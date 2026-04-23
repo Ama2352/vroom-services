@@ -1,0 +1,100 @@
+# vroom-services/docker-compose.yml
+# Usage: docker-compose up --build
+# Everything runs locally — no K8s, no Vagrant, no GitLab CI
+
+services:
+  # ─── INFRASTRUCTURE ────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: vroom
+      POSTGRES_PASSWORD: vroom_dev
+      POSTGRES_DB: vroom
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vroom"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+  # ─── SERVICES ──────────────────────────────────────────────
+  user-service:
+    build:
+      context: ./user
+      dockerfile: Dockerfile.dev # Hot reload in dev (Air)
+    ports: ["8081:8080"]
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: vroom
+      DB_PASSWORD: vroom_dev
+      DB_NAME: vroom
+      JWT_SECRET: dev-secret-change-in-prod
+      PORT: 8080
+    depends_on:
+      postgres: { condition: service_healthy }
+    volumes:
+      - ./user:/app # Mount source for hot reload
+
+  ride-service:
+    build:
+      context: ./ride
+      dockerfile: Dockerfile.dev
+    ports: ["8082:8080"]
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: vroom
+      DB_PASSWORD: vroom_dev
+      DB_NAME: vroom
+      REDIS_ADDR: redis:6379
+      PORT: 8080
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - ./ride:/app
+
+  dispatch-service:
+    build:
+      context: ./dispatch
+      dockerfile: Dockerfile.dev
+    ports: ["8083:8080"]
+    environment:
+      REDIS_ADDR: redis:6379
+      RIDE_SERVICE_URL: http://ride-service:8080
+      PORT: 8080
+    depends_on:
+      redis: { condition: service_healthy }
+    volumes:
+      - ./dispatch:/app
+
+  notification-service:
+    build:
+      context: ./notification
+      dockerfile: Dockerfile.dev
+    ports: ["8084:8080"]
+    environment:
+      REDIS_ADDR: redis:6379
+      PORT: 8080
+    depends_on:
+      redis: { condition: service_healthy }
+    volumes:
+      - ./notification:/app
+
+volumes:
+  postgres_data:
+  redis_data:
