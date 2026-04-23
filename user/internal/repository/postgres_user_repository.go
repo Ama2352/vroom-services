@@ -4,42 +4,63 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"time"
 	"vroom-mvp/user/internal/domain"
+	"vroom-mvp/user/internal/repository/db"
 
 	"github.com/google/uuid"
 )
 
 type PostgresUserRepository struct {
-	db *sql.DB
+	conn    *sql.DB
+	queries *db.Queries
 }
 
-func NewPostgresUserRepository(db *sql.DB) *PostgresUserRepository {
-	return &PostgresUserRepository{db: db}
+func NewPostgresUserRepository(conn *sql.DB) *PostgresUserRepository {
+	return &PostgresUserRepository{
+		conn:    conn,
+		queries: db.New(conn),
+	}
 }
 
 func (r *PostgresUserRepository) CreateWithOutbox(ctx context.Context, user *domain.User, event *OutboxEvent) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// 1. Insert User
-	userQuery := `INSERT INTO users (id, email, password_hash, name, role, created_at) 
-				  VALUES ($1, $2, $3, $4, $5, $6)`
-	if _, err := tx.ExecContext(ctx, userQuery, user.ID, user.Email, user.PasswordHash, user.Name, user.Role, user.CreatedAt); err != nil {
+	qtx := r.queries.WithTx(tx)
+
+	// 1. Create User
+	err = qtx.CreateUser(ctx, db.CreateUserParams{
+		ID:           user.ID,
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		Name:         sql.NullString{String: user.Name, Valid: user.Name != ""},
+		Role:         string(user.Role),
+		CreatedAt:    sql.NullTime{Time: user.CreatedAt, Valid: !user.CreatedAt.IsZero()},
+	})
+	if err != nil {
 		return err
 	}
 
-	// 2. Insert Outbox Event
+	// 2. Create Outbox Event
 	payload, err := json.Marshal(event.Payload)
 	if err != nil {
 		return err
 	}
 
-	outboxQuery := `INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at)
-					VALUES ($1, $2, $3, $4, $5, $6, NOW())`
-	if _, err := tx.ExecContext(ctx, outboxQuery, event.ID, event.AggregateType, event.AggregateID, event.EventType, payload, "PENDING"); err != nil {
+	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		ID:            event.ID,
+		AggregateType: event.AggregateType,
+		AggregateID:   event.AggregateID,
+		EventType:     event.EventType,
+		Payload:       payload,
+		Status:        sql.NullString{String: "PENDING", Valid: true},
+		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
 		return err
 	}
 
@@ -47,37 +68,45 @@ func (r *PostgresUserRepository) CreateWithOutbox(ctx context.Context, user *dom
 }
 
 func (r *PostgresUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
-	query := `SELECT id, email, password_hash, name, role, created_at FROM users WHERE id = $1`
-	row := r.db.QueryRowContext(ctx, query, id)
-
-	var user domain.User
-	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role, &user.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	row, err := r.queries.GetUserByID(ctx, id)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 		return nil, err
 	}
-	return &user, nil
+
+	return toDomainUser(row), nil
 }
 
 func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	query := `SELECT id, email, password_hash, name, role, created_at FROM users WHERE email = $1`
-	row := r.db.QueryRowContext(ctx, query, email)
-
-	var user domain.User
-	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Name, &user.Role, &user.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	row, err := r.queries.GetUserByEmail(ctx, email)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 		return nil, err
 	}
-	return &user, nil
+
+	return toDomainUser(row), nil
 }
 
 func (r *PostgresUserRepository) Update(ctx context.Context, user *domain.User) error {
-	query := `UPDATE users SET email = $1, name = $2, role = $3 WHERE id = $4`
-	_, err := r.db.ExecContext(ctx, query, user.Email, user.Name, user.Role, user.ID)
-	return err
+	return r.queries.UpdateUser(ctx, db.UpdateUserParams{
+		Email: user.Email,
+		Name:  sql.NullString{String: user.Name, Valid: user.Name != ""},
+		Role:  string(user.Role),
+		ID:    user.ID,
+	})
+}
+
+func toDomainUser(u db.User) *domain.User {
+	return &domain.User{
+		ID:           u.ID,
+		Email:        u.Email,
+		PasswordHash: u.PasswordHash,
+		Name:         u.Name.String,
+		Role:         domain.Role(u.Role),
+		CreatedAt:    u.CreatedAt.Time,
+	}
 }
