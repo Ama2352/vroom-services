@@ -1,21 +1,2 @@
--- vroom-services/scripts/init-db.sql
-CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    name VARCHAR(255),
-    role VARCHAR(20) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS trips (
-    id UUID PRIMARY KEY,
-    passenger_id UUID NOT NULL,
-    driver_id UUID,
-    status VARCHAR(20) NOT NULL,
-    source_lat DOUBLE PRECISION NOT NULL,
-    source_lng DOUBLE PRECISION NOT NULL,
-    dest_lat DOUBLE PRECISION NOT NULL,
-    dest_lng DOUBLE PRECISION NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+-- Global DB initialization
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

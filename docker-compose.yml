@@ -31,6 +31,17 @@ services:
       interval: 5s
 
   # ─── SERVICES ──────────────────────────────────────────────
+  user-migrate:
+    image: migrate/migrate
+    volumes:
+      - ./user/migrations:/migrations
+    command:
+      - -path=/migrations/
+      - -database=postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable
+      - up
+    depends_on:
+      postgres: { condition: service_healthy }
+
   user-service:
     build:
       context: ./user
@@ -46,8 +57,20 @@ services:
       PORT: 8080
     depends_on:
       postgres: { condition: service_healthy }
+      user-migrate: { condition: service_completed_successfully }
     volumes:
       - ./user:/app # Mount source for hot reload
+
+  ride-migrate:
+    image: migrate/migrate
+    volumes:
+      - ./ride/migrations:/migrations
+    command:
+      - -path=/migrations/
+      - -database=postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable
+      - up
+    depends_on:
+      postgres: { condition: service_healthy }
 
   ride-service:
     build:
@@ -65,6 +88,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      ride-migrate: { condition: service_completed_successfully }
     volumes:
       - ./ride:/app
 
