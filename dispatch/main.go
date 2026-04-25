@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"vroom-mvp/dispatch/internal/handler"
+	"vroom-mvp/dispatch/internal/service"
 	"vroom-mvp/dispatch/internal/worker"
 
 	"github.com/gin-gonic/gin"
@@ -33,12 +35,25 @@ func main() {
 		log.Fatalf("Redis not ready: %v", err)
 	}
 
-	// 3. Start Event Consumer (Background)
-	consumer := worker.NewRideEventConsumer(rdb, "ride_events", "dispatch_group", consumerID)
+	// 3. Initialize Services
+	dispatchService := service.NewDispatchService(rdb)
+	locationHandler := handler.NewLocationHandler(rdb)
+
+	// 4. Start Event Consumer (Background)
+	consumer := worker.NewRideEventConsumer(rdb, dispatchService, "ride_events", "dispatch_group", consumerID)
 	go consumer.Start(context.Background())
 
-	// 4. Router Setup (Mostly for health checks)
+	// 5. Router Setup
 	r := gin.Default()
+
+	v1 := r.Group("/v1")
+	{
+		dispatch := v1.Group("/dispatch")
+		{
+			// WebSocket for driver location updates
+			dispatch.GET("/ws/location", locationHandler.HandleWS)
+		}
+	}
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "UP", "consumer_id": consumerID})

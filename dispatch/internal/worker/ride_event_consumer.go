@@ -5,23 +5,26 @@ import (
 	"encoding/json"
 	"log"
 	"time"
+	"vroom-mvp/dispatch/internal/service"
 
 	"github.com/redis/go-redis/v9"
 )
 
 type RideEventConsumer struct {
-	redisClient *redis.Client
-	streamName  string
-	groupName   string
-	consumerID  string
+	redisClient     *redis.Client
+	dispatchService *service.DispatchService
+	streamName      string
+	groupName       string
+	consumerID      string
 }
 
-func NewRideEventConsumer(redisClient *redis.Client, streamName, groupName, consumerID string) *RideEventConsumer {
+func NewRideEventConsumer(redisClient *redis.Client, dispatchService *service.DispatchService, streamName, groupName, consumerID string) *RideEventConsumer {
 	return &RideEventConsumer{
-		redisClient: redisClient,
-		streamName:  streamName,
-		groupName:   groupName,
-		consumerID:  consumerID,
+		redisClient:     redisClient,
+		dispatchService: dispatchService,
+		streamName:      streamName,
+		groupName:       groupName,
+		consumerID:      consumerID,
 	}
 }
 
@@ -83,7 +86,26 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			log.Printf("Error unmarshaling payload: %v", err)
 			return
 		}
-		log.Printf("Processing Ride Request for Passenger: %v", data["passenger_id"])
-		// TODO: Implement driver matching logic here in Phase 3
+		
+		tripID := data["id"].(string)
+		lat := data["source_lat"].(float64)
+		lng := data["source_lng"].(float64)
+
+		log.Printf("Processing Ride Request for Trip: %s", tripID)
+		
+		// Match Driver
+		driverID, err := c.dispatchService.MatchDriver(ctx, tripID, lat, lng)
+		if err != nil {
+			log.Printf("Error matching driver: %v", err)
+			return
+		}
+
+		if driverID == "" {
+			log.Printf("No available drivers found for trip: %s", tripID)
+			return
+		}
+
+		log.Printf("MATCH SUCCESS: Trip %s assigned to Driver %s", tripID, driverID)
+		// TODO: In Phase 4, notify the Ride Service and Driver/Passenger via WebSocket
 	}
 }
