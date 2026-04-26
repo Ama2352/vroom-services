@@ -90,6 +90,14 @@ func (r *PostgresTripRepository) UpdateStatus(ctx context.Context, tripID uuid.U
 	})
 }
 
+func (r *PostgresTripRepository) AcceptTrip(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID) error {
+	return r.queries.AcceptTrip(ctx, db.AcceptTripParams{
+		ID:       tripID,
+		DriverID: uuid.NullUUID{UUID: driverID, Valid: true},
+		Status:   string(domain.StatusAccepted),
+	})
+}
+
 func (r *PostgresTripRepository) GetUnpublishedEvents(ctx context.Context, limit int) ([]*OutboxEvent, error) {
 	rows, err := r.queries.GetUnpublishedEvents(ctx, int32(limit))
 	if err != nil {

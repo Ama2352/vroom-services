@@ -14,6 +14,7 @@ import (
 	"vroom-mvp/ride/internal/worker"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 )
@@ -60,11 +61,14 @@ func main() {
 	rideService := service.NewTripService(rideRepo)
 	rideHandler := handler.NewTripHandler(rideService)
 
-	// 5. Start Outbox Worker (Background)
+	// 4. Start Workers (Background)
 	outboxWorker := worker.NewOutboxWorker(rideRepo, rdb, "ride_events")
 	go outboxWorker.Start(context.Background())
 
-	// 6. Router Setup
+	updateWorker := worker.NewTripUpdateWorker(rdb, rideRepo, "ride_events", "ride_update_group", uuid.New().String())
+	go updateWorker.Start(context.Background())
+
+	// 5. Router Setup
 	r := gin.Default()
 
 	v1 := r.Group("/v1")

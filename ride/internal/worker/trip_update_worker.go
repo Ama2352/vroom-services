@@ -1,0 +1,101 @@
+package worker
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"time"
+	"vroom-mvp/ride/internal/repository"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+)
+
+type TripUpdateWorker struct {
+	redisClient *redis.Client
+	repo        repository.TripRepository
+	streamName  string
+	groupName   string
+	consumerID  string
+}
+
+func NewTripUpdateWorker(redisClient *redis.Client, repo repository.TripRepository, streamName, groupName, consumerID string) *TripUpdateWorker {
+	return &TripUpdateWorker{
+		redisClient: redisClient,
+		repo:        repo,
+		streamName:  streamName,
+		groupName:   groupName,
+		consumerID:  consumerID,
+	}
+}
+
+func (w *TripUpdateWorker) Start(ctx context.Context) {
+	// Create consumer group
+	err := w.redisClient.XGroupCreateMkStream(ctx, w.streamName, w.groupName, "0").Err()
+	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+		log.Printf("Error creating consumer group for ride update: %v", err)
+	}
+
+	log.Printf("Trip update worker started, listening on stream: %s", w.streamName)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			w.consume(ctx)
+		}
+	}
+}
+
+func (w *TripUpdateWorker) consume(ctx context.Context) {
+	entries, err := w.redisClient.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    w.groupName,
+		Consumer: w.consumerID,
+		Streams:  []string{w.streamName, ">"},
+		Count:    1,
+		Block:    5 * time.Second,
+	}).Result()
+
+	if err != nil {
+		if err != redis.Nil {
+			log.Printf("Error reading from stream (ride update): %v", err)
+		}
+		return
+	}
+
+	for _, stream := range entries {
+		for _, message := range stream.Messages {
+			w.handleMessage(ctx, message)
+			w.redisClient.XAck(ctx, w.streamName, w.groupName, message.ID)
+		}
+	}
+}
+
+func (w *TripUpdateWorker) handleMessage(ctx context.Context, msg redis.XMessage) {
+	eventType := msg.Values["type"].(string)
+	payload := msg.Values["payload"].(string)
+
+	if eventType == "Trip.Matched" {
+		var data struct {
+			ID       uuid.UUID `json:"id"`
+			DriverID uuid.UUID `json:"driver_id"`
+			Status   string    `json:"status"`
+		}
+
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			log.Printf("Error unmarshaling match payload: %v", err)
+			return
+		}
+
+		log.Printf("[STEP 3] Ride service received 'Trip.Matched' for Trip: %s. Assigning Driver: %s...", data.ID, data.DriverID)
+		
+		// Update trip with driver info and status
+		err := w.repo.AcceptTrip(ctx, data.ID, data.DriverID)
+		if err != nil {
+			log.Printf("[RIDE ERROR] Error accepting trip in DB: %v", err)
+		} else {
+			log.Printf("[STEP 3.1] Trip %s status updated to ACCEPTED in Database.", data.ID)
+		}
+	}
+}

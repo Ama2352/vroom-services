@@ -91,21 +91,44 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		lat := data["source_lat"].(float64)
 		lng := data["source_lng"].(float64)
 
-		log.Printf("Processing Ride Request for Trip: %s", tripID)
+		log.Printf("[STEP 2] Dispatcher received 'Trip.Requested'. Matching driver for Trip: %s", tripID)
 		
 		// Match Driver
 		driverID, err := c.dispatchService.MatchDriver(ctx, tripID, lat, lng)
 		if err != nil {
-			log.Printf("Error matching driver: %v", err)
+			log.Printf("[DISPATCH ERROR] Error matching driver: %v", err)
 			return
 		}
 
 		if driverID == "" {
-			log.Printf("No available drivers found for trip: %s", tripID)
+			log.Printf("[STEP 2.X] Match Failed: No available drivers found for trip: %s", tripID)
 			return
 		}
 
-		log.Printf("MATCH SUCCESS: Trip %s assigned to Driver %s", tripID, driverID)
-		// TODO: In Phase 4, notify the Ride Service and Driver/Passenger via WebSocket
+		log.Printf("[STEP 2] MATCH SUCCESS: Trip %s assigned to Driver %s. Publishing match event...", tripID, driverID)
+		
+		// Publish Trip.Matched event
+		matchPayload := map[string]interface{}{
+			"id":         tripID,
+			"driver_id":  driverID,
+			"status":     "ACCEPTED",
+			"updated_at": time.Now().Format(time.RFC3339),
+		}
+		payloadJSON, _ := json.Marshal(matchPayload)
+
+		err = c.redisClient.XAdd(ctx, &redis.XAddArgs{
+			Stream: c.streamName,
+			Values: map[string]interface{}{
+				"type":      "Trip.Matched",
+				"aggregate": "TRIP",
+				"payload":   string(payloadJSON),
+			},
+		}).Err()
+
+		if err != nil {
+			log.Printf("[DISPATCH ERROR] Error publishing Trip.Matched event: %v", err)
+		} else {
+			log.Printf("[STEP 2.1] Event 'Trip.Matched' published to stream for Trip: %s", tripID)
+		}
 	}
 }

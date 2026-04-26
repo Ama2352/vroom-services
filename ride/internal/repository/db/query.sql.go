@@ -13,6 +13,23 @@ import (
 	"github.com/google/uuid"
 )
 
+const acceptTrip = `-- name: AcceptTrip :exec
+UPDATE trips
+SET driver_id = $2, status = $3, accepted_at = NOW()
+WHERE id = $1
+`
+
+type AcceptTripParams struct {
+	ID       uuid.UUID     `json:"id"`
+	DriverID uuid.NullUUID `json:"driver_id"`
+	Status   string        `json:"status"`
+}
+
+func (q *Queries) AcceptTrip(ctx context.Context, arg AcceptTripParams) error {
+	_, err := q.db.ExecContext(ctx, acceptTrip, arg.ID, arg.DriverID, arg.Status)
+	return err
+}
+
 const createOutboxEvent = `-- name: CreateOutboxEvent :exec
 INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -159,27 +176,16 @@ func (q *Queries) UpdateEventStatus(ctx context.Context, arg UpdateEventStatusPa
 
 const updateTripStatus = `-- name: UpdateTripStatus :exec
 UPDATE trips 
-SET status = $2, driver_id = $3, accepted_at = $4, completed_at = $5, final_price = $6
+SET status = $2
 WHERE id = $1
 `
 
 type UpdateTripStatusParams struct {
-	ID          uuid.UUID       `json:"id"`
-	Status      string          `json:"status"`
-	DriverID    uuid.NullUUID   `json:"driver_id"`
-	AcceptedAt  sql.NullTime    `json:"accepted_at"`
-	CompletedAt sql.NullTime    `json:"completed_at"`
-	FinalPrice  sql.NullFloat64 `json:"final_price"`
+	ID     uuid.UUID `json:"id"`
+	Status string    `json:"status"`
 }
 
 func (q *Queries) UpdateTripStatus(ctx context.Context, arg UpdateTripStatusParams) error {
-	_, err := q.db.ExecContext(ctx, updateTripStatus,
-		arg.ID,
-		arg.Status,
-		arg.DriverID,
-		arg.AcceptedAt,
-		arg.CompletedAt,
-		arg.FinalPrice,
-	)
+	_, err := q.db.ExecContext(ctx, updateTripStatus, arg.ID, arg.Status)
 	return err
 }

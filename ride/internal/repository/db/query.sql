@@ -10,7 +10,12 @@ SELECT * FROM trips WHERE id = $1 LIMIT 1;
 
 -- name: UpdateTripStatus :exec
 UPDATE trips 
-SET status = $2, driver_id = $3, accepted_at = $4, completed_at = $5, final_price = $6
+SET status = $2
+WHERE id = $1;
+
+-- name: AcceptTrip :exec
+UPDATE trips
+SET driver_id = $2, status = $3, accepted_at = NOW()
 WHERE id = $1;
 
 -- name: CreateOutboxEvent :exec

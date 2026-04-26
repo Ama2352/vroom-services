@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	AcceptTrip(ctx context.Context, arg AcceptTripParams) error
 	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error
 	CreateTrip(ctx context.Context, arg CreateTripParams) error
 	GetTrip(ctx context.Context, id uuid.UUID) (Trip, error)
