@@ -59,6 +59,38 @@ func main() {
 
 	// 4. Router Setup
 	r := gin.Default()
+	r.Static("/static", "./static")
+
+	v1 := r.Group("/v1")
+	{
+		v1.GET("/history", func(c *gin.Context) {
+			rows, err := db.QueryContext(c.Request.Context(), 
+				"SELECT id, event_type, aggregate_type, aggregate_id, payload, created_at FROM event_logs ORDER BY created_at DESC LIMIT 50")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			defer rows.Close()
+
+			var events []map[string]interface{}
+			for rows.Next() {
+				var id, eventType, aggType, aggID, payloadStr string
+				var createdAt time.Time
+				if err := rows.Scan(&id, &eventType, &aggType, &aggID, &payloadStr, &createdAt); err != nil {
+					continue
+				}
+				events = append(events, map[string]interface{}{
+					"id":             id,
+					"event_type":     eventType,
+					"aggregate_type": aggType,
+					"aggregate_id":   aggID,
+					"payload":        payloadStr,
+					"created_at":     createdAt,
+				})
+			}
+			c.JSON(http.StatusOK, events)
+		})
+	}
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "UP", "consumer_id": consumerID})

@@ -90,12 +90,26 @@ func (w *TripUpdateWorker) handleMessage(ctx context.Context, msg redis.XMessage
 
 		log.Printf("[STEP 3] Ride service received 'Trip.Matched' for Trip: %s. Assigning Driver: %s...", data.ID, data.DriverID)
 		
-		// Update trip with driver info and status
-		err := w.repo.AcceptTrip(ctx, data.ID, data.DriverID)
+		// 1. Prepare Outbox Event
+		outboxEvent := &repository.OutboxEvent{
+			ID:            uuid.New(),
+			AggregateType: "TRIP",
+			AggregateID:   data.ID,
+			EventType:     "Trip.Accepted",
+			Payload: map[string]interface{}{
+				"id":         data.ID,
+				"driver_id":  data.DriverID,
+				"status":     "ACCEPTED",
+				"updated_at": time.Now(),
+			},
+		}
+
+		// 2. Update trip with driver info and status atomically with outbox
+		err := w.repo.AcceptWithOutbox(ctx, data.ID, data.DriverID, outboxEvent)
 		if err != nil {
 			log.Printf("[RIDE ERROR] Error accepting trip in DB: %v", err)
 		} else {
-			log.Printf("[STEP 3.1] Trip %s status updated to ACCEPTED in Database.", data.ID)
+			log.Printf("[STEP 3.1] Trip %s status updated to ACCEPTED in Database and Outbox.", data.ID)
 		}
 	}
 }

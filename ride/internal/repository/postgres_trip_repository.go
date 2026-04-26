@@ -97,6 +97,46 @@ func (r *PostgresTripRepository) AcceptTrip(ctx context.Context, tripID uuid.UUI
 		Status:   string(domain.StatusAccepted),
 	})
 }
+func (r *PostgresTripRepository) AcceptWithOutbox(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID, event *OutboxEvent) error {
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := r.queries.WithTx(tx)
+
+	// 1. Update Trip
+	err = qtx.AcceptTrip(ctx, db.AcceptTripParams{
+		ID:       tripID,
+		DriverID: uuid.NullUUID{UUID: driverID, Valid: true},
+		Status:   string(domain.StatusAccepted),
+	})
+	if err != nil {
+		return err
+	}
+
+	// 2. Create Outbox Event
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return err
+	}
+
+	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		ID:            event.ID,
+		AggregateType: event.AggregateType,
+		AggregateID:   event.AggregateID,
+		EventType:     event.EventType,
+		Payload:       payload,
+		Status:        sql.NullString{String: "PENDING", Valid: true},
+		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
 
 func (r *PostgresTripRepository) CompleteTrip(ctx context.Context, tripID uuid.UUID, finalPrice float64) error {
 	return r.queries.CompleteTrip(ctx, db.CompleteTripParams{

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vroom Trip Lifecycle Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --secondary: #a855f7;
+            --bg: #0b0f1a;
+            --card-bg: rgba(23, 32, 53, 0.8);
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --success: #10b981;
+            --info: #3b82f6;
+            --warning: #f59e0b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Outfit', sans-serif; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            background-image: radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent),
+                              radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.1), transparent);
+            padding: 2rem;
+        }
+
+        .container { max-width: 1100px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .refresh-indicator {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .trip-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 1.5rem;
+            margin-bottom: 2rem;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+        }
+
+        .trip-header {
+            padding: 1.5rem 2rem;
+            background: rgba(255,255,255,0.02);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .trip-id { font-family: monospace; font-size: 0.9rem; color: var(--text-dim); }
+        .trip-status { font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; padding: 0.4rem 0.8rem; border-radius: 0.5rem; }
+        
+        .status-active { background: rgba(59, 130, 246, 0.15); color: var(--info); border: 1px solid rgba(59, 130, 246, 0.2); }
+        .status-completed { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.2); }
+
+        .lifecycle-container {
+            padding: 2rem;
+            display: flex;
+            justify-content: space-between;
+            position: relative;
+        }
+
+        .lifecycle-line {
+            position: absolute;
+            top: 50%; left: 10%; right: 10%;
+            height: 2px; background: rgba(255,255,255,0.1);
+            transform: translateY(-50%);
+            z-index: 1;
+        }
+
+        .step {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+            width: 80px;
+        }
+
+        .step-circle {
+            width: 32px; height: 32px;
+            background: #1e293b;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            transition: all 0.4s ease;
+        }
+
+        .step-label { font-size: 0.7rem; font-weight: 600; color: var(--text-dim); text-align: center; }
+
+        .step.completed .step-circle { background: var(--primary); border-color: var(--primary); box-shadow: 0 0 15px rgba(99, 102, 241, 0.4); color: white; }
+        .step.completed .step-label { color: var(--text); }
+        
+        .event-details {
+            padding: 0 2rem 1.5rem;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+
+        .detail-row { display: flex; gap: 1rem; margin-top: 0.5rem; }
+        .detail-label { font-weight: 700; color: #64748b; width: 80px; }
+
+        #empty-state {
+            padding: 5rem;
+            text-align: center;
+            color: var(--text-dim);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Trip Lifecycle Monitor</h1>
+            <div class="refresh-indicator">
+                <div class="dot"></div>
+                Live Update Active
+            </div>
+        </header>
+
+        <div id="trip-container">
+            <div id="empty-state">Waiting for ride requests...</div>
+        </div>
+    </div>
+
+    <script>
+        const STAGES = ['Trip.Requested', 'Trip.Matched', 'Trip.Accepted', 'Trip.Completed'];
+
+        async function updateDashboard() {
+            try {
+                const response = await fetch('/v1/history');
+                const events = await response.json();
+                renderTrips(events);
+            } catch (e) { console.error(e); }
+        }
+
+        function renderTrips(events) {
+            // Group events by aggregate_id
+            const trips = {};
+            events.forEach(e => {
+                if (!trips[e.aggregate_id]) {
+                    trips[e.aggregate_id] = {
+                        id: e.aggregate_id,
+                        events: [],
+                        lastUpdate: e.created_at,
+                        status: 'Active'
+                    };
+                }
+                trips[e.aggregate_id].events.push(e);
+                if (e.event_type === 'Trip.Completed') trips[e.aggregate_id].status = 'Completed';
+            });
+
+            const container = document.getElementById('trip-container');
+            const tripIds = Object.keys(trips).sort((a, b) => {
+                // Sort by most recent event
+                const timeA = new Date(trips[a].events[0].created_at);
+                const timeB = new Date(trips[b].events[0].created_at);
+                return timeB - timeA;
+            });
+
+            if (tripIds.length === 0) return;
+            document.getElementById('empty-state').style.display = 'none';
+
+            container.innerHTML = tripIds.map(id => {
+                const trip = trips[id];
+                const completedStages = trip.events.map(e => e.event_type);
+                
+                return `
+                    <div class="trip-card">
+                        <div class="trip-header">
+                            <span class="trip-id">ID: ${id}</span>
+                            <span class="trip-status status-${trip.status.toLowerCase()}">${trip.status}</span>
+                        </div>
+                        
+                        <div class="lifecycle-container">
+                            <div class="lifecycle-line"></div>
+                            ${STAGES.map((stage, i) => {
+                                const isDone = completedStages.includes(stage);
+                                return `
+                                    <div class="step ${isDone ? 'completed' : ''}">
+                                        <div class="step-circle">${isDone ? '✓' : i + 1}</div>
+                                        <div class="step-label">${stage.split('.')[1]}</div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        <div class="event-details">
+                            <div class="detail-row">
+                                <span class="detail-label">TIMELINE</span>
+                                <span>Updated: ${new Date(trip.events[0].created_at).toLocaleTimeString()}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">LOGS</span>
+                                <span>${completedStages.length} checkpoints passed</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        setInterval(updateDashboard, 2000);
+        updateDashboard();
+    </script>
+</body>
+</html>
