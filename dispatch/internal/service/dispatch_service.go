@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -18,13 +19,12 @@ func NewDispatchService(redisClient *redis.Client) *DispatchService {
 }
 
 func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, lng float64) (string, error) {
-	// Search for nearest driver within 5km
+	// Search for nearest drivers within 5km (up to 5 candidates)
 	drivers, err := s.redisClient.GeoRadius(ctx, "drivers_location", lng, lat, &redis.GeoRadiusQuery{
 		Radius:      5,
 		Unit:        "km",
 		WithDist:    true,
-		WithCoord:   true,
-		Count:       1,
+		Count:       5,
 		Sort:        "ASC",
 	}).Result()
 
@@ -32,12 +32,46 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 		return "", err
 	}
 
-	if len(drivers) == 0 {
-		return "", nil // No drivers found
+	for _, driver := range drivers {
+		driverID := driver.Name
+		
+		// Check if driver is still "fresh" (sent heartbeat recently)
+		lastSeen, err := s.redisClient.Exists(ctx, "driver_last_seen:"+driverID).Result()
+		if err != nil {
+			continue
+		}
+
+		if lastSeen == 0 {
+			// Driver is stale, remove from Geo index
+			log.Printf("[CLEANUP] Driver %s is stale, removing from geo index", driverID)
+			s.redisClient.ZRem(ctx, "drivers_location", driverID)
+			continue
+		}
+
+		log.Printf("Matched Trip %s with Fresh Driver %s (Distance: %f km)", tripID, driverID, driver.Dist)
+		return driverID, nil
 	}
 
-	bestDriver := drivers[0]
-	log.Printf("Matched Trip %s with Driver %s (Distance: %f km)", tripID, bestDriver.Name, bestDriver.Dist)
+	return "", nil // No fresh drivers found
+}
 
-	return bestDriver.Name, nil
+func (s *DispatchService) UpdateDriverLocation(ctx context.Context, driverID string, lat, lng float64) error {
+	// 1. Update Geo Location
+	err := s.redisClient.GeoAdd(ctx, "drivers_location", &redis.GeoLocation{
+		Name:      driverID,
+		Latitude:  lat,
+		Longitude: lng,
+	}).Err()
+	if err != nil {
+		return err
+	}
+
+	// 2. Update Freshness (30s TTL)
+	err = s.redisClient.Set(ctx, "driver_last_seen:"+driverID, "active", 30*time.Second).Err()
+	if err != nil {
+		return err
+	}
+
+	log.Printf("[HEARTBEAT] Driver %s location updated: %f, %f", driverID, lat, lng)
+	return nil
 }

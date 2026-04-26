@@ -37,7 +37,7 @@ func main() {
 
 	// 3. Initialize Services
 	dispatchService := service.NewDispatchService(rdb)
-	locationHandler := handler.NewLocationHandler(rdb)
+	locationHandler := handler.NewLocationHandler(dispatchService)
 
 	// 4. Start Event Consumer (Background)
 	consumer := worker.NewRideEventConsumer(rdb, dispatchService, "ride_events", "dispatch_group", consumerID)
@@ -48,6 +48,9 @@ func main() {
 
 	v1 := r.Group("/v1")
 	{
+		// Driver locations
+		v1.PUT("/drivers/:id/location", locationHandler.UpdateLocation)
+		
 		dispatch := v1.Group("/dispatch")
 		{
 			// WebSocket for driver location updates
