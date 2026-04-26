@@ -68,3 +68,21 @@ func (s *TripService) CompleteTrip(ctx context.Context, tripID uuid.UUID, finalP
 
 	return s.repo.CompleteWithOutbox(ctx, tripID, finalPrice, event)
 }
+
+func (s *TripService) AcceptTrip(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID) error {
+	// Create Outbox Event
+	event := &repository.OutboxEvent{
+		ID:            uuid.New(),
+		AggregateType: "TRIP",
+		AggregateID:   tripID,
+		EventType:     "Trip.Accepted",
+		Payload: map[string]interface{}{
+			"id":         tripID,
+			"driver_id":  driverID,
+			"status":     "ACCEPTED",
+			"updated_at": time.Now(),
+		},
+	}
+
+	return s.repo.AcceptWithOutbox(ctx, tripID, driverID, event)
+}

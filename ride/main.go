@@ -78,6 +78,7 @@ func main() {
 			trips.POST("", rideHandler.RequestRide)
 			trips.GET("/:id", rideHandler.GetTrip)
 			trips.POST("/:id/complete", rideHandler.CompleteTrip)
+			trips.POST("/:id/accept", rideHandler.AcceptTrip)
 			trips.GET("/health", rideHandler.Health)
 		}
 	}
