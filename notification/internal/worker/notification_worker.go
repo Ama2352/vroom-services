@@ -5,19 +5,22 @@ import (
 	"log"
 	"time"
 
+	"database/sql"
 	"github.com/redis/go-redis/v9"
 )
 
 type NotificationWorker struct {
 	redisClient *redis.Client
+	db          *sql.DB
 	streamName  string
 	groupName   string
 	consumerID  string
 }
 
-func NewNotificationWorker(redisClient *redis.Client, streamName, groupName, consumerID string) *NotificationWorker {
+func NewNotificationWorker(redisClient *redis.Client, db *sql.DB, streamName, groupName, consumerID string) *NotificationWorker {
 	return &NotificationWorker{
 		redisClient: redisClient,
+		db:          db,
 		streamName:  streamName,
 		groupName:   groupName,
 		consumerID:  consumerID,
@@ -68,7 +71,30 @@ func (w *NotificationWorker) consume(ctx context.Context) {
 }
 
 func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessage) {
-	eventType := msg.Values["type"].(string)
+	getVal := func(key string) string {
+		if val, ok := msg.Values[key]; ok && val != nil {
+			return val.(string)
+		}
+		return ""
+	}
+
+	eventType := getVal("type")
+	aggregateType := getVal("aggregate")
+	aggregateID := getVal("aggregate_id")
+	payload := getVal("payload")
+
+	if aggregateID == "" || eventType == "" {
+		log.Printf("[SKIP] Skipping message %s due to missing critical fields", msg.ID)
+		return
+	}
+
+	// Persist to History DB
+	_, err := w.db.ExecContext(ctx, 
+		"INSERT INTO event_logs (event_type, aggregate_type, aggregate_id, payload) VALUES ($1, $2, $3, $4)",
+		eventType, aggregateType, aggregateID, payload)
+	if err != nil {
+		log.Printf("[HISTORY ERROR] Failed to persist event: %v", err)
+	}
 
 	switch eventType {
 	case "Trip.Requested":

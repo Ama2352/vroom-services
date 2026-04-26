@@ -30,6 +30,23 @@ func (q *Queries) AcceptTrip(ctx context.Context, arg AcceptTripParams) error {
 	return err
 }
 
+const completeTrip = `-- name: CompleteTrip :exec
+UPDATE trips
+SET status = $2, final_price = $3, completed_at = NOW()
+WHERE id = $1
+`
+
+type CompleteTripParams struct {
+	ID         uuid.UUID       `json:"id"`
+	Status     string          `json:"status"`
+	FinalPrice sql.NullFloat64 `json:"final_price"`
+}
+
+func (q *Queries) CompleteTrip(ctx context.Context, arg CompleteTripParams) error {
+	_, err := q.db.ExecContext(ctx, completeTrip, arg.ID, arg.Status, arg.FinalPrice)
+	return err
+}
+
 const createOutboxEvent = `-- name: CreateOutboxEvent :exec
 INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

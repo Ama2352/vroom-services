@@ -119,9 +119,10 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		err = c.redisClient.XAdd(ctx, &redis.XAddArgs{
 			Stream: c.streamName,
 			Values: map[string]interface{}{
-				"type":      "Trip.Matched",
-				"aggregate": "TRIP",
-				"payload":   string(payloadJSON),
+				"type":         "Trip.Matched",
+				"aggregate":    "TRIP",
+				"aggregate_id": tripID,
+				"payload":      string(payloadJSON),
 			},
 		}).Err()
 

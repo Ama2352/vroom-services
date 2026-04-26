@@ -98,6 +98,55 @@ func (r *PostgresTripRepository) AcceptTrip(ctx context.Context, tripID uuid.UUI
 	})
 }
 
+func (r *PostgresTripRepository) CompleteTrip(ctx context.Context, tripID uuid.UUID, finalPrice float64) error {
+	return r.queries.CompleteTrip(ctx, db.CompleteTripParams{
+		ID:         tripID,
+		Status:     string(domain.StatusCompleted),
+		FinalPrice: sql.NullFloat64{Float64: finalPrice, Valid: true},
+	})
+}
+
+func (r *PostgresTripRepository) CompleteWithOutbox(ctx context.Context, tripID uuid.UUID, finalPrice float64, event *OutboxEvent) error {
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := r.queries.WithTx(tx)
+
+	// 1. Update Trip
+	err = qtx.CompleteTrip(ctx, db.CompleteTripParams{
+		ID:         tripID,
+		Status:     string(domain.StatusCompleted),
+		FinalPrice: sql.NullFloat64{Float64: finalPrice, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	// 2. Create Outbox Event
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return err
+	}
+
+	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		ID:            event.ID,
+		AggregateType: event.AggregateType,
+		AggregateID:   event.AggregateID,
+		EventType:     event.EventType,
+		Payload:       payload,
+		Status:        sql.NullString{String: "PENDING", Valid: true},
+		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (r *PostgresTripRepository) GetUnpublishedEvents(ctx context.Context, limit int) ([]*OutboxEvent, error) {
 	rows, err := r.queries.GetUnpublishedEvents(ctx, int32(limit))
 	if err != nil {

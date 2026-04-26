@@ -69,6 +69,31 @@ func (h *TripHandler) GetTrip(c *gin.Context) {
 	c.JSON(http.StatusOK, trip)
 }
 
+func (h *TripHandler) CompleteTrip(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid trip ID"})
+		return
+	}
+
+	var req struct {
+		FinalPrice float64 `json:"final_price" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err = h.tripService.CompleteTrip(c.Request.Context(), id, req.FinalPrice)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "COMPLETED", "trip_id": id})
+}
+
 func (h *TripHandler) Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "UP"})
 }

@@ -73,10 +73,11 @@ func (w *OutboxWorker) publishToRedis(ctx context.Context, event *repository.Out
 	err = w.redisClient.XAdd(ctx, &redis.XAddArgs{
 		Stream: w.streamName,
 		Values: map[string]interface{}{
-			"id":        event.ID.String(),
-			"type":      event.EventType,
-			"aggregate": event.AggregateType,
-			"payload":   string(payloadBytes),
+			"id":           event.ID.String(),
+			"type":         event.EventType,
+			"aggregate":    event.AggregateType,
+			"aggregate_id": event.AggregateID.String(),
+			"payload":      string(payloadBytes),
 		},
 	}).Err()
 

@@ -51,3 +51,20 @@ func (s *TripService) RequestTrip(ctx context.Context, passengerID uuid.UUID, re
 func (s *TripService) GetTrip(ctx context.Context, id uuid.UUID) (*domain.Trip, error) {
 	return s.repo.GetByID(ctx, id)
 }
+
+func (s *TripService) CompleteTrip(ctx context.Context, tripID uuid.UUID, finalPrice float64) error {
+	// Create Outbox Event
+	event := &repository.OutboxEvent{
+		ID:            uuid.New(),
+		AggregateType: "TRIP",
+		AggregateID:   tripID,
+		EventType:     "Trip.Completed",
+		Payload: map[string]interface{}{
+			"id":          tripID,
+			"final_price": finalPrice,
+			"status":      domain.StatusCompleted,
+		},
+	}
+
+	return s.repo.CompleteWithOutbox(ctx, tripID, finalPrice, event)
+}

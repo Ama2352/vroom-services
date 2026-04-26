@@ -18,6 +18,11 @@ UPDATE trips
 SET driver_id = $2, status = $3, accepted_at = NOW()
 WHERE id = $1;
 
+-- name: CompleteTrip :exec
+UPDATE trips
+SET status = $2, final_price = $3, completed_at = NOW()
+WHERE id = $1;
+
 -- name: CreateOutboxEvent :exec
 INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7);
