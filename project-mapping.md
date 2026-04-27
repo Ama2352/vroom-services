@@ -42,8 +42,8 @@ The project has successfully established a **Phase 0 (Local Dev)** environment w
 ## ⏳ Tasks in Progress / Next Steps
 
 ### Phase 3: Notification Service & WebSocket Refinement
-- [ ] **Notification Logic:** Implement the WebSocket Hub to push real-time updates to the Passenger/Driver UI.
-- [ ] **Idempotency:** Implement deduplication logic for event consumers.
+- [x] **Notification Logic:** Implement the WebSocket Hub to push targeted real-time updates to specific Users/Drivers.
+- [x] **Idempotency:** Implement deduplication logic for event consumers using DB history check.
 - [ ] **Domain Models:** Define domain entities for notifications.
 
 ### Phase 4: Infrastructure (K3s Cluster)
@@ -73,4 +73,4 @@ Before starting the next major phases, the following must be verified:
 
 ---
 **Last Updated:** 2026-04-27
-**Status:** ✅ Phase 0-2 Core Logic Complete | 🚀 Moving to Phase 3/4
+**Status:** ✅ Phase 0-3 Core Logic Complete | 🚀 Moving to Phase 4 (Infrastructure)

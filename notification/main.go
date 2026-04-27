@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"vroom-mvp/notification/internal/handler"
+	"vroom-mvp/notification/internal/service"
 	"vroom-mvp/notification/internal/worker"
 
 	"github.com/gin-gonic/gin"
@@ -53,8 +55,13 @@ func main() {
 		log.Fatalf("Database not ready: %v", err)
 	}
 
-	// 4. Start Notification Worker (Background)
-	worker := worker.NewNotificationWorker(rdb, db, "ride_events", "notification_group", consumerID)
+	// 4. Initialize Hub and WebSocket
+	hub := service.NewHub()
+	go hub.Run()
+	notificationHandler := handler.NewNotificationHandler(hub)
+
+	// 5. Start Notification Worker (Background)
+	worker := worker.NewNotificationWorker(rdb, db, "ride_events", "notification_group", consumerID, hub)
 	go worker.Start(context.Background())
 
 	// 4. Router Setup
@@ -101,6 +108,9 @@ func main() {
 			}
 			c.JSON(http.StatusOK, events)
 		})
+
+		// WebSocket endpoint
+		v1.GET("/ws", notificationHandler.HandleWS)
 	}
 
 	r.GET("/health", func(c *gin.Context) {

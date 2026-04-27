@@ -12,6 +12,7 @@ export const API = {
   dispatch:     'http://localhost:8083',
   notification: 'http://localhost:8084',
   dispatchWS:   'ws://localhost:8083/v1/dispatch/ws/location',
+  notificationWS: 'ws://localhost:8084/v1/notification/v1/ws',
 };
 
 /* ── Trip lifecycle states ── */
@@ -170,6 +171,90 @@ export function DemoStoreProvider({ children }) {
     };
   }, []);
 
+  /* ── WebSocket Connection for Notifications (Real-time events) ── */
+  useEffect(() => {
+    const demoUserId = 'c10a8c2f-3d6a-491c-acbb-d313cd4d625f'; // In real app, get from auth context
+    const connectNotif = () => {
+      const wsUrl = `${API.notificationWS}?userId=${demoUserId}`;
+      console.log(`Connecting to Notification WS: ${wsUrl}`);
+      const ws = new WebSocket(wsUrl);
+
+      ws.onmessage = (event) => {
+        try {
+          const data = jsonParse(event.data);
+          handleIncomingEvent(data);
+        } catch (err) {
+          console.error('Error parsing notification event:', err);
+        }
+      };
+
+      ws.onopen = () => console.log('✅ Notification WebSocket connected');
+      ws.onclose = () => {
+        console.log('❌ Notification WebSocket disconnected, retrying in 3s...');
+        setTimeout(connectNotif, 3000);
+      };
+    };
+
+    connectNotif();
+  }, []);
+
+  const handleIncomingEvent = (evt) => {
+    const { event_type, payload } = evt;
+    let data = {};
+    try {
+      data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    } catch (e) {
+      data = payload;
+    }
+
+    console.log(`[EVENT] ${event_type}`, data);
+
+    switch (event_type) {
+      case 'Trip.Requested':
+        pushEvent('Trip.Requested', 'ride', { tripId: data.id, status: 'Processing' });
+        break;
+
+      case 'Trip.Matched': {
+        const driverId = data.driver_id;
+        // In a real app, we'd fetch driver details. For demo, we find in our seeds.
+        const matchedDriver = DRIVER_SEEDS.find(d => d.id === driverId) || DRIVER_SEEDS[0];
+        
+        dispatch({ type: 'ASSIGN_DRIVER', payload: matchedDriver });
+        pushEvent('Trip.Matched', 'dispatch', { tripId: data.id, driverId, driverName: matchedDriver.name });
+        notify('passenger', `Driver matched: ${matchedDriver.name} is on the way!`, 'success');
+        notify('driver', `New ride request! Heading to pickup.`, 'info');
+        break;
+      }
+
+      case 'Trip.Accepted':
+        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.COMING });
+        pushEvent('Trip.Accepted', 'ride', { tripId: data.id });
+        notify('passenger', 'Driver accepted the trip and is heading to you!', 'success');
+        break;
+
+      case 'Trip.Started':
+        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ON_TRIP });
+        pushEvent('Trip.PickedUp', 'ride', { tripId: data.id });
+        notify('passenger', 'Driver has arrived! Enjoy your trip 🚗', 'success');
+        break;
+
+      case 'Trip.Completed':
+        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.COMPLETED });
+        pushEvent('Trip.Completed', 'ride', { tripId: data.id });
+        notify('passenger', '🎉 Trip completed! Thanks for riding with Vroom.', 'success');
+        break;
+      
+      default:
+        // Generic event logging
+        pushEvent(event_type, 'system', data);
+    }
+  };
+
+  // Helper for safe JSON parsing
+  const jsonParse = (str) => {
+    try { return JSON.parse(str); } catch (e) { return str; }
+  };
+
   const sendLocationUpdate = useCallback((driverId, lat, lng) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const msg = { driver_id: driverId, lat, lng };
@@ -250,24 +335,10 @@ export function DemoStoreProvider({ children }) {
         const tripId = res.data?.trip_id ?? res.data?.id ?? `TRIP-${Date.now()}`;
         dispatch({ type: 'SET_TRIP_ID', payload: tripId });
         logApi('POST', '/v1/trips', payload, res.status, res.data);
-        pushEvent('Trip.Requested', 'ride', { tripId, pickup: pickup.label, dropoff: dropoff.label });
-        notify('passenger', 'Trip request sent. Matching you with a driver…', 'success');
-
-        // Simulate backend dispatch match after short delay
-        await new Promise(r => setTimeout(r, 1500));
         
-        // Match Nearest Driver
-        const drivers = state.drivers.length > 0 ? state.drivers : DRIVER_SEEDS;
-        const driver = drivers.reduce((prev, curr) => {
-          const dPrev = Math.pow(prev.lat - pickup.lat, 2) + Math.pow(prev.lng - pickup.lng, 2);
-          const dCurr = Math.pow(curr.lat - pickup.lat, 2) + Math.pow(curr.lng - pickup.lng, 2);
-          return dCurr < dPrev ? curr : prev;
-        });
-
-        dispatch({ type: 'ASSIGN_DRIVER', payload: driver });
-        pushEvent('Trip.Matched', 'dispatch', { tripId, driverId: driver.id, driverName: driver.name });
-        notify('passenger', `Driver matched: ${driver.name} is on the way!`, 'success');
-        notify('driver', `New ride request! Heading to ${pickup.label}.`, 'info');
+        // Note: We don't pushEvent here anymore because we'll get it from the WebSocket
+        // notify('passenger', 'Trip request sent. Matching you with a driver…', 'success');
+        
         return tripId;
 
       } catch (err) {
