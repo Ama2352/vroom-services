@@ -112,17 +112,30 @@ services:
       dockerfile: Dockerfile.dev
     ports: ["8084:8080"]
     environment:
+      REDIS_ADDR: redis:6379
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: vroom
       DB_PASSWORD: vroom_dev
       DB_NAME: vroom
-      REDIS_ADDR: redis:6379
       PORT: 8080
     depends_on:
       redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
     volumes:
       - ./notification:/app
+
+  frontend:
+    build:
+      context: ./frontend
+    ports: ["5173:5173"]
+    depends_on:
+      - ride-service
+      - dispatch-service
+      - notification-service
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
 
 volumes:
   postgres_data:

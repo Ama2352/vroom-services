@@ -1,0 +1,69 @@
+/* App.css – Main layout shell */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── Main 3-column grid ── */
+.app-main {
+  display: grid;
+  grid-template-columns: 280px 1fr 300px;
+  grid-template-rows: 1fr;
+  flex: 1;
+  gap: var(--gap);
+  padding: var(--gap);
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Columns ── */
+.col-left,
+.col-center,
+.col-right {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.col-left   { display: flex; flex-direction: column; }
+.col-center { display: flex; flex-direction: column; }
+.col-right  {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* Right column split: 55% driver / 45% timeline */
+.right-top    { flex: 0 0 55%; min-height: 0; overflow: hidden; }
+.right-bottom { flex: 1;       min-height: 0; overflow: hidden; }
+
+/* ── Footer ── */
+.app-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Responsive: tablet ── */
+@media (max-width: 1100px) {
+  .app-main {
+    grid-template-columns: 240px 1fr 260px;
+  }
+}
+
+/* ── Responsive: mobile ── */
+@media (max-width: 768px) {
+  .app-main {
+    grid-template-columns: 1fr;
+    grid-template-rows: 300px auto auto;
+    overflow-y: auto;
+  }
+  .col-left   { order: 2; }
+  .col-center { order: 1; height: 300px; }
+  .col-right  { order: 3; }
+  .right-top  { flex: none; height: 280px; }
+  .right-bottom { flex: none; height: 280px; }
+}

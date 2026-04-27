@@ -1,0 +1,295 @@
+/* ============================================================
+   VROOM DESIGN SYSTEM – index.css
+   ============================================================ */
+
+/* ── Google Fonts fallback ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── Design tokens ── */
+:root {
+  /* Brand */
+  --brand:        #6C63FF;
+  --brand-light:  #8B84FF;
+  --brand-dark:   #4C45D6;
+  --brand-glow:   rgba(108, 99, 255, 0.25);
+
+  /* Status */
+  --green:  #22C55E;
+  --yellow: #F59E0B;
+  --red:    #EF4444;
+  --blue:   #3B82F6;
+  --cyan:   #06B6D4;
+
+  /* Surface */
+  --bg:           #0F1117;
+  --surface:      #161A26;
+  --surface-2:    #1E2334;
+  --surface-3:    #252B3E;
+  --border:       rgba(255,255,255,0.08);
+  --border-light: rgba(255,255,255,0.14);
+
+  /* Text */
+  --text-primary:   #F1F5F9;
+  --text-secondary: #94A3B8;
+  --text-muted:     #4B5563;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Shadows */
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 20px rgba(0,0,0,0.5);
+  --shadow-lg:  0 8px 40px rgba(0,0,0,0.6);
+  --glow-brand: 0 0 24px rgba(108, 99, 255, 0.35);
+  --glow-green: 0 0 16px rgba(34, 197, 94, 0.4);
+
+  /* Spacing */
+  --gap: 12px;
+  --radius:   10px;
+  --radius-lg: 16px;
+
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg);
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { overflow: hidden; }
+button { cursor: pointer; font-family: inherit; border: none; outline: none; }
+input  { font-family: inherit; outline: none; }
+ul, ol { list-style: none; }
+a { color: inherit; text-decoration: none; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 99px; }
+
+/* ── Root layout ── */
+#root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Utility classes ── */
+.flex        { display: flex; }
+.flex-col    { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1  { gap: 4px; }
+.gap-2  { gap: 8px; }
+.gap-3  { gap: 12px; }
+.gap-4  { gap: 16px; }
+.text-sm   { font-size: 12px; }
+.text-base { font-size: 14px; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.text-muted { color: var(--text-secondary); }
+.mono { font-family: var(--font-mono); }
+.truncate { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* ── Glassmorphism card ── */
+.glass-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(12px);
+}
+
+/* ── Badge ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.badge-idle       { background: rgba(75,85,99,0.3);  color: var(--text-secondary); border: 1px solid rgba(75,85,99,0.5); }
+.badge-searching  { background: rgba(245,158,11,0.2); color: var(--yellow); border: 1px solid rgba(245,158,11,0.4); }
+.badge-assigned   { background: rgba(59,130,246,0.2); color: var(--blue);   border: 1px solid rgba(59,130,246,0.4); }
+.badge-coming     { background: rgba(6,182,212,0.2);  color: var(--cyan);   border: 1px solid rgba(6,182,212,0.4); }
+.badge-ontrip     { background: rgba(108,99,255,0.2); color: var(--brand-light); border: 1px solid rgba(108,99,255,0.4); }
+.badge-completed  { background: rgba(34,197,94,0.2);  color: var(--green);  border: 1px solid rgba(34,197,94,0.4); }
+
+/* ── Primary button ── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--brand);
+  color: #fff;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+  box-shadow: var(--glow-brand);
+}
+.btn-primary:hover  { background: var(--brand-light); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* ── Ghost button ── */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.btn-ghost:hover  { background: var(--surface-2); color: var(--text-primary); border-color: var(--border-light); }
+.btn-ghost:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-ghost.active { background: var(--surface-3); color: var(--text-primary); border-color: var(--brand); }
+
+/* ── Danger button ── */
+.btn-danger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  background: rgba(239,68,68,0.15);
+  color: var(--red);
+  border: 1px solid rgba(239,68,68,0.35);
+  border-radius: var(--radius);
+  font-size: 13px; font-weight: 600;
+  transition: all 0.2s;
+}
+.btn-danger:hover { background: rgba(239,68,68,0.25); }
+
+/* ── Success button ── */
+.btn-success {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  background: rgba(34,197,94,0.15);
+  color: var(--green);
+  border: 1px solid rgba(34,197,94,0.35);
+  border-radius: var(--radius);
+  font-size: 13px; font-weight: 600;
+  transition: all 0.2s;
+}
+.btn-success:hover { background: rgba(34,197,94,0.25); }
+
+/* ── Input ── */
+.input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: border-color 0.2s;
+}
+.input:focus  { border-color: var(--brand); }
+.input::placeholder { color: var(--text-muted); }
+
+/* ── Pulse animation ── */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.85); opacity: 0.8; }
+  50%  { transform: scale(1.4);  opacity: 0; }
+  100% { transform: scale(0.85); opacity: 0; }
+}
+.pulse-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--brand);
+  animation: pulse-ring 1.8s ease-out infinite;
+}
+
+/* ── Fade-slide-in ── */
+@keyframes slide-in-right {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes slide-out-right {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(110%); opacity: 0; }
+}
+@keyframes fade-in-up {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40%            { transform: scale(1);   opacity: 1; }
+}
+.dot-bounce { animation: dot-bounce 1.2s ease-in-out infinite; }
+.dot-bounce:nth-child(2) { animation-delay: 0.2s; }
+.dot-bounce:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── Divider ── */
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0;
+}
+
+/* ── Pill tabs ── */
+.pill-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--surface-3);
+  border-radius: 8px;
+  padding: 3px;
+}
+.pill-tab {
+  flex: 1;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  transition: all 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pill-tab.active { background: var(--surface); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+
+/* ── Leaflet overrides ── */
+.leaflet-container {
+  background: #1a1f2e !important;
+  font-family: var(--font-sans) !important;
+}
+.leaflet-control-zoom {
+  border: 1px solid var(--border) !important;
+  background: var(--surface) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+.leaflet-control-zoom a {
+  background: var(--surface) !important;
+  color: var(--text-secondary) !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+.leaflet-control-zoom a:hover { background: var(--surface-2) !important; color: var(--text-primary) !important; }
+.leaflet-control-attribution { display: none !important; }
+.leaflet-popup-content-wrapper {
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-md) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 13px !important;
+}
+.leaflet-popup-tip { background: var(--surface-2) !important; }

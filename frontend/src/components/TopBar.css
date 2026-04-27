@@ -1,0 +1,97 @@
+/* TopBar.css */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-logo {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, #6C63FF22, #6C63FF44);
+  border: 1px solid rgba(108,99,255,0.4);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.topbar-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+  background: linear-gradient(90deg, #6C63FF, #8B84FF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.topbar-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
+  padding-left: 6px;
+  border-left: 1px solid var(--border-light);
+}
+
+.topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-trip-id {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--surface-3);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-time {
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+}
+
+.topbar-dot-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.live-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}

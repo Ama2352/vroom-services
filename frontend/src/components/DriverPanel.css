@@ -1,0 +1,162 @@
+/* DriverPanel.css */
+.driver-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  height: 100%;
+}
+
+.driver-avatar {
+  background: linear-gradient(135deg, rgba(6,182,212,0.2), rgba(6,182,212,0.4));
+  border: 1px solid rgba(6,182,212,0.4);
+  color: var(--cyan);
+}
+
+.driver-status-badge {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.driver-status-badge.active { color: var(--yellow); }
+
+.dot-yellow {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--yellow);
+  box-shadow: 0 0 6px var(--yellow);
+}
+.dot-muted {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-muted);
+}
+
+/* Driver list */
+.driver-list-section {
+  padding: 12px 14px;
+  flex-shrink: 0;
+}
+.driver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+}
+.driver-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 10px 0;
+}
+.driver-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+.driver-item.assigned {
+  border-color: rgba(34,197,94,0.4);
+  background: rgba(34,197,94,0.06);
+}
+.driver-avatar-sm {
+  font-size: 20px;
+  width: 30px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.driver-info { flex: 1; min-width: 0; }
+.driver-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.driver-coord {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.assigned-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Current trip */
+.current-trip-section {
+  padding: 12px 14px;
+  flex-shrink: 0;
+}
+.trip-info-card {
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+.trip-info-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ti-icon { flex-shrink: 0; }
+.ti-icon.pickup  { color: var(--green); }
+.ti-icon.dropoff { color: var(--red); }
+.ti-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  min-width: 28px;
+}
+.ti-value {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trip-connector-line {
+  height: 14px;
+  width: 2px;
+  margin-left: 5px;
+  background: linear-gradient(to bottom, var(--green), var(--red));
+  opacity: 0.3;
+  border-radius: 2px;
+}
+
+/* Driver notifications */
+.driver-notif-section {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  min-height: 0;
+}
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}

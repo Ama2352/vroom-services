@@ -1,0 +1,94 @@
+/* MapView.css */
+.map-wrapper {
+  position: relative;
+  height: 100%;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.leaflet-map {
+  width: 100%;
+  height: 100%;
+}
+
+/* Legend */
+.map-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: rgba(15, 17, 23, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.legend-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-dot.glow-green {
+  box-shadow: 0 0 8px var(--green);
+}
+
+/* Searching overlay */
+.map-searching-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 17, 23, 0.3);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.searching-pulse {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sp-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid var(--brand);
+  animation: sp-expand 2.4s ease-out infinite;
+}
+.sp-ring-1 { width: 40px;  height: 40px;  animation-delay: 0s; }
+.sp-ring-2 { width: 70px;  height: 70px;  animation-delay: 0.6s; }
+.sp-ring-3 { width: 100px; height: 100px; animation-delay: 1.2s; }
+
+@keyframes sp-expand {
+  0%   { opacity: 0.9; transform: scale(0.4); }
+  100% { opacity: 0;   transform: scale(1); }
+}
+
+.sp-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--brand-light);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(108,99,255,0.8);
+}
