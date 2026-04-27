@@ -29,7 +29,7 @@ func main() {
 	dbName := getEnv("DB_NAME", "vroom")
 
 	// 2. Database connection
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable search_path=users",
 		dbHost, dbPort, dbUser, dbPassword, dbName)
 	
 	db, err := sql.Open("postgres", dsn)

@@ -28,7 +28,7 @@ func main() {
 	consumerID := uuid.New().String()
 
 	// 2. Database connection
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", 
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable search_path=notifications", 
 		dbHost, dbPort, dbUser, dbPass, dbName)
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -76,7 +76,7 @@ func main() {
 	{
 		v1.GET("/history", func(c *gin.Context) {
 			rows, err := db.QueryContext(c.Request.Context(), 
-				"SELECT id, event_type, aggregate_type, aggregate_id, payload, created_at FROM event_logs ORDER BY created_at DESC LIMIT 50")
+				"SELECT event_id as id, event_type, aggregate_type, aggregate_id, payload, created_at FROM notification_history ORDER BY created_at DESC LIMIT 50")
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return

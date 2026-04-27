@@ -6,11 +6,11 @@ MIGRATE_CMD=$(DOCKER_COMPOSE) run --rm ride-migrate
 .PHONY: migrate-up migrate-down migrate-reset
 
 migrate-up:
-	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable&x-migrations-table=ride_migrations" up
+	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://ride_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=rides&x-migrations-table=ride_migrations" up
 
 migrate-down:
-	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable&x-migrations-table=ride_migrations" down 1
+	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://ride_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=rides&x-migrations-table=ride_migrations" down 1
 
 migrate-reset:
-	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable&x-migrations-table=ride_migrations" down 1
-	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable&x-migrations-table=ride_migrations" up
+	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://ride_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=rides&x-migrations-table=ride_migrations" down 1
+	$(MIGRATE_CMD) -path=/migrations/ -database="postgres://ride_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=rides&x-migrations-table=ride_migrations" up

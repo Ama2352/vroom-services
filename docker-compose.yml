@@ -37,7 +37,7 @@ services:
       - ./user/migrations:/migrations
     command:
       - -path=/migrations/
-      - -database=postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable&x-migrations-table=user_migrations
+      - -database=postgres://user_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=users&x-migrations-table=user_migrations
       - up
     depends_on:
       postgres: { condition: service_healthy }
@@ -50,7 +50,7 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: vroom
+      DB_USER: user_svc
       DB_PASSWORD: vroom_dev
       DB_NAME: vroom
       JWT_SECRET: dev-secret-change-in-prod
@@ -67,7 +67,7 @@ services:
       - ./ride/migrations:/migrations
     command:
       - -path=/migrations/
-      - -database=postgres://vroom:vroom_dev@postgres:5432/vroom?sslmode=disable&x-migrations-table=ride_migrations
+      - -database=postgres://ride_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=rides&x-migrations-table=ride_migrations
       - up
     depends_on:
       postgres: { condition: service_healthy }
@@ -80,7 +80,7 @@ services:
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: vroom
+      DB_USER: ride_svc
       DB_PASSWORD: vroom_dev
       DB_NAME: vroom
       REDIS_ADDR: redis:6379
@@ -106,6 +106,17 @@ services:
     volumes:
       - ./dispatch:/app
 
+  notification-migrate:
+    image: migrate/migrate
+    volumes:
+      - ./notification/migrations:/migrations
+    command:
+      - -path=/migrations/
+      - -database=postgres://notification_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=notifications&x-migrations-table=notification_migrations
+      - up
+    depends_on:
+      postgres: { condition: service_healthy }
+
   notification-service:
     build:
       context: ./notification
@@ -115,13 +126,14 @@ services:
       REDIS_ADDR: redis:6379
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: vroom
+      DB_USER: notification_svc
       DB_PASSWORD: vroom_dev
       DB_NAME: vroom
       PORT: 8080
     depends_on:
       redis: { condition: service_healthy }
       postgres: { condition: service_healthy }
+      notification-migrate: { condition: service_completed_successfully }
     volumes:
       - ./notification:/app
 

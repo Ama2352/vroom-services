@@ -90,8 +90,8 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 
 	// Persist to History DB
 	_, err := w.db.ExecContext(ctx, 
-		"INSERT INTO event_logs (event_type, aggregate_type, aggregate_id, payload) VALUES ($1, $2, $3, $4)",
-		eventType, aggregateType, aggregateID, payload)
+		"INSERT INTO notification_history (event_id, event_type, aggregate_type, aggregate_id, payload) VALUES ($1, $2, $3, $4, $5)",
+		msg.ID, eventType, aggregateType, aggregateID, payload)
 	if err != nil {
 		log.Printf("[HISTORY ERROR] Failed to persist event: %v", err)
 	}
