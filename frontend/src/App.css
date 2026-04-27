@@ -25,20 +25,35 @@
 .col-center,
 .col-right {
   min-height: 0;
-  overflow: hidden;
 }
 
-.col-left   { display: flex; flex-direction: column; }
-.col-center { display: flex; flex-direction: column; }
+.col-left   { 
+  display: flex; 
+  flex-direction: column; 
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.col-center { display: flex; flex-direction: column; overflow: hidden; }
 .col-right  {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
+  overflow: hidden;
 }
 
 /* Right column split: 55% driver / 45% timeline */
-.right-top    { flex: 0 0 55%; min-height: 0; overflow: hidden; }
-.right-bottom { flex: 1;       min-height: 0; overflow: hidden; }
+.right-top    { 
+  flex: 0 0 55%; 
+  min-height: 0; 
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.right-bottom { 
+  flex: 1;       
+  min-height: 0; 
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
 
 /* ── Footer ── */
 .app-footer {

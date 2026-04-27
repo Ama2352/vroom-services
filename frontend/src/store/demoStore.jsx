@@ -12,7 +12,7 @@ export const API = {
   dispatch:     'http://localhost:8083',
   notification: 'http://localhost:8084',
   dispatchWS:   'ws://localhost:8083/v1/dispatch/ws/location',
-  notificationWS: 'ws://localhost:8084/v1/notification/v1/ws',
+  notificationWS: 'ws://localhost:8084/v1/ws',
 };
 
 /* ── Trip lifecycle states ── */
@@ -180,6 +180,7 @@ export function DemoStoreProvider({ children }) {
       const ws = new WebSocket(wsUrl);
 
       ws.onmessage = (event) => {
+        console.log('📬 WebSocket Message Received:', event.data);
         try {
           const data = jsonParse(event.data);
           handleIncomingEvent(data);

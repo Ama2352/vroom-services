@@ -74,45 +74,64 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 }
 
 func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) {
-	eventType := msg.Values["type"].(string)
-	aggregateID := msg.Values["aggregate"].(string)
-	payload := msg.Values["payload"].(string)
+	// Robust field extraction
+	getVal := func(key string) string {
+		if val, ok := msg.Values[key]; ok {
+			return val.(string)
+		}
+		return ""
+	}
 
-	log.Printf("Received Event: %s for Aggregate: %s", eventType, aggregateID)
+	eventType := getVal("type")
+	aggregateType := getVal("aggregate")
+	aggregateID := getVal("aggregate_id")
+	if aggregateID == "" {
+		aggregateID = aggregateType // Fallback to "aggregate" key if ride service changed format
+	}
+	payload := getVal("payload")
+
+	log.Printf("[DEBUG] Dispatch Consumer: Received %s for %s (%s)", eventType, aggregateType, aggregateID)
 
 	if eventType == "Trip.Requested" {
 		var data map[string]interface{}
 		if err := json.Unmarshal([]byte(payload), &data); err != nil {
-			log.Printf("Error unmarshaling payload: %v", err)
+			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal payload for trip %s: %v", aggregateID, err)
 			return
 		}
 		
-		tripID := data["id"].(string)
-		lat := data["source_lat"].(float64)
-		lng := data["source_lng"].(float64)
+		tripID := ""
+		if id, ok := data["id"].(string); ok {
+			tripID = id
+		} else {
+			tripID = aggregateID
+		}
 
-		log.Printf("[STEP 2] Dispatcher received 'Trip.Requested'. Matching driver for Trip: %s", tripID)
+		lat, _ := data["source_lat"].(float64)
+		lng, _ := data["source_lng"].(float64)
+
+		log.Printf("[STEP 2] Dispatcher matching driver for Trip: %s at (%f, %f)", tripID, lat, lng)
 		
 		// Match Driver
 		driverID, err := c.dispatchService.MatchDriver(ctx, tripID, lat, lng)
 		if err != nil {
-			log.Printf("[DISPATCH ERROR] Error matching driver: %v", err)
+			log.Printf("[DISPATCH ERROR] MatchDriver failed for trip %s: %v", tripID, err)
 			return
 		}
 
 		if driverID == "" {
-			log.Printf("[STEP 2.X] Match Failed: No available drivers found for trip: %s", tripID)
+			log.Printf("[STEP 2.X] MATCH FAILED: No available drivers found within radius for trip: %s", tripID)
 			return
 		}
 
-		log.Printf("[STEP 2] MATCH SUCCESS: Trip %s assigned to Driver %s. Publishing match event...", tripID, driverID)
+		log.Printf("[STEP 2] MATCH SUCCESS: Trip %s assigned to Driver %s. Publishing 'Trip.Matched'...", tripID, driverID)
 		
 		// Publish Trip.Matched event
 		matchPayload := map[string]interface{}{
-			"id":         tripID,
-			"driver_id":  driverID,
-			"status":     "ACCEPTED",
-			"updated_at": time.Now().Format(time.RFC3339),
+			"id":           tripID,
+			"driver_id":    driverID,
+			"passenger_id": data["passenger_id"], // Preserve passenger ID for easier notification targeting
+			"status":       "ACCEPTED",
+			"updated_at":   time.Now().Format(time.RFC3339),
 		}
 		payloadJSON, _ := json.Marshal(matchPayload)
 
@@ -127,9 +146,9 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		}).Err()
 
 		if err != nil {
-			log.Printf("[DISPATCH ERROR] Error publishing Trip.Matched event: %v", err)
+			log.Printf("[DISPATCH ERROR] Failed to publish Trip.Matched for trip %s: %v", tripID, err)
 		} else {
-			log.Printf("[STEP 2.1] Event 'Trip.Matched' published to stream for Trip: %s", tripID)
+			log.Printf("[STEP 2.1] Event 'Trip.Matched' published successfully for Trip: %s", tripID)
 		}
 	}
 }
