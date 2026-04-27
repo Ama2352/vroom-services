@@ -1,6 +1,3 @@
--- Global DB initialization
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 -- Create schemas for each service to achieve logical isolation
 CREATE SCHEMA IF NOT EXISTS users;
 CREATE SCHEMA IF NOT EXISTS rides;
@@ -32,5 +29,8 @@ GRANT CREATE ON SCHEMA dispatch TO dispatch_svc;
 ALTER DEFAULT PRIVILEGES IN SCHEMA dispatch GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dispatch_svc;
 ALTER USER dispatch_svc SET search_path TO dispatch, public;
 
--- Revoke public schema access from all to enforce isolation
-REVOKE ALL ON SCHEMA public FROM PUBLIC;
+-- Allow all users to see the public schema (required by some GUI tools), 
+-- but prevent them from creating anything in it.
+GRANT USAGE ON SCHEMA public TO PUBLIC;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
