@@ -210,6 +210,18 @@
 .tsv-inner { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
 .tsv-icon  { font-size: 28px; }
 .tsv-text  { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.tsv-reset-btn {
+  margin-top: 8px;
+  padding: 6px 16px;
+  background: var(--brand);
+  color: #fff;
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: var(--glow-brand);
+  transition: all 0.2s;
+}
+.tsv-reset-btn:hover { background: var(--brand-light); transform: translateY(-1px); }
 .search-dots {
   display: flex; gap: 5px; align-items: center;
 }

@@ -28,8 +28,7 @@ export default function ControlBar() {
   const canSeed    = isIdle;
   const canRequest = isIdle && drivers.length > 0;
   const canAccept  = isAssigned;
-  const canStart   = isAccepted;
-  const canSimulate = isOnTrip && !driverMoving;
+  const canStart   = isAccepted && !driverMoving;
   const canComplete = isOnTrip && !driverMoving;
   const canCancel   = !isIdle && !isCompleted && tripStatus !== TRIP_STATUS.CANCELLED;
 
@@ -52,11 +51,7 @@ export default function ControlBar() {
     }
     await delay(600);
     await run('start', () => actions.startTrip(state.tripId));
-    await delay(600);
-    await run('simulate', () =>
-      actions.simulateMovement(state.assignedDriver, state.pickup, state.dropoff, null, speed)
-    );
-    await delay(400);
+    await delay(1500); // Wait for simulation
     await run('complete', () => actions.completeTrip(state.tripId));
     actions.setAutoPlay(false);
   }, [state, actions, speed, run]);
@@ -125,19 +120,6 @@ export default function ControlBar() {
           Start
         </button>
 
-        <button
-          id="btn-simulate"
-          className="btn-ghost"
-          disabled={!canSimulate || !!loading}
-          onClick={() =>
-            run('simulate', () =>
-              actions.simulateMovement(assignedDriver, state.pickup, state.dropoff, null, speed)
-            )
-          }
-        >
-          {loading === 'simulate' || driverMoving ? <Spinner /> : <Truck size={14} />}
-          Simulate
-        </button>
 
         <button
           id="btn-complete"

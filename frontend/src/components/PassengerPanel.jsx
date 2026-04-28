@@ -142,6 +142,7 @@ function TripStateVisual({ status, driver }) {
     [TRIP_STATUS.COMING]:     { icon: '📍', text: `${driver?.name ?? 'Driver'} is heading to your pickup.` },
     [TRIP_STATUS.ON_TRIP]:    { icon: '🛣️',  text: 'You are on your way to destination!' },
     [TRIP_STATUS.COMPLETED]:  { icon: '🎉', text: 'Trip completed! Have a great day.' },
+    [TRIP_STATUS.CANCELLED]:  { icon: '❌', text: 'Trip has been cancelled.' },
   };
   const m = messages[status];
   if (!m) return null;
@@ -157,11 +158,16 @@ function TripStateVisual({ status, driver }) {
           <span className="dot-bounce" />
         </div>
       )}
-      {driver && status !== TRIP_STATUS.COMPLETED && (
+      {driver && status !== TRIP_STATUS.COMPLETED && status !== TRIP_STATUS.CANCELLED && (
         <div className="driver-chip">
           <span>{driver.avatar}</span>
           <span>{driver.name}</span>
         </div>
+      )}
+      {(status === TRIP_STATUS.COMPLETED || status === TRIP_STATUS.CANCELLED) && (
+        <button className="tsv-reset-btn" onClick={() => window.location.reload()}>
+          New Booking
+        </button>
       )}
     </div>
   );

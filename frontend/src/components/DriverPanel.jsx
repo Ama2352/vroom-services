@@ -27,9 +27,9 @@ export default function DriverPanel() {
             {assignedDriver ? assignedDriver.id : 'No driver assigned'}
           </div>
         </div>
-        <div className={`driver-status-badge ${isActive ? 'active' : ''}`}>
-          <span className={isActive ? 'dot-yellow' : 'dot-muted'} />
-          {isActive ? 'On Duty' : 'Standby'}
+        <div className={`driver-status-badge ${isActive ? 'active' : ''} ${tripStatus === TRIP_STATUS.CANCELLED ? 'cancelled' : ''}`}>
+          <span className={isActive ? (tripStatus === TRIP_STATUS.CANCELLED ? 'dot-red' : 'dot-yellow') : 'dot-muted'} />
+          {tripStatus === TRIP_STATUS.CANCELLED ? 'Cancelled' : (isActive ? 'On Duty' : 'Standby')}
         </div>
       </div>
 
@@ -84,6 +84,11 @@ export default function DriverPanel() {
                 <span className="ti-value">{state.dropoff.label}</span>
               </div>
             </div>
+            {(tripStatus === TRIP_STATUS.COMPLETED || tripStatus === TRIP_STATUS.CANCELLED) && (
+              <button className="driver-reset-btn" onClick={() => window.location.reload()}>
+                Ready for Next Trip
+              </button>
+            )}
           </div>
         </>
       )}

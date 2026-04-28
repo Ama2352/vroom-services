@@ -26,6 +26,13 @@
   letter-spacing: 0.5px;
 }
 .driver-status-badge.active { color: var(--yellow); }
+.driver-status-badge.cancelled { color: var(--red); }
+
+.dot-red {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 6px var(--red);
+}
 
 .dot-yellow {
   width: 6px; height: 6px; border-radius: 50%;
@@ -140,6 +147,21 @@
   opacity: 0.3;
   border-radius: 2px;
 }
+
+.driver-reset-btn {
+  margin-top: 10px;
+  width: 100%;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--brand);
+  color: var(--brand-light);
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.driver-reset-btn:hover { background: var(--brand); color: #fff; }
 
 /* Driver notifications */
 .driver-notif-section {

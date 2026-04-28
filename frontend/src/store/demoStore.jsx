@@ -104,7 +104,7 @@ function reducer(state, action) {
       return { ...state, events: [action.payload, ...state.events].slice(0, 50) };
 
     case 'PUSH_NOTIFICATION':
-      return { ...state, notifications: [action.payload, ...state.notifications].slice(0, 30) };
+      return { ...state, notifications: [...state.notifications, action.payload].slice(-30) };
 
     case 'DISMISS_NOTIFICATION':
       return { ...state, notifications: state.notifications.filter(n => n.id !== action.payload) };
@@ -144,6 +144,7 @@ const StoreCtx = createContext(null);
 export function DemoStoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const wsRef = useRef(null);
+  const processedEventIdsRef = useRef(new Set());
 
   /* ── WebSocket Connection for Driver Locations ── */
   useEffect(() => {
@@ -176,7 +177,6 @@ export function DemoStoreProvider({ children }) {
   /* ── WebSocket Connection for Notifications (Real-time events) ── */
   useEffect(() => {
     const demoUserId = 'c10a8c2f-3d6a-491c-acbb-d313cd4d625f';
-    const processedIds = new Set();
 
     const connectNotif = () => {
       const wsUrl = `${API.notificationWS}?userId=${demoUserId}`;
@@ -185,12 +185,19 @@ export function DemoStoreProvider({ children }) {
       ws.onmessage = (event) => {
         try {
           const data = jsonParse(event.data);
-          const uid = data.id || data.correlation_id || JSON.stringify(data.payload);
-          if (processedIds.has(uid)) return;
-          processedIds.add(uid);
-          if (processedIds.size > 100) processedIds.delete(processedIds.values().next().value);
+          // Persistent deduplication via Ref
+          const uid = data.id || data.correlation_id || `${data.event_type}-${JSON.stringify(data.payload)}`;
+          if (processedEventIdsRef.current.has(uid)) return;
+          processedEventIdsRef.current.add(uid);
+          
+          // Keep set size manageable
+          if (processedEventIdsRef.current.size > 200) {
+            const first = processedEventIdsRef.current.values().next().value;
+            processedEventIdsRef.current.delete(first);
+          }
+
           handleIncomingEvent(data);
-        } catch (err) { console.error(err); }
+        } catch (err) { console.error('WS Message Error:', err); }
       };
 
       ws.onopen = () => console.log('✅ Notification WS connected');
@@ -231,7 +238,8 @@ export function DemoStoreProvider({ children }) {
       case 'Trip.Accepted':
         dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ACCEPTED });
         pushEvent('Trip.Accepted', 'ride', { tripId: data.id });
-        notify('passenger', 'Driver accepted the trip!', 'success');
+        notify('passenger', 'Driver is on the way to your location!', 'success');
+        notify('driver', 'Trip accepted! Navigating to passenger.', 'info');
         break;
 
       case 'Trip.Started':
@@ -291,9 +299,9 @@ export function DemoStoreProvider({ children }) {
 
   /* Helper: push notification */
   const notify = useCallback((side, message, variant = 'info') => {
-    const id = `notif-${Date.now()}`;
+    const id = `notif-${Date.now()}-${Math.random()}`;
     dispatch({ type: 'PUSH_NOTIFICATION', payload: { id, side, message, variant, ts: new Date() } });
-    setTimeout(() => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }), 5000);
+    setTimeout(() => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }), 10000); // Increased to 10s
   }, []);
 
   /* ── Actions ── */
@@ -387,7 +395,10 @@ export function DemoStoreProvider({ children }) {
       dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ACCEPTED });
       pushEvent('Trip.Accepted', 'ride', { tripId });
       notify('passenger', 'Driver accepted the trip!', 'success');
-      notify('driver', 'Trip accepted. Navigate to pickup point.', 'info');
+      notify('driver', 'Trip accepted. Heading to pickup.', 'info');
+      
+      // Auto-start movement to pickup
+      actions.moveToPickup(state.assignedDriver || DRIVER_SEEDS[0], state.pickup, state.speed);
     },
 
     startTrip: async (tripId) => {
@@ -401,6 +412,9 @@ export function DemoStoreProvider({ children }) {
       dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ON_TRIP });
       pushEvent('Trip.Started', 'ride', { tripId });
       notify('passenger', 'Trip started!', 'success');
+      
+      // Auto-start movement to destination
+      actions.moveToDestination(state.assignedDriver, state.pickup, state.dropoff, state.speed);
     },
 
     cancelTrip: async (tripId, reason = 'Cancelled by user') => {
@@ -417,31 +431,31 @@ export function DemoStoreProvider({ children }) {
       notify('passenger', 'Trip cancelled.', 'warning');
     },
 
-    simulateMovement: async (driver, pickup, dropoff, onTick, speed = 1) => {
+    moveToPickup: async (driver, pickup, speed = 1) => {
       if (!driver) return;
       dispatch({ type: 'SET_DRIVER_MOVING', payload: true });
-
-      // Step 1: Driver → Pickup
+      
       await moveBetween(driver, pickup, 12, speed, (lat, lng) => {
         dispatch({ type: 'UPDATE_DRIVER_POS', payload: { id: driver.id, lat, lng } });
-        sendLocationUpdate(driver.id, lat, lng); // Streaming location via WS
-        onTick?.({ id: driver.id, lat, lng });
-      });
-
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ON_TRIP });
-      pushEvent('Trip.PickedUp', 'ride', { driverId: driver.id });
-      notify('passenger', 'Driver has arrived! Enjoy your trip 🚗', 'success');
-      notify('driver', 'Passenger on board. Navigate to destination.', 'info');
-
-      // Step 2: Pickup → Dropoff
-      const pickupPos = { lat: pickup.lat, lng: pickup.lng };
-      await moveBetween(pickupPos, dropoff, 16, speed, (lat, lng) => {
-        dispatch({ type: 'UPDATE_DRIVER_POS', payload: { id: driver.id, lat, lng } });
-        sendLocationUpdate(driver.id, lat, lng); // Streaming location via WS
-        onTick?.({ id: driver.id, lat, lng });
+        sendLocationUpdate(driver.id, lat, lng);
       });
 
       dispatch({ type: 'SET_DRIVER_MOVING', payload: false });
+      notify('driver', 'You have arrived at the pickup location.', 'success');
+      notify('passenger', 'Your driver has arrived!', 'info');
+    },
+
+    moveToDestination: async (driver, pickup, dropoff, speed = 1) => {
+      if (!driver) return;
+      dispatch({ type: 'SET_DRIVER_MOVING', payload: true });
+
+      await moveBetween(pickup, dropoff, 16, speed, (lat, lng) => {
+        dispatch({ type: 'UPDATE_DRIVER_POS', payload: { id: driver.id, lat, lng } });
+        sendLocationUpdate(driver.id, lat, lng);
+      });
+
+      dispatch({ type: 'SET_DRIVER_MOVING', payload: false });
+      notify('driver', 'You have arrived at the destination.', 'success');
     },
 
     completeTrip: async (tripId) => {
