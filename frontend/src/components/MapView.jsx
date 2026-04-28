@@ -22,19 +22,22 @@ function makeIcon(svg, size = [36, 36], anchor = [18, 36]) {
 }
 
 const PICKUP_ICON = makeIcon(`
-  <svg width="36" height="42" viewBox="0 0 36 42" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="18" cy="18" r="16" fill="#22C55E" fill-opacity="0.15" stroke="#22C55E" stroke-width="2"/>
-    <circle cx="18" cy="18" r="8" fill="#22C55E"/>
-    <line x1="18" y1="34" x2="18" y2="42" stroke="#22C55E" stroke-width="2"/>
+  <svg width="36" height="46" viewBox="0 0 36 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="18" cy="18" r="16" fill="#22C55E" fill-opacity="0.1" stroke="#22C55E" stroke-width="2"/>
+    <circle cx="18" cy="18" r="8" fill="#22C55E" stroke="#fff" stroke-width="2"/>
+    <path d="M18 34V44" stroke="#22C55E" stroke-width="3" stroke-linecap="round"/>
   </svg>
-`, [36, 42], [18, 42]);
+`, [36, 46], [18, 44]);
 
 const DROPOFF_ICON = makeIcon(`
-  <svg width="28" height="36" viewBox="0 0 28 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M14 0C6.268 0 0 6.268 0 14c0 9.333 14 36 14 36s14-26.667 14-36C28 6.268 21.732 0 14 0z" fill="#EF4444"/>
-    <circle cx="14" cy="14" r="6" fill="white"/>
+  <svg width="32" height="44" viewBox="0 0 32 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <filter id="shadow" x="0" y="0" width="32" height="44">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.3"/>
+    </filter>
+    <path d="M16 2C9.373 2 4 7.373 4 14c0 8 12 26 12 26s12-18 12-26c0-6.627-5.373-12-12-12z" fill="#EF4444" stroke="#fff" stroke-width="2" filter="url(#shadow)"/>
+    <circle cx="16" cy="14" r="5" fill="white"/>
   </svg>
-`, [28, 36], [14, 36]);
+`, [32, 44], [16, 40]);
 
 const PASSENGER_ICON = makeIcon(`
   <div style="

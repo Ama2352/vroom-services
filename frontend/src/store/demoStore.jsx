@@ -45,7 +45,7 @@ export const PICKUP_PRESETS = [
 export const DROPOFF_PRESETS = [
   { label: 'Tan Son Nhat Airport', lat: 10.8184, lng: 106.6697 },
   { label: 'Landmark 81',          lat: 10.7947, lng: 106.7218 },
-  { label: 'Saigon Zoo',           lat: 10.7876, lng: 106.7115 },
+  { label: 'Saigon Zoo',           lat: 10.7895, lng: 106.7052 },
 ];
 
 /* ─────────────────────────────────────────────

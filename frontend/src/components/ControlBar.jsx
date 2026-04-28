@@ -41,19 +41,32 @@ export default function ControlBar() {
     actions.setAutoPlay(true);
     const delay = ms => new Promise(r => setTimeout(r, ms / speed));
 
-    await run('seed', () => actions.seedDrivers());
-    await delay(800);
-    const tid = await run('request', async () => actions.requestRide(state.pickup, state.dropoff));
-    await delay(1000);
-    if (isAssigned || state.tripStatus === TRIP_STATUS.ASSIGNED) {
-      await run('accept', () => actions.acceptTrip(state.tripId));
+    try {
+      // 1. Seed
+      await run('seed', () => actions.seedDrivers());
+      await delay(1000);
+
+      // 2. Request
+      const tid = await run('request', () => actions.requestRide());
+      if (!tid) throw new Error('Request failed');
+      await delay(2000); // Wait for matching
+
+      // 3. Accept (Wait for driver move)
+      await run('accept', () => actions.acceptTrip(tid));
+      
+      // 4. Start (Wait for trip move)
+      await delay(1000);
+      await run('start', () => actions.startTrip(tid));
+      
+      // 5. Complete
+      await delay(1000);
+      await run('complete', () => actions.completeTrip(tid));
+    } catch (err) {
+      console.error('AutoPlay failed:', err);
+    } finally {
+      actions.setAutoPlay(false);
     }
-    await delay(600);
-    await run('start', () => actions.startTrip(state.tripId));
-    await delay(1500); // Wait for simulation
-    await run('complete', () => actions.completeTrip(state.tripId));
-    actions.setAutoPlay(false);
-  }, [state, actions, speed, run]);
+  }, [actions, speed, run]);
 
   return (
     <div className="controlbar">
