@@ -98,25 +98,71 @@ func (h *TripHandler) AcceptTrip(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid trip ID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid trip ID format. Expected UUID, got: " + idStr})
 		return
 	}
 
 	var req struct {
-		DriverID uuid.UUID `json:"driver_id" binding:"required"`
+		DriverID string `json:"driver_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
 		return
 	}
 
-	err = h.tripService.AcceptTrip(c.Request.Context(), id, req.DriverID)
+	driverID, err := uuid.Parse(req.DriverID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid driver_id format. Expected UUID, got: " + req.DriverID})
+		return
+	}
+
+	err = h.tripService.AcceptTrip(c.Request.Context(), id, driverID)
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ACCEPTED", "trip_id": id})
+}
+
+func (h *TripHandler) StartTrip(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid trip ID format"})
+		return
+	}
+
+	err = h.tripService.StartTrip(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "IN_PROGRESS", "trip_id": id})
+}
+
+func (h *TripHandler) CancelTrip(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid trip ID format"})
+		return
+	}
+
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	err = h.tripService.CancelTrip(c.Request.Context(), id, req.Reason)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "CANCELLED", "trip_id": id})
 }
 
 func (h *TripHandler) Health(c *gin.Context) {

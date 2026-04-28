@@ -44,7 +44,18 @@ func (s *TripService) RequestTrip(ctx context.Context, passengerID uuid.UUID, re
 		AggregateType: "TRIP",
 		AggregateID:   trip.ID,
 		EventType:     "Trip.Requested",
-		Payload:       trip,
+		Payload: map[string]interface{}{
+			"id":              trip.ID,
+			"passenger_id":    trip.PassengerID,
+			"status":          trip.Status,
+			"source_lat":      trip.Source.Point.Lat,
+			"source_lng":      trip.Source.Point.Lng,
+			"dest_lat":        trip.Destination.Point.Lat,
+			"dest_lng":        trip.Destination.Point.Lng,
+			"estimated_price": trip.EstimatedPrice.Amount,
+			"currency":        trip.EstimatedPrice.Currency,
+			"created_at":      trip.CreatedAt,
+		},
 	}
 
 	err := s.repo.CreateWithOutbox(ctx, trip, event)
@@ -78,7 +89,12 @@ func (s *TripService) CompleteTrip(ctx context.Context, tripID uuid.UUID, finalP
 		AggregateType: "TRIP",
 		AggregateID:   tripID,
 		EventType:     "Trip.Completed",
-		Payload:       trip.DomainEvents[len(trip.DomainEvents)-1],
+		Payload: map[string]interface{}{
+			"id":          tripID,
+			"final_price": finalPrice,
+			"status":      "COMPLETED",
+			"updated_at":  time.Now(),
+		},
 	}
 
 	return s.repo.CompleteWithOutbox(ctx, tripID, finalPrice, event)
@@ -103,9 +119,71 @@ func (s *TripService) AcceptTrip(ctx context.Context, tripID uuid.UUID, driverID
 		AggregateType: "TRIP",
 		AggregateID:   tripID,
 		EventType:     "Trip.Accepted",
-		Payload:       trip.DomainEvents[len(trip.DomainEvents)-1],
+		Payload: map[string]interface{}{
+			"id":         tripID,
+			"driver_id":  driverID,
+			"status":     "ACCEPTED",
+			"updated_at": time.Now(),
+		},
 	}
 
 	return s.repo.AcceptWithOutbox(ctx, tripID, driverID, event)
+}
+
+func (s *TripService) StartTrip(ctx context.Context, tripID uuid.UUID) error {
+	trip, err := s.repo.GetByID(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	if trip == nil {
+		return errors.New("trip not found")
+	}
+
+	if err := trip.Start(); err != nil {
+		return err
+	}
+
+	event := &repository.OutboxEvent{
+		ID:            uuid.New(),
+		AggregateType: "TRIP",
+		AggregateID:   tripID,
+		EventType:     "Trip.Started",
+		Payload: map[string]interface{}{
+			"id":         tripID,
+			"status":     "IN_PROGRESS",
+			"updated_at": time.Now(),
+		},
+	}
+
+	return s.repo.StartWithOutbox(ctx, tripID, event)
+}
+
+func (s *TripService) CancelTrip(ctx context.Context, tripID uuid.UUID, reason string) error {
+	trip, err := s.repo.GetByID(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	if trip == nil {
+		return errors.New("trip not found")
+	}
+
+	if err := trip.Cancel(reason); err != nil {
+		return err
+	}
+
+	event := &repository.OutboxEvent{
+		ID:            uuid.New(),
+		AggregateType: "TRIP",
+		AggregateID:   tripID,
+		EventType:     "Trip.Cancelled",
+		Payload: map[string]interface{}{
+			"id":         tripID,
+			"status":     "CANCELLED",
+			"reason":     reason,
+			"updated_at": time.Now(),
+		},
+	}
+
+	return s.repo.CancelWithOutbox(ctx, tripID, event)
 }
 

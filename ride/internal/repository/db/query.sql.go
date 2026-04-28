@@ -274,6 +274,22 @@ func (q *Queries) UpdateEventStatus(ctx context.Context, arg UpdateEventStatusPa
 	return err
 }
 
+const updateTripDriver = `-- name: UpdateTripDriver :exec
+UPDATE trips 
+SET driver_id = $2
+WHERE id = $1
+`
+
+type UpdateTripDriverParams struct {
+	ID       uuid.UUID     `json:"id"`
+	DriverID uuid.NullUUID `json:"driver_id"`
+}
+
+func (q *Queries) UpdateTripDriver(ctx context.Context, arg UpdateTripDriverParams) error {
+	_, err := q.db.ExecContext(ctx, updateTripDriver, arg.ID, arg.DriverID)
+	return err
+}
+
 const updateTripStatus = `-- name: UpdateTripStatus :exec
 UPDATE trips 
 SET status = $2

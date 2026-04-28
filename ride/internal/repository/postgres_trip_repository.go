@@ -42,7 +42,7 @@ func (r *PostgresTripRepository) CreateWithOutbox(ctx context.Context, trip *dom
 		DestLat:        trip.Destination.Point.Lat,
 		DestLng:        trip.Destination.Point.Lng,
 		EstimatedPrice: trip.EstimatedPrice.Amount,
-		Currency:       sql.NullString{String: trip.EstimatedPrice.Currency, Valid: true},
+		Currency:       sql.NullString{String: func() string { if trip.EstimatedPrice.Currency == "" { return "VND" }; return trip.EstimatedPrice.Currency }(), Valid: true},
 		SourceAddress:  sql.NullString{String: trip.Source.Address, Valid: trip.Source.Address != ""},
 		DestAddress:    sql.NullString{String: trip.Destination.Address, Valid: trip.Destination.Address != ""},
 		CreatedAt:      sql.NullTime{Time: trip.CreatedAt, Valid: true},
@@ -92,12 +92,56 @@ func (r *PostgresTripRepository) UpdateStatus(ctx context.Context, tripID uuid.U
 	})
 }
 
+func (r *PostgresTripRepository) UpdateDriver(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID) error {
+	return r.queries.UpdateTripDriver(ctx, db.UpdateTripDriverParams{
+		ID:       tripID,
+		DriverID: uuid.NullUUID{UUID: driverID, Valid: true},
+	})
+}
+
 func (r *PostgresTripRepository) AcceptTrip(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID) error {
 	return r.queries.AcceptTrip(ctx, db.AcceptTripParams{
 		ID:       tripID,
 		DriverID: uuid.NullUUID{UUID: driverID, Valid: true},
 		Status:   string(domain.StatusAccepted),
 	})
+}
+
+func (r *PostgresTripRepository) StartWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error {
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := r.queries.WithTx(tx)
+
+	// 1. Update Trip Status
+	err = qtx.UpdateTripStatus(ctx, db.UpdateTripStatusParams{
+		ID:     tripID,
+		Status: string(domain.StatusStarted),
+	})
+	if err != nil {
+		return err
+	}
+
+	// 2. Create Outbox Event
+	payload, _ := json.Marshal(event.Payload)
+	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		ID:            event.ID,
+		AggregateType: event.AggregateType,
+		AggregateID:   event.AggregateID,
+		EventType:     event.EventType,
+		Payload:       payload,
+		Status:        sql.NullString{String: "PENDING", Valid: true},
+		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+	})
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *PostgresTripRepository) AcceptWithOutbox(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID, event *OutboxEvent) error {

@@ -13,6 +13,11 @@ UPDATE trips
 SET status = $2
 WHERE id = $1;
 
+-- name: UpdateTripDriver :exec
+UPDATE trips 
+SET driver_id = $2
+WHERE id = $1;
+
 -- name: AcceptTrip :exec
 UPDATE trips
 SET driver_id = $2, status = $3, accepted_at = NOW()

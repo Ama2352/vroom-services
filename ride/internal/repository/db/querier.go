@@ -22,6 +22,7 @@ type Querier interface {
 	IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error)
 	MarkEventProcessed(ctx context.Context, arg MarkEventProcessedParams) error
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) error
+	UpdateTripDriver(ctx context.Context, arg UpdateTripDriverParams) error
 	UpdateTripStatus(ctx context.Context, arg UpdateTripStatusParams) error
 }
 

@@ -106,7 +106,7 @@ func main() {
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Correlation-ID")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Correlation-ID, X-User-ID")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -122,6 +122,8 @@ func main() {
 			trips.GET("/:id", rideHandler.GetTrip)
 			trips.POST("/:id/complete", rideHandler.CompleteTrip)
 			trips.POST("/:id/accept", rideHandler.AcceptTrip)
+			trips.POST("/:id/start", rideHandler.StartTrip)
+			trips.POST("/:id/cancel", rideHandler.CancelTrip)
 			trips.GET("/health", rideHandler.Health)
 		}
 	}

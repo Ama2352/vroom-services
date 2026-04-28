@@ -20,9 +20,11 @@ export const TRIP_STATUS = {
   IDLE:       'Idle',
   SEARCHING:  'Searching Driver',
   ASSIGNED:   'Driver Assigned',
+  ACCEPTED:   'Accepted',
   COMING:     'Driver Coming',
   ON_TRIP:    'On Trip',
   COMPLETED:  'Completed',
+  CANCELLED:  'Cancelled',
 };
 
 /* ── Ho Chi Minh City area coordinates ── */
@@ -173,27 +175,26 @@ export function DemoStoreProvider({ children }) {
 
   /* ── WebSocket Connection for Notifications (Real-time events) ── */
   useEffect(() => {
-    const demoUserId = 'c10a8c2f-3d6a-491c-acbb-d313cd4d625f'; // In real app, get from auth context
+    const demoUserId = 'c10a8c2f-3d6a-491c-acbb-d313cd4d625f';
+    const processedIds = new Set();
+
     const connectNotif = () => {
       const wsUrl = `${API.notificationWS}?userId=${demoUserId}`;
-      console.log(`Connecting to Notification WS: ${wsUrl}`);
       const ws = new WebSocket(wsUrl);
 
       ws.onmessage = (event) => {
-        console.log('📬 WebSocket Message Received:', event.data);
         try {
           const data = jsonParse(event.data);
+          const uid = data.id || data.correlation_id || JSON.stringify(data.payload);
+          if (processedIds.has(uid)) return;
+          processedIds.add(uid);
+          if (processedIds.size > 100) processedIds.delete(processedIds.values().next().value);
           handleIncomingEvent(data);
-        } catch (err) {
-          console.error('Error parsing notification event:', err);
-        }
+        } catch (err) { console.error(err); }
       };
 
-      ws.onopen = () => console.log('✅ Notification WebSocket connected');
-      ws.onclose = () => {
-        console.log('❌ Notification WebSocket disconnected, retrying in 3s...');
-        setTimeout(connectNotif, 3000);
-      };
+      ws.onopen = () => console.log('✅ Notification WS connected');
+      ws.onclose = () => setTimeout(connectNotif, 3000);
     };
 
     connectNotif();
@@ -228,15 +229,21 @@ export function DemoStoreProvider({ children }) {
       }
 
       case 'Trip.Accepted':
-        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.COMING });
+        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ACCEPTED });
         pushEvent('Trip.Accepted', 'ride', { tripId: data.id });
-        notify('passenger', 'Driver accepted the trip and is heading to you!', 'success');
+        notify('passenger', 'Driver accepted the trip!', 'success');
         break;
 
       case 'Trip.Started':
         dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ON_TRIP });
-        pushEvent('Trip.PickedUp', 'ride', { tripId: data.id });
-        notify('passenger', 'Driver has arrived! Enjoy your trip 🚗', 'success');
+        pushEvent('Trip.Started', 'ride', { tripId: data.id });
+        notify('passenger', 'Trip has started! Enjoy your ride 🚗', 'success');
+        break;
+
+      case 'Trip.Cancelled':
+        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.CANCELLED });
+        pushEvent('Trip.Cancelled', 'ride', { tripId: data.id, reason: data.reason });
+        notify('passenger', 'Trip has been cancelled.', 'warning');
         break;
 
       case 'Trip.Completed':
@@ -377,10 +384,37 @@ export function DemoStoreProvider({ children }) {
       } catch (err) {
         logApi('POST', `/v1/trips/${tripId}/accept`, payload, err.response?.status ?? 0, err.message);
       }
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.COMING });
+      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ACCEPTED });
       pushEvent('Trip.Accepted', 'ride', { tripId });
-      notify('passenger', 'Driver accepted the trip and is heading to you!', 'success');
+      notify('passenger', 'Driver accepted the trip!', 'success');
       notify('driver', 'Trip accepted. Navigate to pickup point.', 'info');
+    },
+
+    startTrip: async (tripId) => {
+      if (!tripId) return;
+      try {
+        const res = await axios.post(`${API.ride}/v1/trips/${tripId}/start`);
+        logApi('POST', `/v1/trips/${tripId}/start`, {}, res.status, res.data);
+      } catch (err) {
+        logApi('POST', `/v1/trips/${tripId}/start`, {}, err.response?.status ?? 0, err.message);
+      }
+      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ON_TRIP });
+      pushEvent('Trip.Started', 'ride', { tripId });
+      notify('passenger', 'Trip started!', 'success');
+    },
+
+    cancelTrip: async (tripId, reason = 'Cancelled by user') => {
+      if (!tripId) return;
+      const payload = { reason };
+      try {
+        const res = await axios.post(`${API.ride}/v1/trips/${tripId}/cancel`, payload);
+        logApi('POST', `/v1/trips/${tripId}/cancel`, payload, res.status, res.data);
+      } catch (err) {
+        logApi('POST', `/v1/trips/${tripId}/cancel`, payload, err.response?.status ?? 0, err.message);
+      }
+      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.CANCELLED });
+      pushEvent('Trip.Cancelled', 'ride', { tripId, reason });
+      notify('passenger', 'Trip cancelled.', 'warning');
     },
 
     simulateMovement: async (driver, pickup, dropoff, onTick, speed = 1) => {

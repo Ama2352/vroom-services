@@ -60,7 +60,8 @@ func (t *Trip) AcceptByDriver(driverID uuid.UUID) error {
 	if t.Status != StatusRequested {
 		return ErrInvalidTripStatus
 	}
-	if t.DriverID != nil {
+	// Allow if no driver assigned, or if the same driver is confirming a match
+	if t.DriverID != nil && *t.DriverID != driverID {
 		return ErrDriverAlreadySet
 	}
 
@@ -110,13 +111,29 @@ func (t *Trip) Complete(finalPrice float64) error {
 	return nil
 }
 
+func (t *Trip) Cancel(reason string) error {
+	if t.Status == StatusCompleted || t.Status == StatusCancelled {
+		return ErrInvalidTripStatus
+	}
+	
+	t.Status = StatusCancelled
+	
+	t.RecordEvent(map[string]interface{}{
+		"type":    "Trip.Cancelled",
+		"trip_id": t.ID,
+		"reason":  reason,
+	})
+	
+	return nil
+}
+
 type CreateTripRequest struct {
 	SourceLat      float64 `json:"source_lat" binding:"required"`
 	SourceLng      float64 `json:"source_lng" binding:"required"`
 	DestLat        float64 `json:"dest_lat" binding:"required"`
 	DestLng        float64 `json:"dest_lng" binding:"required"`
 	EstimatedPrice float64 `json:"estimated_price" binding:"required"`
-	Currency       string  `json:"currency" binding:"required"`
+	Currency       string  `json:"currency"`
 }
 
 type TripResponse struct {

@@ -7,6 +7,7 @@ import (
 	"time"
 	"vroom-mvp/dispatch/internal/service"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -154,10 +155,12 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			err = c.redisClient.XAdd(ctx, &redis.XAddArgs{
 				Stream: c.streamName,
 				Values: map[string]interface{}{
+					"id":           uuid.New().String(),
 					"type":         "Trip.MatchFailed",
 					"aggregate":    "TRIP",
 					"aggregate_id": tripID,
 					"payload":      string(payloadJSON),
+					"correlation_id": correlationID,
 				},
 			}).Err()
 
@@ -183,10 +186,12 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		err = c.redisClient.XAdd(ctx, &redis.XAddArgs{
 			Stream: c.streamName,
 			Values: map[string]interface{}{
+				"id":           uuid.New().String(),
 				"type":         "Trip.Matched",
 				"aggregate":    "TRIP",
 				"aggregate_id": tripID,
 				"payload":      string(payloadJSON),
+				"correlation_id": correlationID,
 			},
 		}).Err()
 

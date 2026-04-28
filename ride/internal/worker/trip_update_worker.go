@@ -67,7 +67,14 @@ func (w *TripUpdateWorker) consume(ctx context.Context) {
 	for _, stream := range entries {
 		for _, message := range stream.Messages {
 			// Idempotency check
-			msgID, err := uuid.Parse(message.Values["id"].(string))
+			var eventID string
+			if val, ok := message.Values["id"]; ok && val != nil {
+				eventID = val.(string)
+			} else {
+				eventID = message.ID // Fallback to Redis Stream ID
+			}
+
+			msgID, err := uuid.Parse(eventID)
 			if err == nil {
 				processed, _ := w.repo.IsEventProcessed(ctx, msgID)
 				if processed {
@@ -108,26 +115,13 @@ func (w *TripUpdateWorker) handleMessage(ctx context.Context, msg redis.XMessage
 
 		log.Printf("[STEP 3] Ride service received 'Trip.Matched' for Trip: %s. Assigning Driver: %s...", data.ID, data.DriverID)
 		
-		// 1. Prepare Outbox Event
-		outboxEvent := &repository.OutboxEvent{
-			ID:            uuid.New(),
-			AggregateType: "TRIP",
-			AggregateID:   data.ID,
-			EventType:     "Trip.Accepted",
-			Payload: map[string]interface{}{
-				"id":         data.ID,
-				"driver_id":  data.DriverID,
-				"status":     "ACCEPTED",
-				"updated_at": time.Now(),
-			},
-		}
-
-		// 2. Update trip with driver info and status atomically with outbox
-		err := w.repo.AcceptWithOutbox(ctx, data.ID, data.DriverID, outboxEvent)
+		// 1. Just update the driver assignment but keep status as REQUESTED/MATCHED
+		// This allows the manual Accept call to proceed as expected by the user.
+		err := w.repo.UpdateDriver(ctx, data.ID, data.DriverID)
 		if err != nil {
-			log.Printf("[RIDE ERROR] Error accepting trip in DB: %v", err)
+			log.Printf("[RIDE ERROR] Error assigning driver in DB: %v", err)
 		} else {
-			log.Printf("[STEP 3.1] Trip %s status updated to ACCEPTED in Database and Outbox.", data.ID)
+			log.Printf("[STEP 3] Driver %s assigned to Trip %s. Waiting for manual acceptance.", data.DriverID, data.ID)
 		}
 	} else if eventType == "Trip.MatchFailed" {
 		var data struct {

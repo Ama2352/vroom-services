@@ -4,7 +4,7 @@
 import { useState, useRef, useCallback } from 'react';
 import {
   Users, Navigation2, Truck, CheckSquare, RotateCcw,
-  Play, Pause, Gauge, StepForward, Info
+  Play, Pause, Gauge, StepForward, Info, PlayCircle, XCircle
 } from 'lucide-react';
 import { useDemo, TRIP_STATUS } from '../store/demoStore';
 import './ControlBar.css';
@@ -20,14 +20,18 @@ export default function ControlBar() {
   const isIdle      = tripStatus === TRIP_STATUS.IDLE;
   const isSearching = tripStatus === TRIP_STATUS.SEARCHING;
   const isAssigned  = tripStatus === TRIP_STATUS.ASSIGNED;
+  const isAccepted  = tripStatus === TRIP_STATUS.ACCEPTED;
   const isComing    = tripStatus === TRIP_STATUS.COMING;
+  const isOnTrip    = tripStatus === TRIP_STATUS.ON_TRIP;
   const isCompleted = tripStatus === TRIP_STATUS.COMPLETED;
 
   const canSeed    = isIdle;
   const canRequest = isIdle && drivers.length > 0;
   const canAccept  = isAssigned;
-  const canSimulate = isComing && !driverMoving;
-  const canComplete = tripStatus === TRIP_STATUS.ON_TRIP;
+  const canStart   = isAccepted;
+  const canSimulate = isOnTrip && !driverMoving;
+  const canComplete = isOnTrip && !driverMoving;
+  const canCancel   = !isIdle && !isCompleted && tripStatus !== TRIP_STATUS.CANCELLED;
 
   const run = useCallback(async (key, fn) => {
     setLoading(key);
@@ -46,6 +50,8 @@ export default function ControlBar() {
     if (isAssigned || state.tripStatus === TRIP_STATUS.ASSIGNED) {
       await run('accept', () => actions.acceptTrip(state.tripId));
     }
+    await delay(600);
+    await run('start', () => actions.startTrip(state.tripId));
     await delay(600);
     await run('simulate', () =>
       actions.simulateMovement(state.assignedDriver, state.pickup, state.dropoff, null, speed)
@@ -106,7 +112,17 @@ export default function ControlBar() {
           onClick={() => run('accept', () => actions.acceptTrip(tripId))}
         >
           {loading === 'accept' ? <Spinner /> : <CheckSquare size={14} />}
-          Accept Trip
+          Accept
+        </button>
+
+        <button
+          id="btn-start"
+          className="btn-ghost"
+          disabled={!canStart || !!loading}
+          onClick={() => run('start', () => actions.startTrip(tripId))}
+        >
+          {loading === 'start' ? <Spinner /> : <PlayCircle size={14} />}
+          Start
         </button>
 
         <button
@@ -130,7 +146,17 @@ export default function ControlBar() {
           onClick={() => run('complete', () => actions.completeTrip(tripId))}
         >
           {loading === 'complete' ? <Spinner /> : <CheckSquare size={14} />}
-          Complete Trip
+          Complete
+        </button>
+
+        <button
+          id="btn-cancel"
+          className="btn-danger-outline"
+          disabled={!canCancel || !!loading}
+          onClick={() => run('cancel', () => actions.cancelTrip(tripId))}
+        >
+          {loading === 'cancel' ? <Spinner /> : <XCircle size={14} />}
+          Cancel
         </button>
 
         <button
