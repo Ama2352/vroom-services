@@ -7,7 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
 	"vroom-mvp/ride/internal/handler"
 	"vroom-mvp/ride/internal/repository"
 	"vroom-mvp/ride/internal/service"
@@ -62,20 +65,48 @@ func main() {
 	rideHandler := handler.NewTripHandler(rideService)
 
 	// 4. Start Workers (Background)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+
 	outboxWorker := worker.NewOutboxWorker(rideRepo, rdb, "ride_events")
-	go outboxWorker.Start(context.Background())
+	go outboxWorker.Start(ctx)
 
 	updateWorker := worker.NewTripUpdateWorker(rdb, rideRepo, "ride_events", "ride_update_group", uuid.New().String())
-	go updateWorker.Start(context.Background())
+	go updateWorker.Start(ctx)
+
+	timeoutWorker := worker.NewTripTimeoutWorker(rideRepo, 10*time.Second, 60)
+	go timeoutWorker.Start(ctx)
 
 	// 5. Router Setup
 	r := gin.Default()
+	r.Use(handler.CorrelationMiddleware())
+
+
+	// Probes
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "UP"})
+	})
+
+	r.GET("/readyz", func(c *gin.Context) {
+		dbErr := db.PingContext(c.Request.Context())
+		redisErr := rdb.Ping(c.Request.Context()).Err()
+
+		if dbErr != nil || redisErr != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "DOWN",
+				"db":     dbErr == nil,
+				"redis":  redisErr == nil,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "READY"})
+	})
 
 	// CORS middleware
 	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-User-ID")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Correlation-ID")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -95,16 +126,36 @@ func main() {
 		}
 	}
 
-	// Root health check
-	r.GET("/health", func(c *gin.Context) {
-		c.String(http.StatusOK, "OK")
-	})
-
-	log.Printf("Ride Service starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// Server setup
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
 	}
+
+	go func() {
+		log.Printf("Ride Service starting on port %s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Listen: %s\n", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down Ride Service...")
+
+	stop() // Cancel worker contexts
+	
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctxShutdown); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	log.Println("Ride Service exited gracefully")
 }
+
 
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {

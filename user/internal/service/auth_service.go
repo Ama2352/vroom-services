@@ -24,8 +24,18 @@ func NewAuthService(repo repository.UserRepository, jwtManager *util.JWTManager)
 }
 
 func (s *AuthService) Register(ctx context.Context, req domain.RegisterRequest) (*domain.AuthResponse, error) {
+	email, err := domain.NewEmail(req.Email)
+	if err != nil {
+		return nil, err
+	}
+
+	phone, err := domain.NewPhoneNumber(req.PhoneNumber, "+1") // Default country code for now
+	if err != nil {
+		return nil, err
+	}
+
 	// Check if user already exists
-	existing, err := s.repo.GetByEmail(ctx, req.Email)
+	existing, err := s.repo.GetByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +52,8 @@ func (s *AuthService) Register(ctx context.Context, req domain.RegisterRequest) 
 	// Create user domain object
 	user := &domain.User{
 		ID:           uuid.New(),
-		Email:        req.Email,
+		Email:        email,
+		PhoneNumber:  phone,
 		PasswordHash: passwordHash,
 		Name:         req.Name,
 		Role:         req.Role,
@@ -77,7 +88,12 @@ func (s *AuthService) Register(ctx context.Context, req domain.RegisterRequest) 
 }
 
 func (s *AuthService) Login(ctx context.Context, req domain.LoginRequest) (*domain.AuthResponse, error) {
-	user, err := s.repo.GetByEmail(ctx, req.Email)
+	email, err := domain.NewEmail(req.Email)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := s.repo.GetByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -102,3 +118,4 @@ func (s *AuthService) Login(ctx context.Context, req domain.LoginRequest) (*doma
 		ExpiresIn:   3600,
 	}, nil
 }
+

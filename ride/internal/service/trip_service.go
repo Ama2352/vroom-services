@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 	"vroom-mvp/ride/internal/domain"
 	"vroom-mvp/ride/internal/repository"
 
 	"github.com/google/uuid"
 )
+
 
 type TripService struct {
 	repo repository.TripRepository
@@ -21,15 +23,20 @@ func NewTripService(repo repository.TripRepository) *TripService {
 
 func (s *TripService) RequestTrip(ctx context.Context, passengerID uuid.UUID, req domain.CreateTripRequest) (*domain.Trip, error) {
 	trip := &domain.Trip{
-		ID:             uuid.New(),
-		PassengerID:    passengerID,
-		Status:         domain.StatusRequested,
-		SourceLat:      req.SourceLat,
-		SourceLng:      req.SourceLng,
-		DestLat:        req.DestLat,
-		DestLng:        req.DestLng,
-		EstimatedPrice: req.EstimatedPrice,
-		CreatedAt:      time.Now(),
+		ID:          uuid.New(),
+		PassengerID: passengerID,
+		Status:      domain.StatusRequested,
+		Source: domain.Location{
+			Point: domain.GeoPoint{Lat: req.SourceLat, Lng: req.SourceLng},
+		},
+		Destination: domain.Location{
+			Point: domain.GeoPoint{Lat: req.DestLat, Lng: req.DestLng},
+		},
+		EstimatedPrice: domain.Price{
+			Amount:   req.EstimatedPrice,
+			Currency: req.Currency,
+		},
+		CreatedAt: time.Now(),
 	}
 
 	event := &repository.OutboxEvent{
@@ -53,36 +60,52 @@ func (s *TripService) GetTrip(ctx context.Context, id uuid.UUID) (*domain.Trip, 
 }
 
 func (s *TripService) CompleteTrip(ctx context.Context, tripID uuid.UUID, finalPrice float64) error {
-	// Create Outbox Event
+	trip, err := s.repo.GetByID(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	if trip == nil {
+		return errors.New("trip not found")
+	}
+
+	if err := trip.Complete(finalPrice); err != nil {
+		return err
+	}
+
+	// Use recorded events to create Outbox Event
 	event := &repository.OutboxEvent{
 		ID:            uuid.New(),
 		AggregateType: "TRIP",
 		AggregateID:   tripID,
 		EventType:     "Trip.Completed",
-		Payload: map[string]interface{}{
-			"id":          tripID,
-			"final_price": finalPrice,
-			"status":      domain.StatusCompleted,
-		},
+		Payload:       trip.DomainEvents[len(trip.DomainEvents)-1],
 	}
 
 	return s.repo.CompleteWithOutbox(ctx, tripID, finalPrice, event)
 }
 
 func (s *TripService) AcceptTrip(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID) error {
-	// Create Outbox Event
+	trip, err := s.repo.GetByID(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	if trip == nil {
+		return errors.New("trip not found")
+	}
+
+	if err := trip.AcceptByDriver(driverID); err != nil {
+		return err
+	}
+
+	// Use recorded events to create Outbox Event
 	event := &repository.OutboxEvent{
 		ID:            uuid.New(),
 		AggregateType: "TRIP",
 		AggregateID:   tripID,
 		EventType:     "Trip.Accepted",
-		Payload: map[string]interface{}{
-			"id":         tripID,
-			"driver_id":  driverID,
-			"status":     "ACCEPTED",
-			"updated_at": time.Now(),
-		},
+		Payload:       trip.DomainEvents[len(trip.DomainEvents)-1],
 	}
 
 	return s.repo.AcceptWithOutbox(ctx, tripID, driverID, event)
 }
+

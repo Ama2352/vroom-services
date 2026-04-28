@@ -48,8 +48,8 @@ func (q *Queries) CompleteTrip(ctx context.Context, arg CompleteTripParams) erro
 }
 
 const createOutboxEvent = `-- name: CreateOutboxEvent :exec
-INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateOutboxEventParams struct {
@@ -60,6 +60,7 @@ type CreateOutboxEventParams struct {
 	Payload       json.RawMessage `json:"payload"`
 	Status        sql.NullString  `json:"status"`
 	CreatedAt     sql.NullTime    `json:"created_at"`
+	CorrelationID sql.NullString  `json:"correlation_id"`
 }
 
 func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error {
@@ -71,6 +72,7 @@ func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventPa
 		arg.Payload,
 		arg.Status,
 		arg.CreatedAt,
+		arg.CorrelationID,
 	)
 	return err
 }
@@ -79,21 +81,24 @@ const createTrip = `-- name: CreateTrip :exec
 INSERT INTO trips (
     id, passenger_id, driver_id, status, 
     source_lat, source_lng, dest_lat, dest_lng, 
-    estimated_price, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    estimated_price, currency, source_address, dest_address, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 `
 
 type CreateTripParams struct {
-	ID             uuid.UUID     `json:"id"`
-	PassengerID    uuid.UUID     `json:"passenger_id"`
-	DriverID       uuid.NullUUID `json:"driver_id"`
-	Status         string        `json:"status"`
-	SourceLat      float64       `json:"source_lat"`
-	SourceLng      float64       `json:"source_lng"`
-	DestLat        float64       `json:"dest_lat"`
-	DestLng        float64       `json:"dest_lng"`
-	EstimatedPrice float64       `json:"estimated_price"`
-	CreatedAt      sql.NullTime  `json:"created_at"`
+	ID             uuid.UUID      `json:"id"`
+	PassengerID    uuid.UUID      `json:"passenger_id"`
+	DriverID       uuid.NullUUID  `json:"driver_id"`
+	Status         string         `json:"status"`
+	SourceLat      float64        `json:"source_lat"`
+	SourceLng      float64        `json:"source_lng"`
+	DestLat        float64        `json:"dest_lat"`
+	DestLng        float64        `json:"dest_lng"`
+	EstimatedPrice float64        `json:"estimated_price"`
+	Currency       sql.NullString `json:"currency"`
+	SourceAddress  sql.NullString `json:"source_address"`
+	DestAddress    sql.NullString `json:"dest_address"`
+	CreatedAt      sql.NullTime   `json:"created_at"`
 }
 
 func (q *Queries) CreateTrip(ctx context.Context, arg CreateTripParams) error {
@@ -107,13 +112,61 @@ func (q *Queries) CreateTrip(ctx context.Context, arg CreateTripParams) error {
 		arg.DestLat,
 		arg.DestLng,
 		arg.EstimatedPrice,
+		arg.Currency,
+		arg.SourceAddress,
+		arg.DestAddress,
 		arg.CreatedAt,
 	)
 	return err
 }
 
+const getStuckTrips = `-- name: GetStuckTrips :many
+SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address FROM trips 
+WHERE status = 'REQUESTED' AND created_at < $1
+`
+
+func (q *Queries) GetStuckTrips(ctx context.Context, createdAt sql.NullTime) ([]Trip, error) {
+	rows, err := q.db.QueryContext(ctx, getStuckTrips, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Trip
+	for rows.Next() {
+		var i Trip
+		if err := rows.Scan(
+			&i.ID,
+			&i.PassengerID,
+			&i.DriverID,
+			&i.Status,
+			&i.SourceLat,
+			&i.SourceLng,
+			&i.DestLat,
+			&i.DestLng,
+			&i.EstimatedPrice,
+			&i.FinalPrice,
+			&i.CreatedAt,
+			&i.AcceptedAt,
+			&i.CompletedAt,
+			&i.Currency,
+			&i.SourceAddress,
+			&i.DestAddress,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTrip = `-- name: GetTrip :one
-SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at FROM trips WHERE id = $1 LIMIT 1
+SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address FROM trips WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
@@ -133,13 +186,16 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 		&i.CreatedAt,
 		&i.AcceptedAt,
 		&i.CompletedAt,
+		&i.Currency,
+		&i.SourceAddress,
+		&i.DestAddress,
 	)
 	return i, err
 }
 
 const getUnpublishedEvents = `-- name: GetUnpublishedEvents :many
-SELECT id, aggregate_type, aggregate_id, event_type, payload, status, created_at FROM outbox_events 
-WHERE status = 'PENDING' 
+SELECT id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id FROM outbox_events 
+WHERE (status = 'PENDING' OR status = 'FAILED') 
 ORDER BY created_at ASC 
 LIMIT $1::int
 `
@@ -161,6 +217,7 @@ func (q *Queries) GetUnpublishedEvents(ctx context.Context, dollar_1 int32) ([]O
 			&i.Payload,
 			&i.Status,
 			&i.CreatedAt,
+			&i.CorrelationID,
 		); err != nil {
 			return nil, err
 		}
@@ -175,7 +232,33 @@ func (q *Queries) GetUnpublishedEvents(ctx context.Context, dollar_1 int32) ([]O
 	return items, nil
 }
 
+const isEventProcessed = `-- name: IsEventProcessed :one
+SELECT EXISTS(SELECT 1 FROM inbox_events WHERE id = $1)
+`
+
+func (q *Queries) IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRowContext(ctx, isEventProcessed, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const markEventProcessed = `-- name: MarkEventProcessed :exec
+INSERT INTO inbox_events (id, event_type) VALUES ($1, $2)
+`
+
+type MarkEventProcessedParams struct {
+	ID        uuid.UUID `json:"id"`
+	EventType string    `json:"event_type"`
+}
+
+func (q *Queries) MarkEventProcessed(ctx context.Context, arg MarkEventProcessedParams) error {
+	_, err := q.db.ExecContext(ctx, markEventProcessed, arg.ID, arg.EventType)
+	return err
+}
+
 const updateEventStatus = `-- name: UpdateEventStatus :exec
+
 UPDATE outbox_events 
 SET status = $1 
 WHERE id = $2

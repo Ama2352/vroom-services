@@ -66,12 +66,31 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 
 	for _, stream := range entries {
 		for _, message := range stream.Messages {
+			// Idempotency check using SETNX on Event ID
+			eventID := ""
+			if val, ok := message.Values["id"]; ok {
+				eventID = val.(string)
+			} else {
+				eventID = message.ID // Fallback to stream ID
+			}
+
+			key := "processed_event:dispatch:" + eventID
+			ok, err := c.redisClient.SetNX(ctx, key, "true", 24*time.Hour).Result()
+			if err != nil {
+				log.Printf("[DISPATCH ERROR] Failed to check idempotency for event %s: %v", eventID, err)
+			} else if !ok {
+				log.Printf("[IDEMPOTENCY] Event %s already processed by dispatch, skipping", eventID)
+				c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
+				continue
+			}
+
 			c.handleMessage(ctx, message)
 			// Acknowledge message
 			c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
 		}
 	}
 }
+
 
 func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) {
 	// Robust field extraction
@@ -90,7 +109,9 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 	}
 	payload := getVal("payload")
 
-	log.Printf("[DEBUG] Dispatch Consumer: Received %s for %s (%s)", eventType, aggregateType, aggregateID)
+	correlationID := getVal("correlation_id")
+	log.Printf("[DEBUG] [%s] Dispatch Consumer: Received %s for %s (%s)", correlationID, eventType, aggregateType, aggregateID)
+
 
 	if eventType == "Trip.Requested" {
 		var data map[string]interface{}
@@ -120,8 +141,32 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 
 		if driverID == "" {
 			log.Printf("[STEP 2.X] MATCH FAILED: No available drivers found within radius for trip: %s", tripID)
+			
+			// Publish Trip.MatchFailed event
+			failedPayload := map[string]interface{}{
+				"id":           tripID,
+				"passenger_id": data["passenger_id"],
+				"reason":       "NO_DRIVERS_AVAILABLE",
+				"updated_at":   time.Now().Format(time.RFC3339),
+			}
+			payloadJSON, _ := json.Marshal(failedPayload)
+
+			err = c.redisClient.XAdd(ctx, &redis.XAddArgs{
+				Stream: c.streamName,
+				Values: map[string]interface{}{
+					"type":         "Trip.MatchFailed",
+					"aggregate":    "TRIP",
+					"aggregate_id": tripID,
+					"payload":      string(payloadJSON),
+				},
+			}).Err()
+
+			if err != nil {
+				log.Printf("[DISPATCH ERROR] Failed to publish Trip.MatchFailed for trip %s: %v", tripID, err)
+			}
 			return
 		}
+
 
 		log.Printf("[STEP 2] MATCH SUCCESS: Trip %s assigned to Driver %s. Publishing 'Trip.Matched'...", tripID, driverID)
 		

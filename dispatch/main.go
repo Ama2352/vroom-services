@@ -5,7 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
 	"vroom-mvp/dispatch/internal/handler"
 	"vroom-mvp/dispatch/internal/service"
 	"vroom-mvp/dispatch/internal/worker"
@@ -40,16 +43,31 @@ func main() {
 	locationHandler := handler.NewLocationHandler(dispatchService)
 
 	// 4. Start Event Consumer (Background)
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
+	
 	consumer := worker.NewRideEventConsumer(rdb, dispatchService, "ride_events", "dispatch_group", consumerID)
-	go consumer.Start(context.Background())
+	go consumer.Start(workerCtx)
 
 	// 5. Router Setup
 	r := gin.Default()
 
+	r.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "UP"})
+	})
+
+	r.GET("/readyz", func(c *gin.Context) {
+		if err := rdb.Ping(c.Request.Context()).Err(); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "DOWN", "redis": false})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "READY"})
+	})
+
 	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "http://localhost:5173")
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Correlation-ID")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -59,25 +77,41 @@ func main() {
 
 	v1 := r.Group("/v1")
 	{
-		// Driver locations
 		v1.PUT("/drivers/:id/location", locationHandler.UpdateLocation)
-		
 		dispatch := v1.Group("/dispatch")
 		{
-			// WebSocket for driver location updates
 			dispatch.GET("/ws/location", locationHandler.HandleWS)
 		}
 	}
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "UP", "consumer_id": consumerID})
-	})
-
-	log.Printf("Dispatch Service starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
 	}
+
+	go func() {
+		log.Printf("Dispatch Service starting on port %s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Listen: %s\n", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down Dispatch Service...")
+
+	stopWorker()
+	
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctxShutdown); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	log.Println("Dispatch Service exited gracefully")
 }
+
 
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {

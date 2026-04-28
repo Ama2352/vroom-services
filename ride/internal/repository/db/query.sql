@@ -2,8 +2,8 @@
 INSERT INTO trips (
     id, passenger_id, driver_id, status, 
     source_lat, source_lng, dest_lat, dest_lng, 
-    estimated_price, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+    estimated_price, currency, source_address, dest_address, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
 
 -- name: GetTrip :one
 SELECT * FROM trips WHERE id = $1 LIMIT 1;
@@ -24,16 +24,28 @@ SET status = $2, final_price = $3, completed_at = NOW()
 WHERE id = $1;
 
 -- name: CreateOutboxEvent :exec
-INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: GetUnpublishedEvents :many
 SELECT * FROM outbox_events 
-WHERE status = 'PENDING' 
+WHERE (status = 'PENDING' OR status = 'FAILED') 
 ORDER BY created_at ASC 
 LIMIT $1::int;
 
+
+-- name: GetStuckTrips :many
+SELECT * FROM trips 
+WHERE status = 'REQUESTED' AND created_at < $1;
+
 -- name: UpdateEventStatus :exec
+
 UPDATE outbox_events 
 SET status = $1 
 WHERE id = $2;
+
+-- name: IsEventProcessed :one
+SELECT EXISTS(SELECT 1 FROM inbox_events WHERE id = $1);
+
+-- name: MarkEventProcessed :exec
+INSERT INTO inbox_events (id, event_type) VALUES ($1, $2);

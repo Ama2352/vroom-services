@@ -1,0 +1,3 @@
+ALTER TABLE trips ADD COLUMN currency VARCHAR(10) DEFAULT 'USD';
+ALTER TABLE trips ADD COLUMN source_address TEXT;
+ALTER TABLE trips ADD COLUMN dest_address TEXT;

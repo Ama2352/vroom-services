@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"time"
 	"vroom-mvp/ride/internal/domain"
 
 	"github.com/google/uuid"
 )
+
 
 type OutboxEvent struct {
 	ID            uuid.UUID
@@ -13,7 +15,9 @@ type OutboxEvent struct {
 	AggregateID   uuid.UUID
 	EventType     string
 	Payload       interface{}
+	CorrelationID string
 }
+
 
 type TripRepository interface {
 	CreateWithOutbox(ctx context.Context, trip *domain.Trip, event *OutboxEvent) error
@@ -25,4 +29,11 @@ type TripRepository interface {
 	CompleteWithOutbox(ctx context.Context, tripID uuid.UUID, finalPrice float64, event *OutboxEvent) error
 	GetUnpublishedEvents(ctx context.Context, limit int) ([]*OutboxEvent, error)
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string) error
+	GetStuckTrips(ctx context.Context, timeout time.Time) ([]*domain.Trip, error)
+	CancelWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error
+	IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error)
+	MarkEventProcessed(ctx context.Context, id uuid.UUID, eventType string) error
 }
+
+
+

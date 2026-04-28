@@ -138,7 +138,8 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 	// We always broadcast core lifecycle events so the multi-view demo dashboard stays in sync
 	isCoreEvent := eventType == "Trip.Requested" || eventType == "Trip.Matched" || 
 		           eventType == "Trip.Accepted" || eventType == "Trip.Started" || 
-				   eventType == "Trip.Completed"
+				   eventType == "Trip.Completed" || eventType == "Trip.MatchFailed"
+
 
 	if !targeted || isCoreEvent {
 		w.hub.BroadcastEvent(event)
@@ -150,7 +151,10 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 		log.Printf("[NOTIFICATION] Passenger: Searching for your ride... (Event: %s)", eventType)
 	case "Trip.Matched":
 		log.Printf("[NOTIFICATION] Trip Matched! (Event: %s)", eventType)
+	case "Trip.MatchFailed":
+		log.Printf("[NOTIFICATION] Passenger: Sorry, no drivers available. (Event: %s)", eventType)
 	case "User.Created":
+
 		log.Printf("[NOTIFICATION] System: Welcome email sent to new user. (Event: %s)", eventType)
 	default:
 		log.Printf("[NOTIFICATION] Received event: %s", eventType)

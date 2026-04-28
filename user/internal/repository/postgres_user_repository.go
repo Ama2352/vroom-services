@@ -34,12 +34,14 @@ func (r *PostgresUserRepository) CreateWithOutbox(ctx context.Context, user *dom
 
 	// 1. Create User
 	err = qtx.CreateUser(ctx, db.CreateUserParams{
-		ID:           user.ID,
-		Email:        user.Email,
-		PasswordHash: user.PasswordHash,
-		Name:         sql.NullString{String: user.Name, Valid: user.Name != ""},
-		Role:         string(user.Role),
-		CreatedAt:    sql.NullTime{Time: user.CreatedAt, Valid: !user.CreatedAt.IsZero()},
+		ID:            user.ID,
+		Email:         user.Email.String(),
+		PasswordHash:  user.PasswordHash,
+		Name:          sql.NullString{String: user.Name, Valid: user.Name != ""},
+		Role:          string(user.Role),
+		PhoneNumber:   sql.NullString{String: user.PhoneNumber.Number, Valid: user.PhoneNumber.Number != ""},
+		PhoneVerified: sql.NullBool{Bool: user.PhoneNumber.Verified, Valid: true},
+		CreatedAt:     sql.NullTime{Time: user.CreatedAt, Valid: !user.CreatedAt.IsZero()},
 	})
 	if err != nil {
 		return err
@@ -79,8 +81,8 @@ func (r *PostgresUserRepository) GetByID(ctx context.Context, id uuid.UUID) (*do
 	return toDomainUser(row), nil
 }
 
-func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	row, err := r.queries.GetUserByEmail(ctx, email)
+func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email domain.Email) (*domain.User, error) {
+	row, err := r.queries.GetUserByEmail(ctx, email.String())
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -93,20 +95,25 @@ func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (
 
 func (r *PostgresUserRepository) Update(ctx context.Context, user *domain.User) error {
 	return r.queries.UpdateUser(ctx, db.UpdateUserParams{
-		Email: user.Email,
-		Name:  sql.NullString{String: user.Name, Valid: user.Name != ""},
-		Role:  string(user.Role),
-		ID:    user.ID,
+		Email:         user.Email.String(),
+		Name:          sql.NullString{String: user.Name, Valid: user.Name != ""},
+		Role:          string(user.Role),
+		PhoneNumber:   sql.NullString{String: user.PhoneNumber.Number, Valid: user.PhoneNumber.Number != ""},
+		PhoneVerified: sql.NullBool{Bool: user.PhoneNumber.Verified, Valid: true},
+		ID:            user.ID,
 	})
 }
 
 func toDomainUser(u db.User) *domain.User {
+	email, _ := domain.NewEmail(u.Email)
 	return &domain.User{
 		ID:           u.ID,
-		Email:        u.Email,
+		Email:        email,
+		PhoneNumber:  domain.PhoneNumber{Number: u.PhoneNumber.String, Verified: u.PhoneVerified.Bool},
 		PasswordHash: u.PasswordHash,
 		Name:         u.Name.String,
 		Role:         domain.Role(u.Role),
 		CreatedAt:    u.CreatedAt.Time,
 	}
 }
+

@@ -6,6 +6,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -15,8 +16,11 @@ type Querier interface {
 	CompleteTrip(ctx context.Context, arg CompleteTripParams) error
 	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error
 	CreateTrip(ctx context.Context, arg CreateTripParams) error
+	GetStuckTrips(ctx context.Context, createdAt sql.NullTime) ([]Trip, error)
 	GetTrip(ctx context.Context, id uuid.UUID) (Trip, error)
 	GetUnpublishedEvents(ctx context.Context, dollar_1 int32) ([]OutboxEvent, error)
+	IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error)
+	MarkEventProcessed(ctx context.Context, arg MarkEventProcessedParams) error
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) error
 	UpdateTripStatus(ctx context.Context, arg UpdateTripStatusParams) error
 }

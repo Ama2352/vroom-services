@@ -66,11 +66,29 @@ func (w *TripUpdateWorker) consume(ctx context.Context) {
 
 	for _, stream := range entries {
 		for _, message := range stream.Messages {
-			w.handleMessage(ctx, message)
+			// Idempotency check
+			msgID, err := uuid.Parse(message.Values["id"].(string))
+			if err == nil {
+				processed, _ := w.repo.IsEventProcessed(ctx, msgID)
+				if processed {
+					log.Printf("[IDEMPOTENCY] Event %s already processed, skipping", msgID)
+					w.redisClient.XAck(ctx, w.streamName, w.groupName, message.ID)
+					continue
+				}
+				
+				w.handleMessage(ctx, message)
+				
+				// Mark as processed
+				_ = w.repo.MarkEventProcessed(ctx, msgID, message.Values["type"].(string))
+			} else {
+				w.handleMessage(ctx, message)
+			}
+			
 			w.redisClient.XAck(ctx, w.streamName, w.groupName, message.ID)
 		}
 	}
 }
+
 
 func (w *TripUpdateWorker) handleMessage(ctx context.Context, msg redis.XMessage) {
 	eventType := msg.Values["type"].(string)
@@ -111,5 +129,26 @@ func (w *TripUpdateWorker) handleMessage(ctx context.Context, msg redis.XMessage
 		} else {
 			log.Printf("[STEP 3.1] Trip %s status updated to ACCEPTED in Database and Outbox.", data.ID)
 		}
+	} else if eventType == "Trip.MatchFailed" {
+		var data struct {
+			ID     uuid.UUID `json:"id"`
+			Reason string    `json:"reason"`
+		}
+
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			log.Printf("Error unmarshaling MatchFailed payload: %v", err)
+			return
+		}
+
+		log.Printf("[SAGA] Ride service received 'Trip.MatchFailed' for Trip: %s. Reason: %s. Cancelling trip...", data.ID, data.Reason)
+
+		// Update trip status to CANCELLED
+		err := w.repo.UpdateStatus(ctx, data.ID, "CANCELLED")
+		if err != nil {
+			log.Printf("[RIDE ERROR] Error cancelling trip in DB: %v", err)
+		} else {
+			log.Printf("[SAGA] Trip %s status updated to CANCELLED in Database.", data.ID)
+		}
 	}
 }
+

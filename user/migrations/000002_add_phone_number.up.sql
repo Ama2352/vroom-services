@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN phone_number VARCHAR(20);
+ALTER TABLE users ADD COLUMN phone_verified BOOLEAN DEFAULT FALSE;

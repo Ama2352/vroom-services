@@ -37,11 +37,14 @@ func (r *PostgresTripRepository) CreateWithOutbox(ctx context.Context, trip *dom
 		ID:             trip.ID,
 		PassengerID:    trip.PassengerID,
 		Status:         string(trip.Status),
-		SourceLat:      trip.SourceLat,
-		SourceLng:      trip.SourceLng,
-		DestLat:        trip.DestLat,
-		DestLng:        trip.DestLng,
-		EstimatedPrice: trip.EstimatedPrice,
+		SourceLat:      trip.Source.Point.Lat,
+		SourceLng:      trip.Source.Point.Lng,
+		DestLat:        trip.Destination.Point.Lat,
+		DestLng:        trip.Destination.Point.Lng,
+		EstimatedPrice: trip.EstimatedPrice.Amount,
+		Currency:       sql.NullString{String: trip.EstimatedPrice.Currency, Valid: true},
+		SourceAddress:  sql.NullString{String: trip.Source.Address, Valid: trip.Source.Address != ""},
+		DestAddress:    sql.NullString{String: trip.Destination.Address, Valid: trip.Destination.Address != ""},
 		CreatedAt:      sql.NullTime{Time: trip.CreatedAt, Valid: true},
 	})
 	if err != nil {
@@ -63,9 +66,8 @@ func (r *PostgresTripRepository) CreateWithOutbox(ctx context.Context, trip *dom
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
 	})
-	// Fixing CreatedAt for outbox event
-	if _, ok := event.Payload.(*domain.Trip); ok {
-		// use current time if payload is trip
+	if err != nil {
+		return err
 	}
 
 	return tx.Commit()
@@ -97,6 +99,7 @@ func (r *PostgresTripRepository) AcceptTrip(ctx context.Context, tripID uuid.UUI
 		Status:   string(domain.StatusAccepted),
 	})
 }
+
 func (r *PostgresTripRepository) AcceptWithOutbox(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID, event *OutboxEvent) error {
 	tx, err := r.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -130,8 +133,10 @@ func (r *PostgresTripRepository) AcceptWithOutbox(ctx context.Context, tripID uu
 		Payload:       payload,
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
 	})
 	if err != nil {
+
 		return err
 	}
 
@@ -179,7 +184,9 @@ func (r *PostgresTripRepository) CompleteWithOutbox(ctx context.Context, tripID 
 		Payload:       payload,
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
 	})
+
 	if err != nil {
 		return err
 	}
@@ -201,10 +208,12 @@ func (r *PostgresTripRepository) GetUnpublishedEvents(ctx context.Context, limit
 			AggregateID:   row.AggregateID,
 			EventType:     row.EventType,
 			Payload:       row.Payload,
+			CorrelationID: row.CorrelationID.String,
 		}
 	}
 	return events, nil
 }
+
 
 func (r *PostgresTripRepository) UpdateEventStatus(ctx context.Context, id uuid.UUID, status string) error {
 	return r.queries.UpdateEventStatus(ctx, db.UpdateEventStatusParams{
@@ -213,24 +222,99 @@ func (r *PostgresTripRepository) UpdateEventStatus(ctx context.Context, id uuid.
 	})
 }
 
+func (r *PostgresTripRepository) GetStuckTrips(ctx context.Context, timeout time.Time) ([]*domain.Trip, error) {
+	rows, err := r.queries.GetStuckTrips(ctx, sql.NullTime{Time: timeout, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+
+	trips := make([]*domain.Trip, len(rows))
+	for i, row := range rows {
+		trips[i] = toDomainTrip(row)
+	}
+	return trips, nil
+}
+
+
+func (r *PostgresTripRepository) CancelWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error {
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := r.queries.WithTx(tx)
+
+	// 1. Update Trip Status
+	err = qtx.UpdateTripStatus(ctx, db.UpdateTripStatusParams{
+		ID:     tripID,
+		Status: string(domain.StatusCancelled),
+	})
+	if err != nil {
+		return err
+	}
+
+
+	// 2. Create Outbox Event
+	payload, _ := json.Marshal(event.Payload)
+	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		ID:            event.ID,
+		AggregateType: event.AggregateType,
+		AggregateID:   event.AggregateID,
+		EventType:     event.EventType,
+		Payload:       payload,
+		Status:        sql.NullString{String: "PENDING", Valid: true},
+		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+	})
+	if err != nil {
+
+		return err
+	}
+
+	return tx.Commit()
+}
+func (r *PostgresTripRepository) IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error) {
+	return r.queries.IsEventProcessed(ctx, id)
+}
+
+func (r *PostgresTripRepository) MarkEventProcessed(ctx context.Context, id uuid.UUID, eventType string) error {
+	return r.queries.MarkEventProcessed(ctx, db.MarkEventProcessedParams{
+		ID:        id,
+		EventType: eventType,
+	})
+}
+
 func toDomainTrip(t db.Trip) *domain.Trip {
+
 	trip := &domain.Trip{
-		ID:             t.ID,
-		PassengerID:    t.PassengerID,
-		Status:         domain.TripStatus(t.Status),
-		SourceLat:      t.SourceLat,
-		SourceLng:      t.SourceLng,
-		DestLat:        t.DestLat,
-		DestLng:        t.DestLng,
-		EstimatedPrice: t.EstimatedPrice,
-		CreatedAt:      t.CreatedAt.Time,
+
+		ID:          t.ID,
+		PassengerID: t.PassengerID,
+		Status:      domain.TripStatus(t.Status),
+		Source: domain.Location{
+			Point:   domain.GeoPoint{Lat: t.SourceLat, Lng: t.SourceLng},
+			Address: t.SourceAddress.String,
+		},
+		Destination: domain.Location{
+			Point:   domain.GeoPoint{Lat: t.DestLat, Lng: t.DestLng},
+			Address: t.DestAddress.String,
+		},
+		EstimatedPrice: domain.Price{
+			Amount:   t.EstimatedPrice,
+			Currency: t.Currency.String,
+		},
+		CreatedAt: t.CreatedAt.Time,
 	}
 	if t.DriverID.Valid {
 		uid := t.DriverID.UUID
 		trip.DriverID = &uid
 	}
 	if t.FinalPrice.Valid {
-		trip.FinalPrice = &t.FinalPrice.Float64
+		trip.FinalPrice = &domain.Price{
+			Amount:   t.FinalPrice.Float64,
+			Currency: t.Currency.String,
+		}
 	}
 	if t.AcceptedAt.Valid {
 		trip.AcceptedAt = &t.AcceptedAt.Time
@@ -240,3 +324,4 @@ func toDomainTrip(t db.Trip) *domain.Trip {
 	}
 	return trip
 }
+

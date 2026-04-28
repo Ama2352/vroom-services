@@ -4,9 +4,11 @@ import (
 	"context"
 	"log"
 	"time"
+	"vroom-mvp/dispatch/internal/domain"
 
 	"github.com/redis/go-redis/v9"
 )
+
 
 type DispatchService struct {
 	redisClient *redis.Client
@@ -20,7 +22,7 @@ func NewDispatchService(redisClient *redis.Client) *DispatchService {
 
 func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, lng float64) (string, error) {
 	// Search for nearest drivers within 5km (up to 5 candidates)
-	drivers, err := s.redisClient.GeoRadius(ctx, "drivers_location", lng, lat, &redis.GeoRadiusQuery{
+	results, err := s.redisClient.GeoRadius(ctx, "drivers_location", lng, lat, &redis.GeoRadiusQuery{
 		Radius:      5,
 		Unit:        "km",
 		WithDist:    true,
@@ -32,28 +34,38 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 		return "", err
 	}
 
-	for _, driver := range drivers {
-		driverID := driver.Name
+	var candidates []domain.AvailableDriver
+	for _, r := range results {
+		driverID := r.Name
 		
 		// Check if driver is still "fresh" (sent heartbeat recently)
 		lastSeen, err := s.redisClient.Exists(ctx, "driver_last_seen:"+driverID).Result()
-		if err != nil {
+		if err != nil || lastSeen == 0 {
+			if lastSeen == 0 {
+				log.Printf("[CLEANUP] Driver %s is stale, removing from geo index", driverID)
+				s.redisClient.ZRem(ctx, "drivers_location", driverID)
+			}
 			continue
 		}
 
-		if lastSeen == 0 {
-			// Driver is stale, remove from Geo index
-			log.Printf("[CLEANUP] Driver %s is stale, removing from geo index", driverID)
-			s.redisClient.ZRem(ctx, "drivers_location", driverID)
-			continue
-		}
-
-		log.Printf("Matched Trip %s with Fresh Driver %s (Distance: %f km)", tripID, driverID, driver.Dist)
-		return driverID, nil
+		candidates = append(candidates, domain.AvailableDriver{
+			ID:       driverID,
+			Lat:      r.Latitude,
+			Lng:      r.Longitude,
+			Distance: r.Dist,
+		})
 	}
 
-	return "", nil // No fresh drivers found
+	pool := domain.NewDriverPool(candidates)
+	bestMatch, err := pool.WaterfallMatch()
+	if err != nil {
+		return "", nil // No drivers found
+	}
+
+	log.Printf("Matched Trip %s with Fresh Driver %s (Distance: %f km)", tripID, bestMatch.ID, bestMatch.Distance)
+	return bestMatch.ID, nil
 }
+
 
 func (s *DispatchService) UpdateDriverLocation(ctx context.Context, driverID string, lat, lng float64) error {
 	// 1. Update Geo Location

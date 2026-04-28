@@ -50,18 +50,20 @@ func (w *OutboxWorker) processEvents(ctx context.Context) {
 	for _, event := range events {
 		err := w.publishToRedis(ctx, event)
 		if err != nil {
-			log.Printf("Error publishing event %s to Redis: %v", event.ID, err)
+			log.Printf("[OUTBOX ERROR] Failed to publish event %s (%s): %v. Marking as FAILED.", event.ID, event.EventType, err)
+			_ = w.repo.UpdateEventStatus(ctx, event.ID, "FAILED")
 			continue
 		}
 
 		err = w.repo.UpdateEventStatus(ctx, event.ID, "PUBLISHED")
 		if err != nil {
-			log.Printf("Error updating event status %s: %v", event.ID, err)
+			log.Printf("[OUTBOX ERROR] Failed to update event status %s to PUBLISHED: %v", event.ID, err)
 		} else {
-			log.Printf("Successfully published event: %s (%s)", event.EventType, event.AggregateID)
+			log.Printf("[OUTBOX] Successfully published: %s for %s %s", event.EventType, event.AggregateType, event.AggregateID)
 		}
 	}
 }
+
 
 func (w *OutboxWorker) publishToRedis(ctx context.Context, event *repository.OutboxEvent) error {
 	payloadBytes, err := json.Marshal(event.Payload)
@@ -76,10 +78,12 @@ func (w *OutboxWorker) publishToRedis(ctx context.Context, event *repository.Out
 			"id":           event.ID.String(),
 			"type":         event.EventType,
 			"aggregate":    event.AggregateType,
-			"aggregate_id": event.AggregateID.String(),
-			"payload":      string(payloadBytes),
+			"aggregate_id":  event.AggregateID.String(),
+			"payload":       string(payloadBytes),
+			"correlation_id": event.CorrelationID,
 		},
 	}).Err()
+
 
 	return err
 }

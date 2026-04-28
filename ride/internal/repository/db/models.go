@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+type InboxEvent struct {
+	ID          uuid.UUID    `json:"id"`
+	EventType   string       `json:"event_type"`
+	ProcessedAt sql.NullTime `json:"processed_at"`
+}
+
 type OutboxEvent struct {
 	ID            uuid.UUID       `json:"id"`
 	AggregateType string          `json:"aggregate_type"`
@@ -19,6 +25,7 @@ type OutboxEvent struct {
 	Payload       json.RawMessage `json:"payload"`
 	Status        sql.NullString  `json:"status"`
 	CreatedAt     sql.NullTime    `json:"created_at"`
+	CorrelationID sql.NullString  `json:"correlation_id"`
 }
 
 type Trip struct {
@@ -35,4 +42,7 @@ type Trip struct {
 	CreatedAt      sql.NullTime    `json:"created_at"`
 	AcceptedAt     sql.NullTime    `json:"accepted_at"`
 	CompletedAt    sql.NullTime    `json:"completed_at"`
+	Currency       sql.NullString  `json:"currency"`
+	SourceAddress  sql.NullString  `json:"source_address"`
+	DestAddress    sql.NullString  `json:"dest_address"`
 }
