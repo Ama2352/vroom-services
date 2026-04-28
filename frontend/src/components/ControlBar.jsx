@@ -3,8 +3,7 @@
  */
 import { useState, useRef, useCallback } from 'react';
 import {
-  Users, Navigation2, Truck, CheckSquare, RotateCcw,
-  Play, Pause, Gauge, StepForward, Info, PlayCircle, XCircle
+  PlusCircle, RotateCcw, Play, Pause, Gauge
 } from 'lucide-react';
 import { useDemo, TRIP_STATUS } from '../store/demoStore';
 import './ControlBar.css';
@@ -86,59 +85,8 @@ export default function ControlBar() {
           disabled={!canSeed || !!loading}
           onClick={() => run('seed', () => actions.seedDrivers())}
         >
-          {loading === 'seed' ? <Spinner /> : <Users size={14} />}
+          {loading === 'seed' ? <Spinner /> : <PlusCircle size={14} />}
           Seed Drivers
-        </button>
-
-        <button
-          id="btn-request"
-          className="btn-primary"
-          disabled={!canRequest || !!loading || isSearching}
-          onClick={() => run('request', () => actions.requestRide(state.pickup, state.dropoff))}
-        >
-          {loading === 'request' ? <Spinner /> : <Navigation2 size={14} />}
-          Request Ride
-        </button>
-
-        <button
-          id="btn-accept"
-          className="btn-ghost"
-          disabled={!canAccept || !!loading}
-          onClick={() => run('accept', () => actions.acceptTrip(tripId))}
-        >
-          {loading === 'accept' ? <Spinner /> : <CheckSquare size={14} />}
-          Accept
-        </button>
-
-        <button
-          id="btn-start"
-          className="btn-ghost"
-          disabled={!canStart || !!loading}
-          onClick={() => run('start', () => actions.startTrip(tripId))}
-        >
-          {loading === 'start' ? <Spinner /> : <PlayCircle size={14} />}
-          Start
-        </button>
-
-
-        <button
-          id="btn-complete"
-          className="btn-success"
-          disabled={!canComplete || !!loading}
-          onClick={() => run('complete', () => actions.completeTrip(tripId))}
-        >
-          {loading === 'complete' ? <Spinner /> : <CheckSquare size={14} />}
-          Complete
-        </button>
-
-        <button
-          id="btn-cancel"
-          className="btn-danger-outline"
-          disabled={!canCancel || !!loading}
-          onClick={() => run('cancel', () => actions.cancelTrip(tripId))}
-        >
-          {loading === 'cancel' ? <Spinner /> : <XCircle size={14} />}
-          Cancel
         </button>
 
         <button

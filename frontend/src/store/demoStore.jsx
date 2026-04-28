@@ -104,7 +104,7 @@ function reducer(state, action) {
       return { ...state, events: [action.payload, ...state.events].slice(0, 50) };
 
     case 'PUSH_NOTIFICATION':
-      return { ...state, notifications: [...state.notifications, action.payload].slice(-30) };
+      return { ...state, notifications: [action.payload, ...state.notifications].slice(0, 30) };
 
     case 'DISMISS_NOTIFICATION':
       return { ...state, notifications: state.notifications.filter(n => n.id !== action.payload) };
@@ -250,8 +250,9 @@ export function DemoStoreProvider({ children }) {
 
       case 'Trip.Cancelled':
         dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.CANCELLED });
-        pushEvent('Trip.Cancelled', 'ride', { tripId: data.id, reason: data.reason });
+        pushEvent('Trip.Cancelled', 'ride', { reason: data.reason });
         notify('passenger', 'Trip has been cancelled.', 'warning');
+        notify('driver', 'Trip has been cancelled by the passenger.', 'warning');
         break;
 
       case 'Trip.Completed':
@@ -301,7 +302,7 @@ export function DemoStoreProvider({ children }) {
   const notify = useCallback((side, message, variant = 'info') => {
     const id = `notif-${Date.now()}-${Math.random()}`;
     dispatch({ type: 'PUSH_NOTIFICATION', payload: { id, side, message, variant, ts: new Date() } });
-    setTimeout(() => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }), 10000); // Increased to 10s
+    setTimeout(() => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }), 12000); // 12s
   }, []);
 
   /* ── Actions ── */
@@ -328,7 +329,9 @@ export function DemoStoreProvider({ children }) {
       }
     },
 
-    requestRide: async (pickup, dropoff) => {
+    requestRide: async (p, d) => {
+      const pickup = p || state.pickup;
+      const dropoff = d || state.dropoff;
       dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.SEARCHING });
       notify('passenger', 'Looking for a driver near you…', 'info');
 

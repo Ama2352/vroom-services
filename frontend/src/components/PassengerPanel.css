@@ -179,7 +179,7 @@
   border-radius: 8px;
   background: var(--surface-3);
   border-left: 3px solid var(--border);
-  animation: fade-in-up 0.3s ease;
+  animation: fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .notif-item.notif-success { border-left-color: var(--green); }
 .notif-item.notif-info    { border-left-color: var(--blue); }

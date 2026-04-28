@@ -6,8 +6,8 @@ import { useDemo, TRIP_STATUS } from '../store/demoStore';
 import './DriverPanel.css';
 
 export default function DriverPanel() {
-  const { state } = useDemo();
-  const { drivers, assignedDriver, tripStatus, notifications } = state;
+  const { state, actions } = useDemo();
+  const { drivers, assignedDriver, tripStatus, notifications, tripId } = state;
 
   const driverNotifs = notifications
     .filter(n => n.side === 'driver')
@@ -83,6 +83,48 @@ export default function DriverPanel() {
                 <span className="ti-label">To</span>
                 <span className="ti-value">{state.dropoff.label}</span>
               </div>
+            </div>
+
+            {/* Driver Actions */}
+            <div className="driver-actions mt-3">
+              {tripStatus === TRIP_STATUS.ASSIGNED && (
+                <button 
+                  className="btn-success w-full"
+                  onClick={() => actions.acceptTrip(tripId)}
+                >
+                  Accept Trip
+                </button>
+              )}
+
+              {tripStatus === TRIP_STATUS.ACCEPTED && (
+                <div className="flex gap-2">
+                  <button 
+                    className="btn-primary flex-1"
+                    disabled={state.driverMoving}
+                    onClick={() => actions.startTrip(state.tripId)}
+                  >
+                    Start Trip
+                  </button>
+                  <button 
+                    className="btn-danger-outline"
+                    onClick={() => actions.cancelTrip(tripId, 'Driver cancelled')}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {tripStatus === TRIP_STATUS.ON_TRIP && (
+                <div className="flex gap-2">
+                  <button 
+                    className="btn-success flex-1"
+                    disabled={state.driverMoving}
+                    onClick={() => actions.completeTrip(tripId)}
+                  >
+                    Complete Trip
+                  </button>
+                </div>
+              )}
             </div>
             {(tripStatus === TRIP_STATUS.COMPLETED || tripStatus === TRIP_STATUS.CANCELLED) && (
               <button className="driver-reset-btn" onClick={() => window.location.reload()}>

@@ -9,7 +9,7 @@ import './PassengerPanel.css';
 
 export default function PassengerPanel() {
   const { state, actions } = useDemo();
-  const { tripStatus, pickup, dropoff, notifications } = state;
+  const { tripStatus, pickup, dropoff, notifications, tripId } = state;
   const isIdle = tripStatus === TRIP_STATUS.IDLE;
 
   const passengerNotifs = notifications
@@ -101,6 +101,45 @@ export default function PassengerPanel() {
             <span className="fare-label"><CreditCard size={13} /> Fare</span>
             <span className="fare-value fare-price">45,000 VND</span>
           </div>
+        </div>
+
+        {/* Passenger Actions */}
+        <div className="passenger-actions mt-6">
+          {isIdle && (
+            <button 
+              className="btn-primary w-full" 
+              disabled={state.drivers.length === 0}
+              onClick={() => actions.requestRide(pickup, dropoff)}
+            >
+              Request Ride
+            </button>
+          )}
+
+          {tripStatus === TRIP_STATUS.SEARCHING && (
+            <div className="flex flex-col gap-2">
+              <button className="btn-primary w-full opacity-75 cursor-not-allowed" disabled>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="dot-bounce" />
+                  Searching for Drivers...
+                </div>
+              </button>
+              <button 
+                className="btn-ghost w-full text-sm"
+                onClick={() => actions.cancelTrip(tripId, 'Cancelled while searching')}
+              >
+                Cancel Request
+              </button>
+            </div>
+          )}
+
+          {(tripStatus === TRIP_STATUS.ASSIGNED || tripStatus === TRIP_STATUS.ACCEPTED || tripStatus === TRIP_STATUS.COMING) && (
+            <button 
+              className="btn-danger-outline w-full"
+              onClick={() => actions.cancelTrip(tripId, 'Cancelled by passenger')}
+            >
+              Cancel Ride
+            </button>
+          )}
         </div>
       </div>
 

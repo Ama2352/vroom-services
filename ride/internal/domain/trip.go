@@ -112,7 +112,7 @@ func (t *Trip) Complete(finalPrice float64) error {
 }
 
 func (t *Trip) Cancel(reason string) error {
-	if t.Status == StatusCompleted || t.Status == StatusCancelled {
+	if t.Status == StatusCompleted || t.Status == StatusCancelled || t.Status == StatusStarted {
 		return ErrInvalidTripStatus
 	}
 	
