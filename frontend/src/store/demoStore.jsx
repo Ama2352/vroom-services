@@ -63,9 +63,21 @@ const initialState = {
   apiLog: null,          // last API call info
   driverMoving: false,
   autoPlay: false,
-  speed: 1,              // playback speed multiplier
+  speed: 1,
   stepMode: false,
+  estimatedFare: 87000,
+  estimatedTime: 19,
 };
+
+function calcMetrics(pickup, dropoff) {
+  if (!pickup || !dropoff) return { fare: 0, time: 0 };
+  const dLat = pickup.lat - dropoff.lat;
+  const dLng = pickup.lng - dropoff.lng;
+  const dist = Math.sqrt(dLat * dLat + dLng * dLng) * 111; // km approx
+  const fare = Math.round((dist * 12000 + 15000) / 1000) * 1000; // Round to k
+  const time = Math.round(dist * 2.5 + 4);
+  return { fare, time };
+}
 
 /* ─────────────────────────────────────────────
    Reducer
@@ -94,11 +106,15 @@ function reducer(state, action) {
       return { ...state, drivers: updated, assignedDriver: assigned };
     }
 
-    case 'SET_PICKUP':
-      return { ...state, pickup: action.payload };
+    case 'SET_PICKUP': {
+      const { fare, time } = calcMetrics(action.payload, state.dropoff);
+      return { ...state, pickup: action.payload, estimatedFare: fare, estimatedTime: time };
+    }
 
-    case 'SET_DROPOFF':
-      return { ...state, dropoff: action.payload };
+    case 'SET_DROPOFF': {
+      const { fare, time } = calcMetrics(state.pickup, action.payload);
+      return { ...state, dropoff: action.payload, estimatedFare: fare, estimatedTime: time };
+    }
 
     case 'PUSH_EVENT':
       return { ...state, events: [action.payload, ...state.events].slice(0, 50) };
@@ -124,12 +140,16 @@ function reducer(state, action) {
     case 'SET_STEP_MODE':
       return { ...state, stepMode: action.payload };
 
-    case 'RESET':
+    case 'RESET': {
+      const { fare, time } = calcMetrics(state.pickup, state.dropoff);
       return {
         ...initialState,
         pickup:  state.pickup,
         dropoff: state.dropoff,
+        estimatedFare: fare,
+        estimatedTime: time,
       };
+    }
 
     default:
       return state;

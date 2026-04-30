@@ -9,7 +9,7 @@ import './PassengerPanel.css';
 
 export default function PassengerPanel() {
   const { state, actions } = useDemo();
-  const { tripStatus, pickup, dropoff, notifications, tripId } = state;
+  const { tripStatus, pickup, dropoff, notifications, tripId, estimatedFare, estimatedTime } = state;
   const isIdle = tripStatus === TRIP_STATUS.IDLE;
 
   const passengerNotifs = notifications
@@ -95,11 +95,11 @@ export default function PassengerPanel() {
         <div className="fare-card">
           <div className="fare-row">
             <span className="fare-label"><Clock size={13} /> Est. Time</span>
-            <span className="fare-value">~18 min</span>
+            <span className="fare-value">~{estimatedTime} min</span>
           </div>
           <div className="fare-row">
             <span className="fare-label"><CreditCard size={13} /> Fare</span>
-            <span className="fare-value fare-price">45,000 VND</span>
+            <span className="fare-value fare-price">{estimatedFare.toLocaleString('vi-VN')} VND</span>
           </div>
         </div>
 
