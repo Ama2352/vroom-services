@@ -32,11 +32,11 @@ variables:
   extends: .service_template
   stage: publish
   script:
-    - cd $SERVICE_PATH
+    - cd "$SERVICE_PATH"
     - export IMAGE_NAME="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
-    - docker build -t $IMAGE_NAME:latest -t $IMAGE_NAME:$CI_COMMIT_SHORT_SHA .
-    - docker push $IMAGE_NAME:latest
-    - docker push $IMAGE_NAME:$CI_COMMIT_SHORT_SHA
+    - docker build -t "$IMAGE_NAME:latest" -t "$IMAGE_NAME:$CI_COMMIT_SHORT_SHA" .
+    - docker push "$IMAGE_NAME:latest"
+    - docker push "$IMAGE_NAME:$CI_COMMIT_SHORT_SHA"
 
 publish-user:
   extends: .publish_template
@@ -72,11 +72,13 @@ deploy-gitops:
     - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
     - mv kustomize /usr/local/bin/
   script:
-    - git config --global user.email "ci@vroom-platform.com"
-    - git config --global user.name "Vroom CI Bot"
-    - git clone "https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git" gitops-repo
-    - cd gitops-repo/apps
     - |
+      set -e
+      git config --global user.email "ci@vroom-platform.com"
+      git config --global user.name "Vroom CI Bot"
+      git clone "https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git" gitops-repo
+      cd gitops-repo/apps
+      
       for service in user ride notification dispatch; do
         if [ -d "$service/base" ]; then
           echo "Updating image for $service to $CI_COMMIT_SHORT_SHA"
@@ -85,8 +87,14 @@ deploy-gitops:
           cd ../..
         fi
       done
-    - git add .
-    - git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || echo "No changes to commit"
-    - git push origin main
+      
+      git add .
+      # Avoid failure if nothing to commit
+      if git diff --staged --quiet; then
+        echo "No changes to commit"
+      else
+        git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]"
+        git push origin main
+      fi
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
