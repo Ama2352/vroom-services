@@ -22,9 +22,7 @@ variables:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
-      changes:
-        - $SERVICE_PATH/**/*
-        - $SERVICE_PATH/Dockerfile
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 # --- PUBLISH JOBS ---
 
@@ -41,25 +39,25 @@ variables:
 publish-user:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "user"
+    SERVICE_NAME: "user-service"
     SERVICE_PATH: "user"
 
 publish-ride:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "ride"
+    SERVICE_NAME: "ride-service"
     SERVICE_PATH: "ride"
 
 publish-notification:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "notification"
+    SERVICE_NAME: "notification-service"
     SERVICE_PATH: "notification"
 
 publish-dispatch:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "dispatch"
+    SERVICE_NAME: "dispatch-service"
     SERVICE_PATH: "dispatch"
 
 # --- GITOPS DEPLOY JOB ---
@@ -80,9 +78,11 @@ deploy-gitops:
       cd gitops-repo/apps
       
       for service in user ride notification dispatch; do
-        cd "$service/base"
-        kustomize edit set image "$DOCKER_USER/$DOCKER_REGISTRY-${service}=$DOCKER_USER/$DOCKER_REGISTRY-${service}:$CI_COMMIT_SHORT_SHA"
-        cd ../..
+        echo "Updating image for $service to $CI_COMMIT_SHORT_SHA"
+        cd "$service/overlays/dev"
+        # Bridge the k3s manifest name (vroom-mvp/user-service) to the DockerHub build name (user-service)
+        kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
+        cd ../../..
       done
       
       git add .
