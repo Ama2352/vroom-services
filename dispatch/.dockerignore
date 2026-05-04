@@ -1,0 +1,11 @@
+# .dockerignore
+.git
+.gitignore
+.air.toml
+Dockerfile*
+Makefile
+tmp/
+bin/
+*.md
+test/
+vendor/
