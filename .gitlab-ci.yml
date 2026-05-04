@@ -19,14 +19,14 @@ variables:
   services:
     - docker:24.0.5-dind
   before_script:
-    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+    - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
       changes:
         - $SERVICE_PATH/**/*
         - $SERVICE_PATH/Dockerfile
 
-# --- BUILD & PUBLISH JOBS ---
+# --- PUBLISH JOBS ---
 
 .publish_template:
   extends: .service_template
@@ -68,20 +68,20 @@ deploy-gitops:
   stage: deploy
   image: alpine:latest
   before_script:
-    - apk add --no-cache git curl
+    - apk add --no-cache git curl bash
     - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
     - mv kustomize /usr/local/bin/
   script:
     - git config --global user.email "ci@vroom-platform.com"
     - git config --global user.name "Vroom CI Bot"
-    - git clone https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git gitops-repo
+    - git clone "https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git" gitops-repo
     - cd gitops-repo/apps
-    # Update each service image tag
     - |
       for service in user ride notification dispatch; do
         if [ -d "$service/base" ]; then
-          cd $service/base
-          kustomize edit set image $DOCKER_USER/$DOCKER_REGISTRY-${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA
+          echo "Updating image for $service to $CI_COMMIT_SHORT_SHA"
+          cd "$service/base"
+          kustomize edit set image "$DOCKER_USER/$DOCKER_REGISTRY-${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
           cd ../..
         fi
       done
