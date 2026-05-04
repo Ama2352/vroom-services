@@ -77,7 +77,7 @@ deploy-gitops:
       git config --global user.email "ci@vroom-platform.com"
       git config --global user.name "Vroom CI Bot"
       git clone "https://oauth2:${GITOPS_TOKEN}@gitlab.com/${GITOPS_REPO}.git" gitops-repo
-      cd gitops-repo/k3s-version/vroom-gitops/apps
+      cd gitops-repo/apps
       
       for service in user ride notification dispatch; do
         cd "$service/base"
