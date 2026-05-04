@@ -8,11 +8,11 @@ stages:
 
 variables:
   DOCKER_REGISTRY: "vroom-mvp"
-  GITOPS_REPO: "Ama2352/vroom-gitops"
+  GITOPS_REPO: "vroom-app/gitops"
   # Set these in GitLab CI/CD Variables:
   # DOCKER_USER: <your-dockerhub-username>
   # DOCKER_PASSWORD: <your-dockerhub-token>
-  # GITOPS_TOKEN: <git-token-to-push-to-gitops-repo>
+  # GITOPS_TOKEN: <gitlab-access-token-to-push>
 
 .service_template:
   image: docker:24.0.5
@@ -41,25 +41,25 @@ variables:
 publish-user:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "user-service"
+    SERVICE_NAME: "user"
     SERVICE_PATH: "user"
 
 publish-ride:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "ride-service"
+    SERVICE_NAME: "ride"
     SERVICE_PATH: "ride"
 
 publish-notification:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "notification-service"
+    SERVICE_NAME: "notification"
     SERVICE_PATH: "notification"
 
 publish-dispatch:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "dispatch-service"
+    SERVICE_NAME: "dispatch"
     SERVICE_PATH: "dispatch"
 
 # --- GITOPS DEPLOY JOB ---
@@ -76,25 +76,17 @@ deploy-gitops:
       set -e
       git config --global user.email "ci@vroom-platform.com"
       git config --global user.name "Vroom CI Bot"
-      git clone "https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git" gitops-repo
-      cd gitops-repo/apps
+      git clone "https://oauth2:${GITOPS_TOKEN}@gitlab.com/${GITOPS_REPO}.git" gitops-repo
+      cd gitops-repo/k3s-version/vroom-gitops/apps
       
       for service in user ride notification dispatch; do
-        if [ -d "$service/base" ]; then
-          echo "Updating image for $service to $CI_COMMIT_SHORT_SHA"
-          cd "$service/base"
-          kustomize edit set image "$DOCKER_USER/$DOCKER_REGISTRY-${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
-          cd ../..
-        fi
+        cd "$service/base"
+        kustomize edit set image "$DOCKER_USER/$DOCKER_REGISTRY-${service}=$DOCKER_USER/$DOCKER_REGISTRY-${service}:$CI_COMMIT_SHORT_SHA"
+        cd ../..
       done
       
       git add .
-      # Avoid failure if nothing to commit
-      if git diff --staged --quiet; then
-        echo "No changes to commit"
-      else
-        git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]"
-        git push origin main
-      fi
+      git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
+      git push origin main
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
