@@ -5,14 +5,22 @@
 import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react';
 import axios from 'axios';
 
-/* ── Base URLs (docker-compose) ── */
+/* ── API Configuration (Dynamic for Local vs Cluster) ── */
+const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const host = window.location.host;
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
 export const API = {
-  user:         'http://localhost:8081',
-  ride:         'http://localhost:8082',
-  dispatch:     'http://localhost:8083',
-  notification: 'http://localhost:8084',
-  dispatchWS:   'ws://localhost:8083/v1/dispatch/ws/location',
-  notificationWS: 'ws://localhost:8084/v1/ws',
+  user:         isLocal ? 'http://localhost:8081' : '/user-service',
+  ride:         isLocal ? 'http://localhost:8082' : '/ride-service',
+  dispatch:     isLocal ? 'http://localhost:8083' : '/dispatch-service',
+  notification: isLocal ? 'http://localhost:8084' : '/notification-service',
+  dispatchWS:   isLocal 
+    ? 'ws://localhost:8083/v1/dispatch/ws/location' 
+    : `${wsProtocol}//${host}/dispatch-service/v1/dispatch/ws/location`,
+  notificationWS: isLocal 
+    ? 'ws://localhost:8084/v1/ws' 
+    : `${wsProtocol}//${host}/notification-service/v1/ws`,
 };
 
 /* ── Trip lifecycle states ── */
