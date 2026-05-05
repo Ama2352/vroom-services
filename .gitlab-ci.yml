@@ -60,6 +60,12 @@ publish-dispatch:
     SERVICE_NAME: "dispatch-service"
     SERVICE_PATH: "dispatch"
 
+publish-frontend:
+  extends: .publish_template
+  variables:
+    SERVICE_NAME: "frontend"
+    SERVICE_PATH: "frontend"
+
 # --- GITOPS DEPLOY JOB ---
 
 deploy-gitops:
@@ -77,11 +83,14 @@ deploy-gitops:
       git clone "https://oauth2:${GITOPS_TOKEN}@gitlab.com/${GITOPS_REPO}.git" gitops-repo
       cd gitops-repo/apps
       
-      for service in user ride notification dispatch; do
+      for service in user ride notification dispatch frontend; do
         echo "Updating image for $service to $CI_COMMIT_SHORT_SHA"
         cd "$service/overlays/dev"
-        # Bridge the k3s manifest name (vroom-mvp/user-service) to the DockerHub build name (user-service)
-        kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
+        if [ "$service" == "frontend" ]; then
+          kustomize edit set image "vroom-mvp/frontend=$DOCKER_USER/$DOCKER_REGISTRY-frontend:$CI_COMMIT_SHORT_SHA"
+        else
+          kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
+        fi
         cd ../../..
       done
       
