@@ -111,6 +111,28 @@ func (t *Trip) Complete(finalPrice float64) error {
 	return nil
 }
 
+func (t *Trip) RejectOffer(driverID uuid.UUID) error {
+	if t.Status != StatusRequested && t.Status != StatusAccepted {
+		return ErrInvalidTripStatus
+	}
+	
+	// Ensure the driver rejecting is the one assigned
+	if t.DriverID == nil || *t.DriverID != driverID {
+		return errors.New("driver not assigned to this trip")
+	}
+
+	t.DriverID = nil
+	t.Status = StatusRequested // Go back to requested so it can be re-matched
+	
+	t.RecordEvent(map[string]interface{}{
+		"type":    "Trip.OfferRejected",
+		"trip_id": t.ID,
+		"driver":  driverID,
+	})
+	
+	return nil
+}
+
 func (t *Trip) Cancel(reason string) error {
 	if t.Status == StatusCompleted || t.Status == StatusCancelled || t.Status == StatusStarted {
 		return ErrInvalidTripStatus

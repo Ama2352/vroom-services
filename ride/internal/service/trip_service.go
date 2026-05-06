@@ -158,6 +158,38 @@ func (s *TripService) StartTrip(ctx context.Context, tripID uuid.UUID) error {
 	return s.repo.StartWithOutbox(ctx, tripID, event)
 }
 
+func (s *TripService) RejectTripOffer(ctx context.Context, tripID uuid.UUID, driverID uuid.UUID) error {
+	trip, err := s.repo.GetByID(ctx, tripID)
+	if err != nil {
+		return err
+	}
+	if trip == nil {
+		return errors.New("trip not found")
+	}
+
+	if err := trip.RejectOffer(driverID); err != nil {
+		return err
+	}
+
+	event := &repository.OutboxEvent{
+		ID:            uuid.New(),
+		AggregateType: "TRIP",
+		AggregateID:   tripID,
+		EventType:     "Trip.OfferRejected",
+		Payload: map[string]interface{}{
+			"id":           tripID,
+			"driver_id":    driverID,
+			"passenger_id": trip.PassengerID,
+			"status":       "REQUESTED",
+			"source_lat":   trip.Source.Point.Lat,
+			"source_lng":   trip.Source.Point.Lng,
+			"updated_at":   time.Now(),
+		},
+	}
+
+	return s.repo.RejectOfferWithOutbox(ctx, tripID, event)
+}
+
 func (s *TripService) CancelTrip(ctx context.Context, tripID uuid.UUID, reason string) error {
 	trip, err := s.repo.GetByID(ctx, tripID)
 	if err != nil {

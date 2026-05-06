@@ -21,12 +21,12 @@ func NewDispatchService(redisClient *redis.Client) *DispatchService {
 }
 
 func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, lng float64) (string, error) {
-	// Search for nearest drivers within 5km (up to 5 candidates)
+	// Search for nearest drivers within 5km (up to 10 candidates to account for exclusions)
 	results, err := s.redisClient.GeoRadius(ctx, "drivers_location", lng, lat, &redis.GeoRadiusQuery{
 		Radius:      5,
 		Unit:        "km",
 		WithDist:    true,
-		Count:       5,
+		Count:       10,
 		Sort:        "ASC",
 	}).Result()
 
@@ -34,9 +34,21 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 		return "", err
 	}
 
+	// Fetch rejected drivers for this trip
+	rejectedDrivers, _ := s.redisClient.SMembers(ctx, "trip_rejections:"+tripID).Result()
+	rejectedMap := make(map[string]bool)
+	for _, id := range rejectedDrivers {
+		rejectedMap[id] = true
+	}
+
 	var candidates []domain.AvailableDriver
 	for _, r := range results {
 		driverID := r.Name
+
+		if rejectedMap[driverID] {
+			log.Printf("[DISPATCH] Driver %s rejected Trip %s previously, skipping", driverID, tripID)
+			continue
+		}
 		
 		// Check if driver is still "fresh" (sent heartbeat recently)
 		lastSeen, err := s.redisClient.Exists(ctx, "driver_last_seen:"+driverID).Result()
@@ -64,6 +76,17 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 
 	log.Printf("Matched Trip %s with Fresh Driver %s (Distance: %f km)", tripID, bestMatch.ID, bestMatch.Distance)
 	return bestMatch.ID, nil
+}
+
+func (s *DispatchService) RecordRejection(ctx context.Context, tripID, driverID string) error {
+	key := "trip_rejections:" + tripID
+	err := s.redisClient.SAdd(ctx, key, driverID).Err()
+	if err != nil {
+		return err
+	}
+	// Expire rejection list after 1 hour to keep Redis clean
+	s.redisClient.Expire(ctx, key, 1*time.Hour)
+	return nil
 }
 
 

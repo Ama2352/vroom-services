@@ -318,6 +318,51 @@ func (r *PostgresTripRepository) CancelWithOutbox(ctx context.Context, tripID uu
 
 	return tx.Commit()
 }
+
+func (r *PostgresTripRepository) RejectOfferWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error {
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := r.queries.WithTx(tx)
+
+	// 1. Update Trip: Clear Driver and reset Status
+	err = qtx.UpdateTripDriver(ctx, db.UpdateTripDriverParams{
+		ID:       tripID,
+		DriverID: uuid.NullUUID{Valid: false},
+	})
+	if err != nil {
+		return err
+	}
+
+	err = qtx.UpdateTripStatus(ctx, db.UpdateTripStatusParams{
+		ID:     tripID,
+		Status: string(domain.StatusRequested),
+	})
+	if err != nil {
+		return err
+	}
+
+	// 2. Create Outbox Event
+	payload, _ := json.Marshal(event.Payload)
+	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
+		ID:            event.ID,
+		AggregateType: event.AggregateType,
+		AggregateID:   event.AggregateID,
+		EventType:     event.EventType,
+		Payload:       payload,
+		Status:        sql.NullString{String: "PENDING", Valid: true},
+		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (r *PostgresTripRepository) IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error) {
 	return r.queries.IsEventProcessed(ctx, id)
 }

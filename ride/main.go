@@ -122,6 +122,7 @@ func main() {
 			trips.GET("/:id", rideHandler.GetTrip)
 			trips.POST("/:id/complete", rideHandler.CompleteTrip)
 			trips.POST("/:id/accept", rideHandler.AcceptTrip)
+			trips.POST("/:id/reject", rideHandler.RejectOffer)
 			trips.POST("/:id/start", rideHandler.StartTrip)
 			trips.POST("/:id/cancel", rideHandler.CancelTrip)
 			trips.GET("/health", rideHandler.Health)

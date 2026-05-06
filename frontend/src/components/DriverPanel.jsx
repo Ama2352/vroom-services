@@ -88,12 +88,20 @@ export default function DriverPanel() {
             {/* Driver Actions */}
             <div className="driver-actions mt-3">
               {tripStatus === TRIP_STATUS.ASSIGNED && (
-                <button 
-                  className="btn-success w-full"
-                  onClick={() => actions.acceptTrip(tripId)}
-                >
-                  Accept Trip
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    className="btn-success flex-1"
+                    onClick={() => actions.acceptTrip(tripId)}
+                  >
+                    Accept Trip
+                  </button>
+                  <button 
+                    className="btn-danger-outline"
+                    onClick={() => actions.rejectOffer(tripId, assignedDriver.id)}
+                  >
+                    Reject
+                  </button>
+                </div>
               )}
 
               {tripStatus === TRIP_STATUS.ACCEPTED && (

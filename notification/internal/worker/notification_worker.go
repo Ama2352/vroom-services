@@ -138,7 +138,8 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 	// We always broadcast core lifecycle events so the multi-view demo dashboard stays in sync
 	isCoreEvent := eventType == "Trip.Requested" || eventType == "Trip.Matched" || 
 		           eventType == "Trip.Accepted" || eventType == "Trip.Started" || 
-				   eventType == "Trip.Completed" || eventType == "Trip.MatchFailed"
+				   eventType == "Trip.Completed" || eventType == "Trip.MatchFailed" ||
+				   eventType == "Trip.OfferRejected"
 
 
 	if !targeted || isCoreEvent {

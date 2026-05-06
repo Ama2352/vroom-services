@@ -33,6 +33,7 @@ type TripRepository interface {
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string) error
 	GetStuckTrips(ctx context.Context, timeout time.Time) ([]*domain.Trip, error)
 	CancelWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error
+	RejectOfferWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error
 	IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error)
 	MarkEventProcessed(ctx context.Context, id uuid.UUID, eventType string) error
 }

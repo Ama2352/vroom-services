@@ -289,6 +289,14 @@ export function DemoStoreProvider({ children }) {
         notify('passenger', '🎉 Trip completed! Thanks for riding with Vroom.', 'success');
         break;
       
+      case 'Trip.OfferRejected':
+        dispatch({ type: 'ASSIGN_DRIVER', payload: null });
+        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.SEARCHING });
+        pushEvent('Trip.OfferRejected', 'dispatch', { tripId: data.id, driverId: data.driver_id });
+        notify('passenger', 'Looking for a new driver...', 'info');
+        notify('driver', 'Offer rejected. Waiting for next ride.', 'warning');
+        break;
+      
       default:
         // Generic event logging
         pushEvent(event_type, 'system', data);
@@ -460,6 +468,21 @@ export function DemoStoreProvider({ children }) {
       dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.CANCELLED });
       pushEvent('Trip.Cancelled', 'ride', { tripId, reason });
       notify('passenger', 'Trip cancelled.', 'warning');
+    },
+
+    rejectOffer: async (tripId, driverId) => {
+      if (!tripId || !driverId) return;
+      const payload = { driver_id: driverId };
+      try {
+        const res = await axios.post(`${API.ride}/v1/trips/${tripId}/reject`, payload);
+        logApi('POST', `/v1/trips/${tripId}/reject`, payload, res.status, res.data);
+      } catch (err) {
+        logApi('POST', `/v1/trips/${tripId}/reject`, payload, err.response?.status ?? 0, err.message);
+      }
+      dispatch({ type: 'ASSIGN_DRIVER', payload: null });
+      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.SEARCHING });
+      pushEvent('Trip.OfferRejected', 'ride', { tripId, driverId });
+      notify('driver', 'You rejected the offer.', 'warning');
     },
 
     moveToPickup: async (driver, pickup, speed = 1) => {

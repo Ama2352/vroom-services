@@ -143,6 +143,37 @@ func (h *TripHandler) StartTrip(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "IN_PROGRESS", "trip_id": id})
 }
 
+func (h *TripHandler) RejectOffer(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid trip ID format"})
+		return
+	}
+
+	var req struct {
+		DriverID string `json:"driver_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	driverID, err := uuid.Parse(req.DriverID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid driver_id format"})
+		return
+	}
+
+	err = h.tripService.RejectTripOffer(c.Request.Context(), id, driverID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "OFFER_REJECTED", "trip_id": id})
+}
+
 func (h *TripHandler) CancelTrip(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := uuid.Parse(idStr)

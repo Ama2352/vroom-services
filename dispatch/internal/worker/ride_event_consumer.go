@@ -114,18 +114,22 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 	log.Printf("[DEBUG] [%s] Dispatch Consumer: Received %s for %s (%s)", correlationID, eventType, aggregateType, aggregateID)
 
 
-	if eventType == "Trip.Requested" {
+	if eventType == "Trip.Requested" || eventType == "Trip.OfferRejected" {
 		var data map[string]interface{}
 		if err := json.Unmarshal([]byte(payload), &data); err != nil {
 			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal payload for trip %s: %v", aggregateID, err)
 			return
 		}
 		
-		tripID := ""
+		tripID := aggregateID
 		if id, ok := data["id"].(string); ok {
 			tripID = id
-		} else {
-			tripID = aggregateID
+		}
+
+		if eventType == "Trip.OfferRejected" {
+			driverID, _ := data["driver_id"].(string)
+			log.Printf("[REJECT] Driver %s rejected Trip %s. Recording rejection and re-matching...", driverID, tripID)
+			_ = c.dispatchService.RecordRejection(ctx, tripID, driverID)
 		}
 
 		lat, _ := data["source_lat"].(float64)
@@ -146,8 +150,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			// Publish Trip.MatchFailed event
 			failedPayload := map[string]interface{}{
 				"id":           tripID,
-				"passenger_id": data["passenger_id"],
-				"reason":       "NO_DRIVERS_AVAILABLE",
+				"reason":       "NO_DRIVERS_AVAILABLE_AFTER_REJECTIONS",
 				"updated_at":   time.Now().Format(time.RFC3339),
 			}
 			payloadJSON, _ := json.Marshal(failedPayload)
@@ -177,7 +180,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		matchPayload := map[string]interface{}{
 			"id":           tripID,
 			"driver_id":    driverID,
-			"passenger_id": data["passenger_id"], // Preserve passenger ID for easier notification targeting
+			"passenger_id": data["passenger_id"],
 			"status":       "ACCEPTED",
 			"updated_at":   time.Now().Format(time.RFC3339),
 		}
