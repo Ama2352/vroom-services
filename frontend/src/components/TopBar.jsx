@@ -2,7 +2,7 @@
  * TopBar.jsx – App header with brand, trip status badge and live clock.
  */
 import { useDemo, TRIP_STATUS } from '../store/demoStore';
-import { Zap } from 'lucide-react';
+import { Zap, Activity } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import './TopBar.css';
 
@@ -24,7 +24,7 @@ const STATUS_DOT = {
   [TRIP_STATUS.COMPLETED]:  '#22C55E',
 };
 
-export default function TopBar() {
+export default function TopBar({ onToggleMonitor, monitorOpen }) {
   const { state } = useDemo();
   const [time, setTime] = useState(new Date());
 
@@ -66,6 +66,18 @@ export default function TopBar() {
           <span className="live-dot" />
           <span className="text-sm text-muted">LIVE</span>
         </div>
+        <button
+          id="btn-toggle-system-monitor"
+          className={`topbar-monitor-btn ${monitorOpen ? 'active' : ''}`}
+          onClick={onToggleMonitor}
+          title="System Monitor"
+        >
+          <Activity size={14} />
+          <span>Monitor</span>
+          {state.drivers.length > 0 && (
+            <span className="topbar-monitor-badge">{state.drivers.length}</span>
+          )}
+        </button>
       </div>
     </header>
   );

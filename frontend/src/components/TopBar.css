@@ -95,3 +95,43 @@
   border-radius: 50%;
   display: inline-block;
 }
+
+/* Monitor toggle button */
+.topbar-monitor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.3px;
+}
+.topbar-monitor-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border-color: var(--brand);
+}
+.topbar-monitor-btn.active {
+  background: rgba(108,99,255,0.15);
+  border-color: rgba(108,99,255,0.5);
+  color: var(--brand-light);
+}
+
+.topbar-monitor-badge {
+  background: var(--green);
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 99px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 16px;
+  height: 16px;
+}

@@ -2,58 +2,93 @@
  * demoStore.js – Centralized state for the Vroom demo UI.
  * Uses useReducer + Context for clean state sharing across panels.
  */
-import { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react';
-import axios from 'axios';
+import {
+  createContext,
+  useContext,
+  useReducer,
+  useCallback,
+  useRef,
+  useEffect,
+} from "react";
+import axios from "axios";
 
 /* ── API Configuration (Dynamic for Local vs Cluster) ── */
-const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const isLocal =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1";
 const host = window.location.host;
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+
+// Vagrant VM IP from your Vagrantfile
+const VAGRANT_IP = "192.168.242.10";
 
 export const API = {
-  user:         isLocal ? 'http://localhost:8081' : '/user-service',
-  ride:         isLocal ? 'http://localhost:8082' : '/ride-service',
-  dispatch:     isLocal ? 'http://localhost:8083' : '/dispatch-service',
-  notification: isLocal ? 'http://localhost:8084' : '/notification-service',
-  dispatchWS:   isLocal 
-    ? 'ws://localhost:8083/v1/dispatch/ws/location' 
+  // If local, we try to hit the cluster via the VM IP if localhost backends aren't running
+  user: isLocal ? `http://${VAGRANT_IP}/user-service` : "/user-service",
+  ride: isLocal ? `http://${VAGRANT_IP}/ride-service` : "/ride-service",
+  dispatch: isLocal
+    ? `http://${VAGRANT_IP}/dispatch-service`
+    : "/dispatch-service",
+  notification: isLocal
+    ? `http://${VAGRANT_IP}/notification-service`
+    : "/notification-service",
+  dispatchWS: isLocal
+    ? `ws://${VAGRANT_IP}/dispatch-service/v1/dispatch/ws/location`
     : `${wsProtocol}//${host}/dispatch-service/v1/dispatch/ws/location`,
-  notificationWS: isLocal 
-    ? 'ws://localhost:8084/v1/ws' 
+  notificationWS: isLocal
+    ? `ws://${VAGRANT_IP}/notification-service/v1/ws`
     : `${wsProtocol}//${host}/notification-service/v1/ws`,
 };
 
 /* ── Trip lifecycle states ── */
 export const TRIP_STATUS = {
-  IDLE:       'Idle',
-  SEARCHING:  'Searching Driver',
-  ASSIGNED:   'Driver Assigned',
-  ACCEPTED:   'Accepted',
-  COMING:     'Driver Coming',
-  ON_TRIP:    'On Trip',
-  COMPLETED:  'Completed',
-  CANCELLED:  'Cancelled',
+  IDLE: "Idle",
+  SEARCHING: "Searching Driver",
+  ASSIGNED: "Driver Assigned",
+  ACCEPTED: "Accepted",
+  COMING: "Driver Coming",
+  ON_TRIP: "On Trip",
+  COMPLETED: "Completed",
+  CANCELLED: "Cancelled",
 };
 
 /* ── Ho Chi Minh City area coordinates ── */
 export const HCMC_CENTER = [10.7769, 106.7009];
 
 export const DRIVER_SEEDS = [
-  { id: '550e8400-e29b-41d4-a716-446655440001', name: 'Nguyen Van An', lat: 10.7800, lng: 106.6970, avatar: '🧑' },
-  { id: '550e8400-e29b-41d4-a716-446655440002', name: 'Tran Thi Bich', lat: 10.7750, lng: 106.7050, avatar: '👩' },
-  { id: '550e8400-e29b-41d4-a716-446655440003', name: 'Le Van Cuong',  lat: 10.7820, lng: 106.7080, avatar: '👨' },
+  {
+    id: "550e8400-e29b-41d4-a716-446655440001",
+    name: "Nguyen Van An",
+    lat: 10.78,
+    lng: 106.697,
+    avatar: "🧑",
+  },
+  {
+    id: "550e8400-e29b-41d4-a716-446655440002",
+    name: "Tran Thi Bich",
+    lat: 10.775,
+    lng: 106.705,
+    avatar: "👩",
+  },
+  {
+    id: "550e8400-e29b-41d4-a716-446655440003",
+    name: "Le Van Cuong",
+    lat: 10.782,
+    lng: 106.708,
+    avatar: "👨",
+  },
 ];
 
 export const PICKUP_PRESETS = [
-  { label: 'Ben Thanh Market',  lat: 10.7724, lng: 106.6980 },
-  { label: 'Nguyen Hue Walk',   lat: 10.7754, lng: 106.7028 },
-  { label: 'Bitexco Tower',     lat: 10.7718, lng: 106.7040 },
+  { label: "Ben Thanh Market", lat: 10.7724, lng: 106.698 },
+  { label: "Nguyen Hue Walk", lat: 10.7754, lng: 106.7028 },
+  { label: "Bitexco Tower", lat: 10.7718, lng: 106.704 },
 ];
 
 export const DROPOFF_PRESETS = [
-  { label: 'Tan Son Nhat Airport', lat: 10.8184, lng: 106.6697 },
-  { label: 'Landmark 81',          lat: 10.7947, lng: 106.7218 },
-  { label: 'Saigon Zoo',           lat: 10.7895, lng: 106.7052 },
+  { label: "Tan Son Nhat Airport", lat: 10.8184, lng: 106.6697 },
+  { label: "Landmark 81", lat: 10.7947, lng: 106.7218 },
+  { label: "Saigon Zoo", lat: 10.7895, lng: 106.7052 },
 ];
 
 /* ─────────────────────────────────────────────
@@ -62,13 +97,13 @@ export const DROPOFF_PRESETS = [
 const initialState = {
   tripStatus: TRIP_STATUS.IDLE,
   tripId: null,
-  drivers: [],           // seeded drivers with positions
+  drivers: [], // seeded drivers with positions
   assignedDriver: null,
   pickup: PICKUP_PRESETS[0],
   dropoff: DROPOFF_PRESETS[0],
-  events: [],            // timeline events
-  notifications: [],     // passenger + driver toasts
-  apiLog: null,          // last API call info
+  events: [], // timeline events
+  notifications: [], // passenger + driver toasts
+  apiLog: null, // last API call info
   driverMoving: false,
   autoPlay: false,
   speed: 1,
@@ -92,67 +127,99 @@ function calcMetrics(pickup, dropoff) {
 ───────────────────────────────────────────── */
 function reducer(state, action) {
   switch (action.type) {
-    case 'SET_STATUS':
+    case "SET_STATUS":
       return { ...state, tripStatus: action.payload };
 
-    case 'SET_TRIP_ID':
+    case "SET_TRIP_ID":
       return { ...state, tripId: action.payload };
 
-    case 'SEED_DRIVERS':
-      return { ...state, drivers: DRIVER_SEEDS.map(d => ({ ...d })) };
+    case "SEED_DRIVERS":
+      return { ...state, drivers: DRIVER_SEEDS.map((d) => ({ ...d })) };
 
-    case 'ASSIGN_DRIVER':
-      return { ...state, assignedDriver: action.payload, tripStatus: TRIP_STATUS.ASSIGNED };
+    case "ASSIGN_DRIVER":
+      return {
+        ...state,
+        assignedDriver: action.payload,
+        tripStatus: TRIP_STATUS.ASSIGNED,
+      };
 
-    case 'UPDATE_DRIVER_POS': {
-      const updated = state.drivers.map(d =>
-        d.id === action.payload.id ? { ...d, lat: action.payload.lat, lng: action.payload.lng } : d
+    case "UPDATE_DRIVER_POS": {
+      const updated = state.drivers.map((d) =>
+        d.id === action.payload.id
+          ? { ...d, lat: action.payload.lat, lng: action.payload.lng }
+          : d,
       );
-      const assigned = state.assignedDriver?.id === action.payload.id
-        ? { ...state.assignedDriver, lat: action.payload.lat, lng: action.payload.lng }
-        : state.assignedDriver;
+      const assigned =
+        state.assignedDriver?.id === action.payload.id
+          ? {
+              ...state.assignedDriver,
+              lat: action.payload.lat,
+              lng: action.payload.lng,
+            }
+          : state.assignedDriver;
       return { ...state, drivers: updated, assignedDriver: assigned };
     }
 
-    case 'SET_PICKUP': {
+    case "SET_PICKUP": {
       const { fare, time } = calcMetrics(action.payload, state.dropoff);
-      return { ...state, pickup: action.payload, estimatedFare: fare, estimatedTime: time };
+      return {
+        ...state,
+        pickup: action.payload,
+        estimatedFare: fare,
+        estimatedTime: time,
+      };
     }
 
-    case 'SET_DROPOFF': {
+    case "SET_DROPOFF": {
       const { fare, time } = calcMetrics(state.pickup, action.payload);
-      return { ...state, dropoff: action.payload, estimatedFare: fare, estimatedTime: time };
+      return {
+        ...state,
+        dropoff: action.payload,
+        estimatedFare: fare,
+        estimatedTime: time,
+      };
     }
 
-    case 'PUSH_EVENT':
-      return { ...state, events: [action.payload, ...state.events].slice(0, 50) };
+    case "PUSH_EVENT":
+      return {
+        ...state,
+        events: [action.payload, ...state.events].slice(0, 50),
+      };
 
-    case 'PUSH_NOTIFICATION':
-      return { ...state, notifications: [action.payload, ...state.notifications].slice(0, 30) };
+    case "PUSH_NOTIFICATION":
+      return {
+        ...state,
+        notifications: [action.payload, ...state.notifications].slice(0, 30),
+      };
 
-    case 'DISMISS_NOTIFICATION':
-      return { ...state, notifications: state.notifications.filter(n => n.id !== action.payload) };
+    case "DISMISS_NOTIFICATION":
+      return {
+        ...state,
+        notifications: state.notifications.filter(
+          (n) => n.id !== action.payload,
+        ),
+      };
 
-    case 'SET_API_LOG':
+    case "SET_API_LOG":
       return { ...state, apiLog: action.payload };
 
-    case 'SET_DRIVER_MOVING':
+    case "SET_DRIVER_MOVING":
       return { ...state, driverMoving: action.payload };
 
-    case 'SET_AUTO_PLAY':
+    case "SET_AUTO_PLAY":
       return { ...state, autoPlay: action.payload };
 
-    case 'SET_SPEED':
+    case "SET_SPEED":
       return { ...state, speed: action.payload };
 
-    case 'SET_STEP_MODE':
+    case "SET_STEP_MODE":
       return { ...state, stepMode: action.payload };
 
-    case 'RESET': {
+    case "RESET": {
       const { fare, time } = calcMetrics(state.pickup, state.dropoff);
       return {
         ...initialState,
-        pickup:  state.pickup,
+        pickup: state.pickup,
         dropoff: state.dropoff,
         estimatedFare: fare,
         estimatedTime: time,
@@ -176,23 +243,35 @@ export function DemoStoreProvider({ children }) {
 
   /* ── WebSocket Connection for Driver Locations ── */
   useEffect(() => {
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+
     const connect = () => {
-      console.log(`Connecting to Dispatch WS: ${API.dispatchWS}`);
+      if (retryCount >= MAX_RETRIES) {
+        console.warn(
+          "⚠️ Dispatch WS: Max retries reached. Operating in offline/simulated mode.",
+        );
+        return;
+      }
+
       const ws = new WebSocket(API.dispatchWS);
-      
+
       ws.onopen = () => {
-        console.log('✅ Dispatch WebSocket connected');
+        console.log("✅ Dispatch WebSocket connected");
         wsRef.current = ws;
+        retryCount = 0;
       };
-      
+
       ws.onclose = () => {
-        console.log('❌ Dispatch WebSocket disconnected, retrying in 3s...');
         wsRef.current = null;
-        setTimeout(connect, 3000);
+        retryCount++;
+        if (retryCount < MAX_RETRIES) {
+          setTimeout(connect, 5000); // Wait 5s before retry
+        }
       };
-      
-      ws.onerror = (err) => {
-        console.error('WebSocket Error:', err);
+
+      ws.onerror = () => {
+        // Silent error to prevent console spam
       };
     };
 
@@ -204,7 +283,7 @@ export function DemoStoreProvider({ children }) {
 
   /* ── WebSocket Connection for Notifications (Real-time events) ── */
   useEffect(() => {
-    const demoUserId = 'c10a8c2f-3d6a-491c-acbb-d313cd4d625f';
+    const demoUserId = "c10a8c2f-3d6a-491c-acbb-d313cd4d625f";
 
     const connectNotif = () => {
       const wsUrl = `${API.notificationWS}?userId=${demoUserId}`;
@@ -214,10 +293,13 @@ export function DemoStoreProvider({ children }) {
         try {
           const data = jsonParse(event.data);
           // Persistent deduplication via Ref
-          const uid = data.id || data.correlation_id || `${data.event_type}-${JSON.stringify(data.payload)}`;
+          const uid =
+            data.id ||
+            data.correlation_id ||
+            `${data.event_type}-${JSON.stringify(data.payload)}`;
           if (processedEventIdsRef.current.has(uid)) return;
           processedEventIdsRef.current.add(uid);
-          
+
           // Keep set size manageable
           if (processedEventIdsRef.current.size > 200) {
             const first = processedEventIdsRef.current.values().next().value;
@@ -225,21 +307,55 @@ export function DemoStoreProvider({ children }) {
           }
 
           handleIncomingEvent(data);
-        } catch (err) { console.error('WS Message Error:', err); }
+        } catch (err) {
+          console.error("WS Message Error:", err);
+        }
       };
 
-      ws.onopen = () => console.log('✅ Notification WS connected');
+      ws.onopen = () => console.log("✅ Notification WS connected");
       ws.onclose = () => setTimeout(connectNotif, 3000);
     };
 
     connectNotif();
   }, []);
 
+  /* ── Driver Heartbeat (Keep drivers online in backend) ── */
+  const driversRef = useRef(state.drivers);
+  useEffect(() => {
+    driversRef.current = state.drivers;
+  }, [state.drivers]);
+
+  useEffect(() => {
+    if (state.drivers.length === 0) return;
+
+    const interval = setInterval(() => {
+      const currentDrivers = driversRef.current;
+      if (!currentDrivers || currentDrivers.length === 0) return;
+
+      currentDrivers.forEach((d) => {
+        axios
+          .put(`${API.dispatch}/v1/drivers/${d.id}/location`, {
+            lat: d.lat,
+            lng: d.lng,
+          })
+          .catch(() => {});
+
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({ driver_id: d.id, lat: d.lat, lng: d.lng }),
+          );
+        }
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [state.drivers.length]);
+
   const handleIncomingEvent = (evt) => {
     const { event_type, payload } = evt;
     let data = {};
     try {
-      data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+      data = typeof payload === "string" ? JSON.parse(payload) : payload;
     } catch (e) {
       data = payload;
     }
@@ -247,65 +363,96 @@ export function DemoStoreProvider({ children }) {
     console.log(`[EVENT] ${event_type}`, data);
 
     switch (event_type) {
-      case 'Trip.Requested':
-        pushEvent('Trip.Requested', 'ride', { tripId: data.id, status: 'Processing' });
+      case "Trip.Requested":
+        pushEvent("Trip.Requested", "ride", {
+          tripId: data.id,
+          status: "Processing",
+        });
         break;
 
-      case 'Trip.Matched': {
+      case "Trip.Matched": {
         const driverId = data.driver_id;
         // In a real app, we'd fetch driver details. For demo, we find in our seeds.
-        const matchedDriver = DRIVER_SEEDS.find(d => d.id === driverId) || DRIVER_SEEDS[0];
-        
-        dispatch({ type: 'ASSIGN_DRIVER', payload: matchedDriver });
-        pushEvent('Trip.Matched', 'dispatch', { tripId: data.id, driverId, driverName: matchedDriver.name });
-        notify('passenger', `Driver matched: ${matchedDriver.name} is on the way!`, 'success');
-        notify('driver', `New ride request! Heading to pickup.`, 'info');
+        const matchedDriver =
+          DRIVER_SEEDS.find((d) => d.id === driverId) || DRIVER_SEEDS[0];
+
+        dispatch({ type: "ASSIGN_DRIVER", payload: matchedDriver });
+        pushEvent("Trip.Matched", "dispatch", {
+          tripId: data.id,
+          driverId,
+          driverName: matchedDriver.name,
+        });
+        notify(
+          "passenger",
+          `Driver matched: ${matchedDriver.name} is on the way!`,
+          "success",
+        );
+        notify("driver", `New ride request! Heading to pickup.`, "info");
         break;
       }
 
-      case 'Trip.Accepted':
-        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ACCEPTED });
-        pushEvent('Trip.Accepted', 'ride', { tripId: data.id });
-        notify('passenger', 'Driver is on the way to your location!', 'success');
-        notify('driver', 'Trip accepted! Navigating to passenger.', 'info');
+      case "Trip.Accepted":
+        dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.ACCEPTED });
+        pushEvent("Trip.Accepted", "ride", { tripId: data.id });
+        notify(
+          "passenger",
+          "Driver is on the way to your location!",
+          "success",
+        );
+        notify("driver", "Trip accepted! Navigating to passenger.", "info");
         break;
 
-      case 'Trip.Started':
-        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ON_TRIP });
-        pushEvent('Trip.Started', 'ride', { tripId: data.id });
-        notify('passenger', 'Trip has started! Enjoy your ride 🚗', 'success');
+      case "Trip.Started":
+        dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.ON_TRIP });
+        pushEvent("Trip.Started", "ride", { tripId: data.id });
+        notify("passenger", "Trip has started! Enjoy your ride 🚗", "success");
         break;
 
-      case 'Trip.Cancelled':
-        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.CANCELLED });
-        pushEvent('Trip.Cancelled', 'ride', { reason: data.reason });
-        notify('passenger', 'Trip has been cancelled.', 'warning');
-        notify('driver', 'Trip has been cancelled by the passenger.', 'warning');
+      case "Trip.Cancelled":
+        dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.CANCELLED });
+        pushEvent("Trip.Cancelled", "ride", { reason: data.reason });
+        notify("passenger", "Trip has been cancelled.", "warning");
+        notify(
+          "driver",
+          "Trip has been cancelled by the passenger.",
+          "warning",
+        );
         break;
 
-      case 'Trip.Completed':
-        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.COMPLETED });
-        pushEvent('Trip.Completed', 'ride', { tripId: data.id });
-        notify('passenger', '🎉 Trip completed! Thanks for riding with Vroom.', 'success');
+      case "Trip.Completed":
+        dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.COMPLETED });
+        pushEvent("Trip.Completed", "ride", { tripId: data.id });
+        notify(
+          "passenger",
+          "🎉 Trip completed! Thanks for riding with Vroom.",
+          "success",
+        );
         break;
-      
-      case 'Trip.OfferRejected':
-        dispatch({ type: 'ASSIGN_DRIVER', payload: null });
-        dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.SEARCHING });
-        pushEvent('Trip.OfferRejected', 'dispatch', { tripId: data.id, driverId: data.driver_id });
-        notify('passenger', 'Looking for a new driver...', 'info');
-        notify('driver', 'Offer rejected. Waiting for next ride.', 'warning');
+
+      case "Trip.OfferRejected":
+        dispatch({ type: "ASSIGN_DRIVER", payload: null });
+        dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.SEARCHING });
+        pushEvent("Trip.OfferRejected", "dispatch", {
+          tripId: data.id,
+          driverId: data.driver_id,
+        });
+        notify("passenger", "Looking for a new driver...", "info");
+        notify("driver", "Offer rejected. Waiting for next ride.", "warning");
         break;
-      
+
       default:
         // Generic event logging
-        pushEvent(event_type, 'system', data);
+        pushEvent(event_type, "system", data);
     }
   };
 
   // Helper for safe JSON parsing
   const jsonParse = (str) => {
-    try { return JSON.parse(str); } catch (e) { return str; }
+    try {
+      return JSON.parse(str);
+    } catch (e) {
+      return str;
+    }
   };
 
   const sendLocationUpdate = useCallback((driverId, lat, lng) => {
@@ -317,13 +464,16 @@ export function DemoStoreProvider({ children }) {
 
   /* Helper: record api call */
   const logApi = useCallback((method, url, payload, status, response) => {
-    dispatch({ type: 'SET_API_LOG', payload: { method, url, payload, status, response, ts: new Date() } });
+    dispatch({
+      type: "SET_API_LOG",
+      payload: { method, url, payload, status, response, ts: new Date() },
+    });
   }, []);
 
   /* Helper: push timeline event */
   const pushEvent = useCallback((type, service, detail = {}) => {
     dispatch({
-      type: 'PUSH_EVENT',
+      type: "PUSH_EVENT",
       payload: {
         id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type,
@@ -335,29 +485,49 @@ export function DemoStoreProvider({ children }) {
   }, []);
 
   /* Helper: push notification */
-  const notify = useCallback((side, message, variant = 'info') => {
+  const notify = useCallback((side, message, variant = "info") => {
     const id = `notif-${Date.now()}-${Math.random()}`;
-    dispatch({ type: 'PUSH_NOTIFICATION', payload: { id, side, message, variant, ts: new Date() } });
-    setTimeout(() => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }), 12000); // 12s
+    dispatch({
+      type: "PUSH_NOTIFICATION",
+      payload: { id, side, message, variant, ts: new Date() },
+    });
+    setTimeout(
+      () => dispatch({ type: "DISMISS_NOTIFICATION", payload: id }),
+      12000,
+    ); // 12s
   }, []);
 
   /* ── Actions ── */
   const actions = {
-
     seedDrivers: async () => {
-      dispatch({ type: 'SEED_DRIVERS' });
-      pushEvent('Drivers.Seeded', 'dispatch', { count: DRIVER_SEEDS.length });
-      notify('driver', '3 drivers are now online and ready.', 'success');
+      dispatch({ type: "SEED_DRIVERS" });
+      pushEvent("Drivers.Seeded", "dispatch", { count: DRIVER_SEEDS.length });
+      notify("driver", "3 drivers are now online and ready.", "success");
 
       // Fire location updates to dispatch service
       for (const d of DRIVER_SEEDS) {
         // 1. REST update (Fixed payload keys: lat/lng)
         const payload = { lat: d.lat, lng: d.lng };
         try {
-          const res = await axios.put(`${API.dispatch}/v1/drivers/${d.id}/location`, payload);
-          logApi('PUT', `/v1/drivers/${d.id}/location`, payload, res.status, res.data);
+          const res = await axios.put(
+            `${API.dispatch}/v1/drivers/${d.id}/location`,
+            payload,
+          );
+          logApi(
+            "PUT",
+            `/v1/drivers/${d.id}/location`,
+            payload,
+            res.status,
+            res.data,
+          );
         } catch (err) {
-          logApi('PUT', `/v1/drivers/${d.id}/location`, payload, err.response?.status ?? 0, err.message);
+          logApi(
+            "PUT",
+            `/v1/drivers/${d.id}/location`,
+            payload,
+            err.response?.status ?? 0,
+            err.message,
+          );
         }
 
         // 2. WebSocket update
@@ -368,55 +538,87 @@ export function DemoStoreProvider({ children }) {
     requestRide: async (p, d) => {
       const pickup = p || state.pickup;
       const dropoff = d || state.dropoff;
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.SEARCHING });
-      notify('passenger', 'Looking for a driver near you…', 'info');
+      dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.SEARCHING });
+      notify("passenger", "Looking for a driver near you…", "info");
 
       // Simple fare estimation (dist * 10000 VND)
-      const dist = Math.sqrt(Math.pow(pickup.lat - dropoff.lat, 2) + Math.pow(pickup.lng - dropoff.lng, 2));
-      const estimatedPrice = Math.max(30000, Math.round(dist * 800000) / 10 * 10); 
+      const dist = Math.sqrt(
+        Math.pow(pickup.lat - dropoff.lat, 2) +
+          Math.pow(pickup.lng - dropoff.lng, 2),
+      );
+      const estimatedPrice = Math.max(
+        30000,
+        (Math.round(dist * 800000) / 10) * 10,
+      );
 
       const payload = {
-        source_lat:      pickup.lat,
-        source_lng:      pickup.lng,
-        dest_lat:        dropoff.lat,
-        dest_lng:        dropoff.lng,
+        source_lat: pickup.lat,
+        source_lng: pickup.lng,
+        dest_lat: dropoff.lat,
+        dest_lng: dropoff.lng,
         estimated_price: estimatedPrice,
       };
 
-      const headers = { 'X-User-ID': 'c10a8c2f-3d6a-491c-acbb-d313cd4d625f' }; // Demo UUID
+      const headers = { "X-User-ID": "c10a8c2f-3d6a-491c-acbb-d313cd4d625f" }; // Demo UUID
 
       try {
-        const res = await axios.post(`${API.ride}/v1/trips`, payload, { headers });
-        const tripId = res.data?.trip_id ?? res.data?.id ?? `TRIP-${Date.now()}`;
-        dispatch({ type: 'SET_TRIP_ID', payload: tripId });
-        logApi('POST', '/v1/trips', payload, res.status, res.data);
-        
+        const res = await axios.post(`${API.ride}/v1/trips`, payload, {
+          headers,
+        });
+        const tripId =
+          res.data?.trip_id ?? res.data?.id ?? `TRIP-${Date.now()}`;
+        dispatch({ type: "SET_TRIP_ID", payload: tripId });
+        logApi("POST", "/v1/trips", payload, res.status, res.data);
+
         // Note: We don't pushEvent here anymore because we'll get it from the WebSocket
         // notify('passenger', 'Trip request sent. Matching you with a driver…', 'success');
-        
-        return tripId;
 
+        return tripId;
       } catch (err) {
-        logApi('POST', '/v1/trips', payload, err.response?.status ?? 0, err.message);
+        logApi(
+          "POST",
+          "/v1/trips",
+          payload,
+          err.response?.status ?? 0,
+          err.message,
+        );
         // Offline mode: simulate anyway
         const tripId = `TRIP-${Date.now()}`;
-        dispatch({ type: 'SET_TRIP_ID', payload: tripId });
-        pushEvent('Trip.Requested', 'ride', { tripId, pickup: pickup.label, dropoff: dropoff.label, offline: true });
-        
-        await new Promise(r => setTimeout(r, 1200));
-        
+        dispatch({ type: "SET_TRIP_ID", payload: tripId });
+        pushEvent("Trip.Requested", "ride", {
+          tripId,
+          pickup: pickup.label,
+          dropoff: dropoff.label,
+          offline: true,
+        });
+
+        await new Promise((r) => setTimeout(r, 1200));
+
         // Match Nearest Driver (Offline)
         const drivers = state.drivers.length > 0 ? state.drivers : DRIVER_SEEDS;
         const driver = drivers.reduce((prev, curr) => {
-          const dPrev = Math.pow(prev.lat - pickup.lat, 2) + Math.pow(prev.lng - pickup.lng, 2);
-          const dCurr = Math.pow(curr.lat - pickup.lat, 2) + Math.pow(curr.lng - pickup.lng, 2);
+          const dPrev =
+            Math.pow(prev.lat - pickup.lat, 2) +
+            Math.pow(prev.lng - pickup.lng, 2);
+          const dCurr =
+            Math.pow(curr.lat - pickup.lat, 2) +
+            Math.pow(curr.lng - pickup.lng, 2);
           return dCurr < dPrev ? curr : prev;
         });
 
-        dispatch({ type: 'ASSIGN_DRIVER', payload: driver });
-        pushEvent('Trip.Matched', 'dispatch', { tripId, driverId: driver.id, driverName: driver.name, offline: true });
-        notify('passenger', `[Offline] Driver matched: ${driver.name}`, 'success');
-        notify('driver', `[Offline] New ride! Go to ${pickup.label}.`, 'info');
+        dispatch({ type: "ASSIGN_DRIVER", payload: driver });
+        pushEvent("Trip.Matched", "dispatch", {
+          tripId,
+          driverId: driver.id,
+          driverName: driver.name,
+          offline: true,
+        });
+        notify(
+          "passenger",
+          `[Offline] Driver matched: ${driver.name}`,
+          "success",
+        );
+        notify("driver", `[Offline] New ride! Go to ${pickup.label}.`, "info");
         return tripId;
       }
     },
@@ -426,90 +628,158 @@ export function DemoStoreProvider({ children }) {
       const dId = driverId || state.assignedDriver?.id;
       const payload = { driver_id: dId };
       try {
-        const res = await axios.post(`${API.ride}/v1/trips/${tripId}/accept`, payload);
-        logApi('POST', `/v1/trips/${tripId}/accept`, payload, res.status, res.data);
+        const res = await axios.post(
+          `${API.ride}/v1/trips/${tripId}/accept`,
+          payload,
+        );
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/accept`,
+          payload,
+          res.status,
+          res.data,
+        );
       } catch (err) {
-        logApi('POST', `/v1/trips/${tripId}/accept`, payload, err.response?.status ?? 0, err.message);
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/accept`,
+          payload,
+          err.response?.status ?? 0,
+          err.message,
+        );
       }
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ACCEPTED });
-      pushEvent('Trip.Accepted', 'ride', { tripId });
-      notify('passenger', 'Driver accepted the trip!', 'success');
-      notify('driver', 'Trip accepted. Heading to pickup.', 'info');
-      
+      dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.ACCEPTED });
+      pushEvent("Trip.Accepted", "ride", { tripId });
+      notify("passenger", "Driver accepted the trip!", "success");
+      notify("driver", "Trip accepted. Heading to pickup.", "info");
+
       // Auto-start movement to pickup
-      actions.moveToPickup(state.assignedDriver || DRIVER_SEEDS[0], state.pickup, state.speed);
+      actions.moveToPickup(
+        state.assignedDriver || DRIVER_SEEDS[0],
+        state.pickup,
+        state.speed,
+      );
     },
 
     startTrip: async (tripId) => {
       if (!tripId) return;
       try {
         const res = await axios.post(`${API.ride}/v1/trips/${tripId}/start`);
-        logApi('POST', `/v1/trips/${tripId}/start`, {}, res.status, res.data);
+        logApi("POST", `/v1/trips/${tripId}/start`, {}, res.status, res.data);
       } catch (err) {
-        logApi('POST', `/v1/trips/${tripId}/start`, {}, err.response?.status ?? 0, err.message);
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/start`,
+          {},
+          err.response?.status ?? 0,
+          err.message,
+        );
       }
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.ON_TRIP });
-      pushEvent('Trip.Started', 'ride', { tripId });
-      notify('passenger', 'Trip started!', 'success');
-      
+      dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.ON_TRIP });
+      pushEvent("Trip.Started", "ride", { tripId });
+      notify("passenger", "Trip started!", "success");
+
       // Auto-start movement to destination
-      actions.moveToDestination(state.assignedDriver, state.pickup, state.dropoff, state.speed);
+      actions.moveToDestination(
+        state.assignedDriver,
+        state.pickup,
+        state.dropoff,
+        state.speed,
+      );
     },
 
-    cancelTrip: async (tripId, reason = 'Cancelled by user') => {
+    cancelTrip: async (tripId, reason = "Cancelled by user") => {
       if (!tripId) return;
       const payload = { reason };
       try {
-        const res = await axios.post(`${API.ride}/v1/trips/${tripId}/cancel`, payload);
-        logApi('POST', `/v1/trips/${tripId}/cancel`, payload, res.status, res.data);
+        const res = await axios.post(
+          `${API.ride}/v1/trips/${tripId}/cancel`,
+          payload,
+        );
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/cancel`,
+          payload,
+          res.status,
+          res.data,
+        );
       } catch (err) {
-        logApi('POST', `/v1/trips/${tripId}/cancel`, payload, err.response?.status ?? 0, err.message);
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/cancel`,
+          payload,
+          err.response?.status ?? 0,
+          err.message,
+        );
       }
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.CANCELLED });
-      pushEvent('Trip.Cancelled', 'ride', { tripId, reason });
-      notify('passenger', 'Trip cancelled.', 'warning');
+      dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.CANCELLED });
+      pushEvent("Trip.Cancelled", "ride", { tripId, reason });
+      notify("passenger", "Trip cancelled.", "warning");
     },
 
     rejectOffer: async (tripId, driverId) => {
       if (!tripId || !driverId) return;
       const payload = { driver_id: driverId };
       try {
-        const res = await axios.post(`${API.ride}/v1/trips/${tripId}/reject`, payload);
-        logApi('POST', `/v1/trips/${tripId}/reject`, payload, res.status, res.data);
+        const res = await axios.post(
+          `${API.ride}/v1/trips/${tripId}/reject`,
+          payload,
+        );
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/reject`,
+          payload,
+          res.status,
+          res.data,
+        );
       } catch (err) {
-        logApi('POST', `/v1/trips/${tripId}/reject`, payload, err.response?.status ?? 0, err.message);
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/reject`,
+          payload,
+          err.response?.status ?? 0,
+          err.message,
+        );
       }
-      dispatch({ type: 'ASSIGN_DRIVER', payload: null });
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.SEARCHING });
-      pushEvent('Trip.OfferRejected', 'ride', { tripId, driverId });
-      notify('driver', 'You rejected the offer.', 'warning');
+      dispatch({ type: "ASSIGN_DRIVER", payload: null });
+      dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.SEARCHING });
+      pushEvent("Trip.OfferRejected", "ride", { tripId, driverId });
+      notify("driver", "You rejected the offer.", "warning");
     },
 
     moveToPickup: async (driver, pickup, speed = 1) => {
       if (!driver) return;
-      dispatch({ type: 'SET_DRIVER_MOVING', payload: true });
-      
+      dispatch({ type: "SET_DRIVER_MOVING", payload: true });
+
       await moveBetween(driver, pickup, 12, speed, (lat, lng) => {
-        dispatch({ type: 'UPDATE_DRIVER_POS', payload: { id: driver.id, lat, lng } });
+        dispatch({
+          type: "UPDATE_DRIVER_POS",
+          payload: { id: driver.id, lat, lng },
+        });
         sendLocationUpdate(driver.id, lat, lng);
       });
 
-      dispatch({ type: 'SET_DRIVER_MOVING', payload: false });
-      notify('driver', 'You have arrived at the pickup location.', 'success');
-      notify('passenger', 'Your driver has arrived!', 'info');
+      dispatch({ type: "SET_DRIVER_MOVING", payload: false });
+      notify("driver", "You have arrived at the pickup location.", "success");
+      notify("passenger", "Your driver has arrived!", "info");
     },
 
     moveToDestination: async (driver, pickup, dropoff, speed = 1) => {
       if (!driver) return;
-      dispatch({ type: 'SET_DRIVER_MOVING', payload: true });
+      dispatch({ type: "SET_DRIVER_MOVING", payload: true });
 
-      await moveBetween(pickup, dropoff, 16, speed, (lat, lng) => {
-        dispatch({ type: 'UPDATE_DRIVER_POS', payload: { id: driver.id, lat, lng } });
+      // Start from the driver's current position (they should be at pickup now),
+      // not from the pickup preset coords — prevents coord interpolation going OOB.
+      await moveBetween(driver, dropoff, 16, speed, (lat, lng) => {
+        dispatch({
+          type: "UPDATE_DRIVER_POS",
+          payload: { id: driver.id, lat, lng },
+        });
         sendLocationUpdate(driver.id, lat, lng);
       });
 
-      dispatch({ type: 'SET_DRIVER_MOVING', payload: false });
-      notify('driver', 'You have arrived at the destination.', 'success');
+      dispatch({ type: "SET_DRIVER_MOVING", payload: false });
+      notify("driver", "You have arrived at the destination.", "success");
     },
 
     completeTrip: async (tripId) => {
@@ -517,30 +787,50 @@ export function DemoStoreProvider({ children }) {
       // Use estimated price + small random variance for final price
       const finalPrice = 45000; // Hardcoded or calculated
       const payload = { final_price: finalPrice };
-      
+
       try {
-        const res = await axios.post(`${API.ride}/v1/trips/${tripId}/complete`, payload);
-        logApi('POST', `/v1/trips/${tripId}/complete`, payload, res.status, res.data);
+        const res = await axios.post(
+          `${API.ride}/v1/trips/${tripId}/complete`,
+          payload,
+        );
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/complete`,
+          payload,
+          res.status,
+          res.data,
+        );
       } catch (err) {
-        logApi('POST', `/v1/trips/${tripId}/complete`, payload, err.response?.status ?? 0, err.message);
+        logApi(
+          "POST",
+          `/v1/trips/${tripId}/complete`,
+          payload,
+          err.response?.status ?? 0,
+          err.message,
+        );
       }
-      dispatch({ type: 'SET_STATUS', payload: TRIP_STATUS.COMPLETED });
-      pushEvent('Trip.Completed', 'ride', { tripId });
-      notify('passenger', '🎉 Trip completed! Thanks for riding with Vroom.', 'success');
-      notify('driver', '✅ Trip completed. Great job!', 'success');
+      dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.COMPLETED });
+      pushEvent("Trip.Completed", "ride", { tripId });
+      notify(
+        "passenger",
+        "🎉 Trip completed! Thanks for riding with Vroom.",
+        "success",
+      );
+      notify("driver", "✅ Trip completed. Great job!", "success");
     },
 
     reset: () => {
-      dispatch({ type: 'RESET' });
-      pushEvent('Demo.Reset', 'system', {});
+      dispatch({ type: "RESET" });
+      pushEvent("Demo.Reset", "system", {});
     },
 
-    setPickup:  (loc) => dispatch({ type: 'SET_PICKUP',  payload: loc }),
-    setDropoff: (loc) => dispatch({ type: 'SET_DROPOFF', payload: loc }),
-    setAutoPlay:(v)   => dispatch({ type: 'SET_AUTO_PLAY', payload: v }),
-    setSpeed:   (v)   => dispatch({ type: 'SET_SPEED',  payload: v }),
-    setStepMode:(v)   => dispatch({ type: 'SET_STEP_MODE', payload: v }),
-    dismissNotif:(id) => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }),
+    setPickup: (loc) => dispatch({ type: "SET_PICKUP", payload: loc }),
+    setDropoff: (loc) => dispatch({ type: "SET_DROPOFF", payload: loc }),
+    setAutoPlay: (v) => dispatch({ type: "SET_AUTO_PLAY", payload: v }),
+    setSpeed: (v) => dispatch({ type: "SET_SPEED", payload: v }),
+    setStepMode: (v) => dispatch({ type: "SET_STEP_MODE", payload: v }),
+    dismissNotif: (id) =>
+      dispatch({ type: "DISMISS_NOTIFICATION", payload: id }),
   };
 
   return (
@@ -552,7 +842,7 @@ export function DemoStoreProvider({ children }) {
 
 export function useDemo() {
   const ctx = useContext(StoreCtx);
-  if (!ctx) throw new Error('useDemo must be used inside DemoStoreProvider');
+  if (!ctx) throw new Error("useDemo must be used inside DemoStoreProvider");
   return ctx;
 }
 
@@ -564,6 +854,6 @@ async function moveBetween(from, to, steps, speed, onStep) {
     const lat = from.lat + (to.lat - from.lat) * t;
     const lng = from.lng + (to.lng - from.lng) * t;
     onStep(lat, lng);
-    await new Promise(r => setTimeout(r, delay));
+    await new Promise((r) => setTimeout(r, delay));
   }
 }

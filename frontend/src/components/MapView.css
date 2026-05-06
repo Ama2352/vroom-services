@@ -5,6 +5,10 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--border);
+  /* Isolate Leaflet's internal z-index stacking context so it
+     cannot bleed through overlays rendered outside this element. */
+  isolation: isolate;
+  z-index: 0;
 }
 
 .leaflet-map {

@@ -1,7 +1,7 @@
 /**
  * DriverPanel.jsx – Driver mock app (right column, top half).
  */
-import { Car, MapPin, CheckCircle } from 'lucide-react';
+import { Car, MapPin } from 'lucide-react';
 import { useDemo, TRIP_STATUS } from '../store/demoStore';
 import './DriverPanel.css';
 
@@ -35,35 +35,6 @@ export default function DriverPanel() {
 
       <div className="divider" />
 
-      {/* Online drivers list */}
-      <div className="driver-list-section">
-        <div className="section-title">Online Drivers ({drivers.length})</div>
-        <div className="driver-list">
-          {drivers.length === 0 && (
-            <div className="driver-empty">Seed drivers to see them here</div>
-          )}
-          {drivers.map(d => {
-            const isAssigned = assignedDriver?.id === d.id;
-            return (
-              <div key={d.id} className={`driver-item ${isAssigned ? 'assigned' : ''}`}>
-                <div className="driver-avatar-sm">{d.avatar}</div>
-                <div className="driver-info">
-                  <div className="driver-name">{d.name}</div>
-                  <div className="driver-coord mono">
-                    {d.lat.toFixed(4)}, {d.lng.toFixed(4)}
-                  </div>
-                </div>
-                {isAssigned && (
-                  <div className="assigned-tag">
-                    <CheckCircle size={12} />
-                    Active
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
 
       {/* Current trip info */}
       {assignedDriver && (
