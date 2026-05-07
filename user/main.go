@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -85,6 +86,8 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "OK")
 	})
+
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	log.Printf("User Service starting on port %s", port)
 	if err := r.Run(":" + port); err != nil {

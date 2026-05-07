@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"database/sql"
 	"fmt"
@@ -116,6 +117,8 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "UP", "consumer_id": consumerID})
 	})
+
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	log.Printf("Notification Service starting on port %s", port)
 	if err := r.Run(":" + port); err != nil {
