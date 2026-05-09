@@ -1,72 +1,267 @@
 # vroom-services/.gitlab-ci.yml
 # Monorepo CI/CD Pipeline for Vroom Microservices
+# Stage order: test → build → scan → publish → deploy
+# Trivy scans the image tarball BEFORE any push to DockerHub
 
 stages:
+  - test
   - build
+  - scan
   - publish
   - deploy
 
 variables:
   DOCKER_REGISTRY: "vroom-mvp"
   GITOPS_REPO: "vroom-app/gitops"
-  # Set these in GitLab CI/CD Variables:
-  # DOCKER_USER: <your-dockerhub-username>
-  # DOCKER_PASSWORD: <your-dockerhub-token>
-  # GITOPS_TOKEN: <gitlab-access-token-to-push>
+  # Set these in GitLab CI/CD Variables (protected):
+  # DOCKER_USER        — DockerHub username
+  # DOCKER_PASSWORD    — DockerHub access token
+  # GITOPS_TOKEN       — GitLab token with push rights to vroom-gitops
+  # SONAR_TOKEN        — From local SonarQube: My Account → Security → Generate Token
+  # SONAR_HOST_URL     — http://<k3s-server-node-ip>:<sonarqube-nodeport>
 
-.service_template:
+# ---------------------------------------------------------------------------
+# STAGE 1: test
+# ---------------------------------------------------------------------------
+
+.go_test_template:
+  stage: test
+  image: golang:1.25-alpine
+  script:
+    - cd "$SERVICE_PATH"
+    - go test ./... -v -coverprofile=coverage.out -covermode=atomic
+    - go tool cover -func=coverage.out
+  artifacts:
+    paths: ["$SERVICE_PATH/coverage.out"]
+    expire_in: 1 hour
+    when: always
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+test-user:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: user
+  allow_failure: true   # no tests written yet
+
+test-ride:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: ride
+  allow_failure: false  # trip_test.go exists and must pass
+
+test-dispatch:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: dispatch
+  allow_failure: true
+
+test-notification:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: notification
+  allow_failure: true
+
+gosec:
+  stage: test
+  image: golang:1.25-alpine
+  before_script:
+    - go install github.com/securego/gosec/v2/cmd/gosec@latest
+  script:
+    - |
+      for svc in user ride dispatch notification; do
+        echo "--- gosec: $svc ---"
+        cd "vroom-services/$svc" 2>/dev/null || cd "$svc"
+        gosec -fmt=sarif -out=../gosec-$svc.sarif ./... || true
+        cd -
+      done
+  artifacts:
+    reports:
+      sast: "gosec-*.sarif"
+    when: always
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ---------------------------------------------------------------------------
+# STAGE 2: build — docker build → .tar artifact (NO push to registry yet)
+# ---------------------------------------------------------------------------
+
+.build_template:
+  stage: build
   image: docker:24.0.5
   services:
     - docker:24.0.5-dind
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
+  script:
+    - export IMG="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}:ci-$CI_COMMIT_SHORT_SHA"
+    - cd "$SERVICE_PATH"
+    - docker build -t "$IMG" .
+    - docker save "$IMG" > "../${SERVICE_NAME}.tar"
+  artifacts:
+    paths: ["${SERVICE_NAME}.tar"]
+    expire_in: 1 hour
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_PIPELINE_SOURCE == "web"
 
-# --- PUBLISH JOBS ---
+build-user:
+  extends: .build_template
+  variables:
+    SERVICE_NAME: user-service
+    SERVICE_PATH: user
+
+build-ride:
+  extends: .build_template
+  variables:
+    SERVICE_NAME: ride-service
+    SERVICE_PATH: ride
+
+build-notification:
+  extends: .build_template
+  variables:
+    SERVICE_NAME: notification-service
+    SERVICE_PATH: notification
+
+build-dispatch:
+  extends: .build_template
+  variables:
+    SERVICE_NAME: dispatch-service
+    SERVICE_PATH: dispatch
+
+build-frontend:
+  extends: .build_template
+  variables:
+    SERVICE_NAME: frontend
+    SERVICE_PATH: frontend
+
+# ---------------------------------------------------------------------------
+# STAGE 3: scan — Trivy on tarball + SonarQube (in parallel)
+# Trivy MUST pass before anything is pushed to DockerHub
+# ---------------------------------------------------------------------------
+
+.trivy_template:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    # Informational: show HIGH findings without failing
+    - trivy image --input "${SERVICE_NAME}.tar" --exit-code 0 --severity HIGH --format table
+    # Hard fail on CRITICAL CVEs — blocks the publish stage
+    - trivy image --input "${SERVICE_NAME}.tar" --exit-code 1 --severity CRITICAL --format sarif --output "trivy-${SERVICE_NAME}.sarif"
+  artifacts:
+    reports:
+      container_scanning: "trivy-${SERVICE_NAME}.sarif"
+    when: always
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+scan-user:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: user-service
+  needs: [build-user]
+
+scan-ride:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: ride-service
+  needs: [build-ride]
+
+scan-notification:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: notification-service
+  needs: [build-notification]
+
+scan-dispatch:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: dispatch-service
+  needs: [build-dispatch]
+
+scan-frontend:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: frontend
+  needs: [build-frontend]
+
+sonarqube:
+  stage: scan
+  image: sonarsource/sonar-scanner-cli:latest
+  needs: [test-user, test-ride, test-dispatch, test-notification]
+  script:
+    - sonar-scanner
+        -Dsonar.host.url="$SONAR_HOST_URL"
+        -Dsonar.login="$SONAR_TOKEN"
+        -Dsonar.projectBaseDir=.
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" && $SONAR_TOKEN && $SONAR_HOST_URL
+    - if: $CI_PIPELINE_SOURCE == "web" && $SONAR_TOKEN && $SONAR_HOST_URL
+  allow_failure: true   # don't block if SonarQube is temporarily unavailable
+
+# ---------------------------------------------------------------------------
+# STAGE 4: publish — load tarball → push to DockerHub (after clean scan)
+# ---------------------------------------------------------------------------
 
 .publish_template:
-  extends: .service_template
   stage: publish
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   script:
-    - cd "$SERVICE_PATH"
-    - export IMAGE_NAME="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
-    - docker build -t "$IMAGE_NAME:latest" -t "$IMAGE_NAME:$CI_COMMIT_SHORT_SHA" .
-    - docker push "$IMAGE_NAME:latest"
-    - docker push "$IMAGE_NAME:$CI_COMMIT_SHORT_SHA"
+    - export IMG="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
+    - docker load < "${SERVICE_NAME}.tar"
+    - docker tag "$IMG:ci-$CI_COMMIT_SHORT_SHA" "$IMG:latest"
+    - docker tag "$IMG:ci-$CI_COMMIT_SHORT_SHA" "$IMG:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMG:latest"
+    - docker push "$IMG:$CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 publish-user:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "user-service"
-    SERVICE_PATH: "user"
+    SERVICE_NAME: user-service
+  needs: [scan-user, build-user]
 
 publish-ride:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "ride-service"
-    SERVICE_PATH: "ride"
+    SERVICE_NAME: ride-service
+  needs: [scan-ride, build-ride]
 
 publish-notification:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "notification-service"
-    SERVICE_PATH: "notification"
+    SERVICE_NAME: notification-service
+  needs: [scan-notification, build-notification]
 
 publish-dispatch:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "dispatch-service"
-    SERVICE_PATH: "dispatch"
+    SERVICE_NAME: dispatch-service
+  needs: [scan-dispatch, build-dispatch]
 
 publish-frontend:
   extends: .publish_template
   variables:
-    SERVICE_NAME: "frontend"
-    SERVICE_PATH: "frontend"
+    SERVICE_NAME: frontend
+  needs: [scan-frontend, build-frontend]
 
-# --- GITOPS DEPLOY JOB ---
+# ---------------------------------------------------------------------------
+# STAGE 5: deploy — update GitOps repo → ArgoCD syncs dev overlay
+# ---------------------------------------------------------------------------
 
 deploy-gitops:
   stage: deploy
@@ -82,9 +277,9 @@ deploy-gitops:
       git config --global user.name "Vroom CI Bot"
       git clone "https://oauth2:${GITOPS_TOKEN}@gitlab.com/${GITOPS_REPO}.git" gitops-repo
       cd gitops-repo/apps
-      
+
       for service in user ride notification dispatch frontend; do
-        echo "Updating image for $service to $CI_COMMIT_SHORT_SHA"
+        echo "Updating $service → $CI_COMMIT_SHORT_SHA"
         cd "$service/overlays/dev"
         if [ "$service" == "frontend" ]; then
           kustomize edit set image "vroom-mvp/frontend=$DOCKER_USER/$DOCKER_REGISTRY-frontend:$CI_COMMIT_SHORT_SHA"
@@ -93,9 +288,10 @@ deploy-gitops:
         fi
         cd ../../..
       done
-      
+
       git add .
       git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
       git push origin main
+  needs: [publish-user, publish-ride, publish-notification, publish-dispatch, publish-frontend]
   rules:
     - if: $CI_COMMIT_BRANCH == "main"

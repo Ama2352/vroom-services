@@ -1,0 +1,26 @@
+{
+  "example_input": {
+    "window": "30m",
+    "services": {
+      "user-service":         { "req_rate_rps": 10.2, "error_rate_pct": 0.1, "p99_latency_s": 0.31, "error_logs": 0 },
+      "ride-service":         { "req_rate_rps": 7.4,  "error_rate_pct": 6.8, "p99_latency_s": 4.2,  "error_logs": 89 },
+      "dispatch-service":     { "req_rate_rps": 5.1,  "error_rate_pct": 0.0, "p99_latency_s": 0.09, "error_logs": 0 },
+      "notification-service": { "req_rate_rps": 8.3,  "error_rate_pct": 0.3, "p99_latency_s": 0.22, "error_logs": 1 }
+    }
+  },
+  "example_output": {
+    "overall_status": "CRIT",
+    "summary": "ride-service is critically degraded: 6.8% error rate and p99 latency of 4.2s.",
+    "services": [
+      { "name": "user-service",         "status": "OK",   "finding": "Normal. 0.1% errors, p99=0.31s." },
+      { "name": "ride-service",         "status": "CRIT", "finding": "Error rate 6.8% (CRIT >5%), p99 4.2s (CRIT >5s), 89 error logs (CRIT >50)." },
+      { "name": "dispatch-service",     "status": "OK",   "finding": "Normal. No errors, p99=0.09s." },
+      { "name": "notification-service", "status": "OK",   "finding": "Normal. 0.3% errors within threshold." }
+    ],
+    "recommendations": [
+      "Check ride-service logs for database connection timeouts or Redis Stream consumer lag.",
+      "Verify PostgreSQL rides schema for long-running queries or lock contention.",
+      "Consider restarting ride-service pod if error rate does not drop in the next cycle."
+    ]
+  }
+}
