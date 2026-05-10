@@ -32,7 +32,7 @@ func main() {
 	// 2. Database connection
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable search_path=users",
 		dbHost, dbPort, dbUser, dbPassword, dbName)
-	
+
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
@@ -42,7 +42,7 @@ func main() {
 	// Wait for DB to be ready
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	for i := 0; i < 10; i++ {
 		err = db.PingContext(ctx)
 		if err == nil {
@@ -84,7 +84,7 @@ func main() {
 
 	// Root health check
 	r.GET("/health", func(c *gin.Context) {
-		c.String(http.StatusOK, "OK")
+		c.String(http.StatusOK, "I am fine!")
 	})
 
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))

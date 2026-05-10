@@ -12,13 +12,13 @@ stages:
 
 variables:
   DOCKER_REGISTRY: "vroom-mvp"
-  GITOPS_REPO: "vroom-app/gitops"
+  GITHUB_GITOPS_REPO: "Ama2352/vroom-gitops"
   # Set these in GitLab CI/CD Variables (protected):
-  # DOCKER_USER        — DockerHub username
-  # DOCKER_PASSWORD    — DockerHub access token
-  # GITOPS_TOKEN       — GitLab token with push rights to vroom-gitops
-  # SONAR_TOKEN        — From local SonarQube: My Account → Security → Generate Token
-  # SONAR_HOST_URL     — http://<k3s-server-node-ip>:<sonarqube-nodeport>
+  # DOCKER_USER           — DockerHub username
+  # DOCKER_PASSWORD       — DockerHub access token
+  # GITHUB_GITOPS_TOKEN   — GitHub classic PAT (repo scope) with write access to vroom-gitops
+  # SONAR_TOKEN           — From local SonarQube: My Account → Security → Generate Token
+  # SONAR_HOST_URL        — http://<k3s-server-node-ip>:<sonarqube-nodeport>
 
 # ---------------------------------------------------------------------------
 # STAGE 1: test
@@ -275,7 +275,7 @@ deploy-gitops:
       set -e
       git config --global user.email "ci@vroom-platform.com"
       git config --global user.name "Vroom CI Bot"
-      git clone "https://oauth2:${GITOPS_TOKEN}@gitlab.com/${GITOPS_REPO}.git" gitops-repo
+      git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
       cd gitops-repo/apps
 
       for service in user ride notification dispatch frontend; do
