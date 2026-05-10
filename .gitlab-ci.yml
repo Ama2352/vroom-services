@@ -13,6 +13,11 @@ stages:
 variables:
   DOCKER_REGISTRY: "vroom-mvp"
   GITHUB_GITOPS_REPO: "Ama2352/vroom-gitops"
+  # Caching directories for Go
+  GOPATH: "$CI_PROJECT_DIR/.go"
+  GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
+  # Enable Docker BuildKit for layer caching
+  DOCKER_BUILDKIT: "1"
   # Set these in GitLab CI/CD Variables (protected):
   # DOCKER_USER           — DockerHub username
   # DOCKER_PASSWORD       — DockerHub access token
@@ -27,6 +32,11 @@ variables:
 .go_test_template:
   stage: test
   image: golang:1.25-alpine
+  cache:
+    key: "go-test-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .go/pkg/mod/
+      - .go/build-cache/
   script:
     - cd "$SERVICE_PATH"
     - go test ./... -v -coverprofile=coverage.out -covermode=atomic
@@ -44,13 +54,13 @@ test-user:
   extends: .go_test_template
   variables:
     SERVICE_PATH: user
-  allow_failure: true   # no tests written yet
+  allow_failure: true # no tests written yet
 
 test-ride:
   extends: .go_test_template
   variables:
     SERVICE_PATH: ride
-  allow_failure: false  # trip_test.go exists and must pass
+  allow_failure: false # trip_test.go exists and must pass
 
 test-dispatch:
   extends: .go_test_template
@@ -67,8 +77,15 @@ test-notification:
 gosec:
   stage: test
   image: golang:1.25-alpine
+  cache:
+    key: "go-gosec-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .go/pkg/mod/
+      - .go/build-cache/
+      - .go/bin/
   before_script:
-    - go install github.com/securego/gosec/v2/cmd/gosec@latest
+    - export PATH="$CI_PROJECT_DIR/.go/bin:$PATH"
+    - command -v gosec || go install github.com/securego/gosec/v2/cmd/gosec@latest
   script:
     - gosec -fmt=sarif -out=gosec-report.sarif ./... || true
   artifacts:
@@ -93,9 +110,11 @@ gosec:
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   script:
-    - export IMG="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}:ci-$CI_COMMIT_SHORT_SHA"
+    - export IMG_BASE="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
+    - export IMG="$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA"
+    - docker pull "$IMG_BASE:latest" || true
     - cd "$SERVICE_PATH"
-    - docker build -t "$IMG" .
+    - docker build --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from "$IMG_BASE:latest" -t "$IMG" .
     - docker save "$IMG" > "../${SERVICE_NAME}.tar"
   artifacts:
     paths: ["${SERVICE_NAME}.tar"]
@@ -191,15 +210,21 @@ sonarqube:
   stage: scan
   image: sonarsource/sonar-scanner-cli:latest
   needs: [test-user, test-ride, test-dispatch, test-notification]
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+  cache:
+    key: "sonar-cache-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .sonar/cache
   script:
     - sonar-scanner
-        -Dsonar.host.url="$SONAR_HOST_URL"
-        -Dsonar.login="$SONAR_TOKEN"
-        -Dsonar.projectBaseDir=.
+      -Dsonar.host.url="$SONAR_HOST_URL"
+      -Dsonar.login="$SONAR_TOKEN"
+      -Dsonar.projectBaseDir=.
   rules:
     - if: $CI_COMMIT_BRANCH == "main" && $SONAR_TOKEN && $SONAR_HOST_URL
     - if: $CI_PIPELINE_SOURCE == "web" && $SONAR_TOKEN && $SONAR_HOST_URL
-  allow_failure: true   # don't block if SonarQube is temporarily unavailable
+  allow_failure: true # don't block if SonarQube is temporarily unavailable
 
 # ---------------------------------------------------------------------------
 # STAGE 4: publish — load tarball → push to DockerHub (after clean scan)
@@ -213,12 +238,12 @@ sonarqube:
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   script:
-    - export IMG="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
+    - export IMG_BASE="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
     - docker load < "${SERVICE_NAME}.tar"
-    - docker tag "$IMG:ci-$CI_COMMIT_SHORT_SHA" "$IMG:latest"
-    - docker tag "$IMG:ci-$CI_COMMIT_SHORT_SHA" "$IMG:$CI_COMMIT_SHORT_SHA"
-    - docker push "$IMG:latest"
-    - docker push "$IMG:$CI_COMMIT_SHORT_SHA"
+    - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:latest"
+    - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMG_BASE:latest"
+    - docker push "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -259,7 +284,7 @@ publish-frontend:
 
 deploy-gitops:
   stage: deploy
-  image: line/kubectl-kustomize:latest
+  image: alpine/k8s:1.36.0
   before_script:
     - git config --global user.email "ci@vroom-platform.com"
     - git config --global user.name "Vroom CI Bot"
@@ -283,6 +308,13 @@ deploy-gitops:
       git add .
       git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
       git push origin main
-  needs: [publish-user, publish-ride, publish-notification, publish-dispatch, publish-frontend]
+  needs:
+    [
+      publish-user,
+      publish-ride,
+      publish-notification,
+      publish-dispatch,
+      publish-frontend,
+    ]
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
