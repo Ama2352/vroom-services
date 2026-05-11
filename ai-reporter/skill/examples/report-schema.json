@@ -2,14 +2,14 @@
   "type": "object",
   "properties": {
     "overall_status": { "type": "string", "enum": ["OK", "WARN", "CRIT"] },
-    "summary":        { "type": "string" },
+    "summary": { "type": "string" },
     "services": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "name":    { "type": "string" },
-          "status":  { "type": "string", "enum": ["OK", "WARN", "CRIT"] },
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["OK", "WARN", "CRIT"] },
           "finding": { "type": "string" }
         },
         "required": ["name", "status", "finding"]
@@ -17,8 +17,7 @@
     },
     "recommendations": {
       "type": "array",
-      "items": { "type": "string" },
-      "maxItems": 3
+      "items": { "type": "string" }
     }
   },
   "required": ["overall_status", "summary", "services", "recommendations"]

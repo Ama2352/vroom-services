@@ -50,11 +50,11 @@ def call_gemini(metrics: dict, retry_feedback: str = "") -> dict:
 
     genai.configure(api_key=GEMINI_KEY)
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model_name="gemini-flash-latest",
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
             response_schema=schema,
-            max_output_tokens=800,
+            max_output_tokens=2048,
             temperature=0.1,
         ),
         system_instruction=system,
