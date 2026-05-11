@@ -40,8 +40,8 @@ def query_prometheus(promql: str) -> list:
         results = resp.json().get("data", {}).get("result", [])
         return results
     except Exception as exc:
-        print(f"WARN: Prometheus query failed at {url}: {exc}", file=sys.stderr)
-        return []
+        print(f"ERROR: Prometheus query failed at {url}: {exc}", file=sys.stderr)
+        return None
 
 
 def query_loki_error_count(service: str) -> int | None:
@@ -70,7 +70,9 @@ def query_loki_error_count(service: str) -> int | None:
         return None
 
 
-def extract_value(results: list, label: str, label_value: str) -> float | None:
+def extract_value(results: list | None, label: str, label_value: str) -> float | None:
+    if results is None:
+        return None
     for r in results:
         if r.get("metric", {}).get(label) == label_value:
             try:
@@ -111,9 +113,10 @@ def main() -> int:
         }
 
         if (
-            (error_rate is not None and error_rate > THRESHOLDS["error_rate_pct"])
-            or (p99        is not None and p99        > THRESHOLDS["p99_latency_s"])
-            or (error_logs is not None and error_logs > THRESHOLDS["error_log_count"])
+            req_rate is None or error_rate is None or p99 is None or error_logs is None
+            or (error_rate > THRESHOLDS["error_rate_pct"])
+            or (p99        > THRESHOLDS["p99_latency_s"])
+            or (error_logs > THRESHOLDS["error_log_count"])
         ):
             anomaly_found = True
 

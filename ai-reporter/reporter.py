@@ -82,9 +82,8 @@ def main() -> int:
 
     # Step 1: Collect metrics
     exit_code, _ = run_script("collect_metrics.py")
-    if exit_code == 0:
-        run_script("post_slack.py", "--healthy")
-        return 0
+    # We now always proceed to Gemini analysis to ensure metrics are reported to Slack,
+    # regardless of whether an anomaly was strictly detected by thresholds.
 
     metrics = json.load(open("metrics.json"))
 
