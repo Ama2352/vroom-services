@@ -12,10 +12,10 @@ import time
 
 import requests
 
-PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring:9090")
-LOKI_URL       = os.environ.get("LOKI_URL", "http://loki-stack.monitoring:3100")
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://kube-prometheus-stack-prometheus.monitoring:9090/prometheus").rstrip("/")
+LOKI_URL       = os.environ.get("LOKI_URL", "http://loki-stack.monitoring:3100").rstrip("/")
 NAMESPACE      = os.environ.get("TARGET_NAMESPACE", "vroom-dev")
-WINDOW         = os.environ.get("VERIFY_WINDOW", "30m")
+WINDOW         = os.environ.get("VERIFY_WINDOW", "10m")
 
 SERVICES = ["user-service", "ride-service", "dispatch-service", "notification-service"]
 
@@ -28,9 +28,11 @@ THRESHOLDS = {
 
 
 def query_prometheus(promql: str) -> list:
+    url = f"{PROMETHEUS_URL}/api/v1/query"
     try:
+        print(f"INFO: Querying Prometheus at {url}...")
         resp = requests.get(
-            f"{PROMETHEUS_URL}/api/v1/query",
+            url,
             params={"query": promql},
             timeout=10,
         )
@@ -38,7 +40,7 @@ def query_prometheus(promql: str) -> list:
         results = resp.json().get("data", {}).get("result", [])
         return results
     except Exception as exc:
-        print(f"WARN: Prometheus query failed: {exc}", file=sys.stderr)
+        print(f"WARN: Prometheus query failed at {url}: {exc}", file=sys.stderr)
         return []
 
 

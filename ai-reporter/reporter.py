@@ -13,7 +13,10 @@ import subprocess
 import sys
 import time
 
-import google.generativeai as genai
+import warnings
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", FutureWarning)
+    import google.generativeai as genai
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 SKILL_DIR  = os.path.join(os.path.dirname(__file__), "skill")
