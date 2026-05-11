@@ -24,6 +24,8 @@ variables:
   # GITHUB_GITOPS_TOKEN   — GitHub classic PAT (repo scope) with write access to vroom-gitops
   # SONAR_TOKEN           — From local SonarQube: My Account → Security → Generate Token
   # SONAR_HOST_URL        — http://<k3s-server-node-ip>:<sonarqube-nodeport>
+  GIT_STRATEGY: clone
+  GIT_DEPTH: 1
 
 # ---------------------------------------------------------------------------
 # STAGE 1: test
@@ -311,7 +313,7 @@ publish-ai-reporter:
 #       set -e
 #       git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
 #       cd gitops-repo/apps
-# 
+#
 #       for service in user ride notification dispatch frontend; do
 #         echo "Updating $service → $CI_COMMIT_SHORT_SHA"
 #         cd "$service/overlays/dev"
@@ -322,7 +324,7 @@ publish-ai-reporter:
 #         fi
 #         cd ../../..
 #       done
-# 
+#
 #       git add .
 #       git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
 #       git push origin main
