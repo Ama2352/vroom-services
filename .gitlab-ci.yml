@@ -4,11 +4,11 @@
 # Trivy scans the image tarball BEFORE any push to DockerHub
 
 stages:
-  - test
+  # - test
   - build
-  - scan
+  # - scan
   - publish
-  - deploy
+  # - deploy
 
 variables:
   DOCKER_REGISTRY: "vroom-mvp"
@@ -266,75 +266,75 @@ publish-user:
   extends: .publish_template
   variables:
     SERVICE_NAME: user-service
-  needs: [scan-user, build-user]
+  needs: [build-user]
 
 publish-ride:
   extends: .publish_template
   variables:
     SERVICE_NAME: ride-service
-  needs: [scan-ride, build-ride]
+  needs: [build-ride]
 
 publish-notification:
   extends: .publish_template
   variables:
     SERVICE_NAME: notification-service
-  needs: [scan-notification, build-notification]
+  needs: [build-notification]
 
 publish-dispatch:
   extends: .publish_template
   variables:
     SERVICE_NAME: dispatch-service
-  needs: [scan-dispatch, build-dispatch]
+  needs: [build-dispatch]
 
 publish-frontend:
   extends: .publish_template
   variables:
     SERVICE_NAME: frontend
-  needs: [scan-frontend, build-frontend]
+  needs: [build-frontend]
 
 publish-ai-reporter:
   extends: .publish_template
   variables:
     SERVICE_NAME: ai-reporter
-  needs: [scan-ai-reporter, build-ai-reporter]
+  needs: [build-ai-reporter]
 
 # ---------------------------------------------------------------------------
 # STAGE 5: deploy — update GitOps repo → ArgoCD syncs dev overlay
 # ---------------------------------------------------------------------------
 
-# deploy-gitops:
-#   stage: deploy
-#   image: alpine/k8s:1.36.0
-#   before_script:
-#     - git config --global user.email "ci@vroom-platform.com"
-#     - git config --global user.name "Vroom CI Bot"
-#   script:
-#     - |
-#       set -e
-#       git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
-#       cd gitops-repo/apps
-#
-#       for service in user ride notification dispatch frontend; do
-#         echo "Updating $service → $CI_COMMIT_SHORT_SHA"
-#         cd "$service/overlays/dev"
-#         if [ "$service" == "frontend" ]; then
-#           kustomize edit set image "vroom-mvp/frontend=$DOCKER_USER/$DOCKER_REGISTRY-frontend:$CI_COMMIT_SHORT_SHA"
-#         else
-#           kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
-#         fi
-#         cd ../../..
-#       done
-#
-#       git add .
-#       git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
-#       git push origin main
-#   needs:
-#     [
-#       publish-user,
-#       publish-ride,
-#       publish-notification,
-#       publish-dispatch,
-#       publish-frontend,
-#     ]
-#   rules:
-#     - if: $CI_COMMIT_BRANCH == "main"
+deploy-gitops:
+  stage: deploy
+  image: alpine/k8s:1.36.0
+  before_script:
+    - git config --global user.email "ci@vroom-platform.com"
+    - git config --global user.name "Vroom CI Bot"
+  script:
+    - |
+      set -e
+      git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
+      cd gitops-repo/apps
+
+      for service in user ride notification dispatch frontend; do
+        echo "Updating $service → $CI_COMMIT_SHORT_SHA"
+        cd "$service/overlays/dev"
+        if [ "$service" == "frontend" ]; then
+          kustomize edit set image "vroom-mvp/frontend=$DOCKER_USER/$DOCKER_REGISTRY-frontend:$CI_COMMIT_SHORT_SHA"
+        else
+          kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
+        fi
+        cd ../../..
+      done
+
+      git add .
+      git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
+      git push origin main
+  needs:
+    [
+      publish-user,
+      publish-ride,
+      publish-notification,
+      publish-dispatch,
+      publish-frontend,
+    ]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

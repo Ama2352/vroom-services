@@ -19,6 +19,7 @@ with warnings.catch_warnings():
     import google.generativeai as genai
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+MODEL_NAME  = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash-8b")
 SKILL_DIR  = os.path.join(os.path.dirname(__file__), "skill")
 
 
@@ -50,7 +51,7 @@ def call_gemini(metrics: dict, retry_feedback: str = "") -> dict:
 
     genai.configure(api_key=GEMINI_KEY)
     model = genai.GenerativeModel(
-        model_name="gemini-flash-latest",
+        model_name=MODEL_NAME,
         generation_config=genai.GenerationConfig(
             response_mime_type="application/json",
             response_schema=schema,
@@ -87,8 +88,8 @@ def main() -> int:
 
     metrics = json.load(open("metrics.json"))
 
-    # Step 2: Analyze with Gemini Flash
-    print("Calling Gemini Flash for analysis…")
+    # Step 2: Analyze with Gemini
+    print(f"Calling {MODEL_NAME} for analysis…")
     report = call_gemini(metrics)
     json.dump(report, open("report.json", "w"), indent=2)
 
