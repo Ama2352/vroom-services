@@ -53,7 +53,7 @@ def query_loki_error_count(service: str) -> int | None:
         resp = requests.get(
             f"{LOKI_URL}/loki/api/v1/query_range",
             params={
-                "query": f'count_over_time({{namespace="{NAMESPACE}", app="{service}"}} |= "level=error" [{WINDOW}])',
+                "query": f'count_over_time({{namespace="{NAMESPACE}", app="{service}"}} |~ "(?i)error" [{WINDOW}])',
                 "start": start_ns,
                 "end":   end_ns,
                 "limit": 1,
@@ -86,23 +86,24 @@ def main() -> int:
     metrics = {"window": WINDOW, "namespace": NAMESPACE, "services": {}}
 
     # Prometheus queries
+    # Note: Using 'gin_' prefix and 'service' label as configured in vroom services
     req_rate_results = query_prometheus(
-        f'sum by (app) (rate(http_requests_total{{namespace="{NAMESPACE}"}}[{WINDOW}]))'
+        f'sum by (service) (rate(gin_requests_total{{namespace="{NAMESPACE}"}}[{WINDOW}]))'
     )
     err_rate_results = query_prometheus(
-        f'100 * sum by (app) (rate(http_requests_total{{namespace="{NAMESPACE}",status=~"5.."}}[{WINDOW}]))'
-        f' / sum by (app) (rate(http_requests_total{{namespace="{NAMESPACE}"}}[{WINDOW}]))'
+        f'100 * sum by (service) (rate(gin_requests_total{{namespace="{NAMESPACE}",code=~"5.."}}[{WINDOW}]))'
+        f' / sum by (service) (rate(gin_requests_total{{namespace="{NAMESPACE}"}}[{WINDOW}]))'
     )
     p99_results = query_prometheus(
-        f'histogram_quantile(0.99, sum by (le, app) (rate(http_request_duration_seconds_bucket{{namespace="{NAMESPACE}"}}[{WINDOW}])))'
+        f'histogram_quantile(0.99, sum by (le, service) (rate(gin_request_duration_seconds_bucket{{namespace="{NAMESPACE}"}}[{WINDOW}])))'
     )
 
     anomaly_found = False
 
     for svc in SERVICES:
-        req_rate   = extract_value(req_rate_results, "app", svc)
-        error_rate = extract_value(err_rate_results, "app", svc)
-        p99        = extract_value(p99_results,      "app", svc)
+        req_rate   = extract_value(req_rate_results, "service", svc)
+        error_rate = extract_value(err_rate_results, "service", svc)
+        p99        = extract_value(p99_results,      "service", svc)
         error_logs = query_loki_error_count(svc)
 
         metrics["services"][svc] = {
@@ -131,7 +132,7 @@ def main() -> int:
         print("STATUS: anomaly detected — Gemini analysis required")
         return 1
 
-    print("STATUS: all services within thresholds — skipping Gemini call")
+    print("STATUS: all services within thresholds")
     return 0
 
 

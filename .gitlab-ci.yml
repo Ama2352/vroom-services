@@ -255,9 +255,9 @@ build-ai-reporter:
     - export IMG_BASE="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
     - docker load < "${SERVICE_NAME}.tar"
     - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:latest"
-    - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
+    - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:b$CI_PIPELINE_IID-$CI_COMMIT_SHORT_SHA"
     - docker push "$IMG_BASE:latest"
-    - docker push "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMG_BASE:b$CI_PIPELINE_IID-$CI_COMMIT_SHORT_SHA"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_PIPELINE_SOURCE == "web"
