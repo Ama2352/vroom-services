@@ -106,17 +106,19 @@ def main() -> int:
         error_logs = query_loki_error_count(svc)
 
         metrics["services"][svc] = {
-            "req_rate_rps":   round(req_rate,   2) if req_rate   is not None else None,
-            "error_rate_pct": round(error_rate, 3) if error_rate is not None else None,
-            "p99_latency_s":  round(p99,        3) if p99        is not None else None,
-            "error_logs":     error_logs,
+            "req_rate_rps":   round(req_rate,   2) if req_rate   is not None else 0.0,
+            "error_rate_pct": round(error_rate, 3) if error_rate is not None else 0.0,
+            "p99_latency_s":  round(p99,        3) if p99        is not None else 0.0,
+            "error_logs":     error_logs if error_logs is not None else 0,
+            "instrumented":   (req_rate is not None),
         }
 
+        # Anomaly is only true if metrics EXIST and exceed thresholds, 
+        # or if critical logs are found. Missing metrics are noted but don't trigger alerts here.
         if (
-            req_rate is None or error_rate is None or p99 is None or error_logs is None
-            or (error_rate > THRESHOLDS["error_rate_pct"])
-            or (p99        > THRESHOLDS["p99_latency_s"])
-            or (error_logs > THRESHOLDS["error_log_count"])
+            (error_rate is not None and error_rate > THRESHOLDS["error_rate_pct"])
+            or (p99 is not None and p99 > THRESHOLDS["p99_latency_s"])
+            or (error_logs is not None and error_logs > THRESHOLDS["error_log_count"])
         ):
             anomaly_found = True
 

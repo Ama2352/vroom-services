@@ -17,7 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/zsais/go-gin-prometheus"
 )
 
 func main() {
@@ -72,6 +72,9 @@ func main() {
 	// 5. Router Setup
 	r := gin.Default()
 
+	p := ginprometheus.NewPrometheus("gin")
+	p.Use(r)
+
 	v1 := r.Group("/v1")
 	{
 		auth := v1.Group("/auth")
@@ -86,8 +89,6 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "I am fine!")
 	})
-
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	log.Printf("User Service starting on port %s", port)
 	if err := r.Run(":" + port); err != nil {

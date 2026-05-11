@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
+	"github.com/zsais/go-gin-prometheus"
 	"database/sql"
 	"fmt"
 )
@@ -68,6 +68,9 @@ func main() {
 	// 4. Router Setup
 	r := gin.Default()
 
+	p := ginprometheus.NewPrometheus("gin")
+	p.Use(r)
+
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
@@ -117,8 +120,6 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "UP", "consumer_id": consumerID})
 	})
-
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	log.Printf("Notification Service starting on port %s", port)
 	if err := r.Run(":" + port); err != nil {
