@@ -19,7 +19,7 @@ with warnings.catch_warnings():
     import google.generativeai as genai
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_NAME  = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash-8b")
+MODEL_NAME  = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 SKILL_DIR  = os.path.join(os.path.dirname(__file__), "skill")
 
 
