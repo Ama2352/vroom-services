@@ -104,20 +104,38 @@ def post_verify_report(path: str) -> None:
     annotation = report.get("kargo_annotation", "")
     summary    = report.get("summary", "")
 
+    # Determine next environment for promotion text
+    NEXT_ENV = {
+        "vroom-dev": "vroom-staging",
+        "vroom-staging": "vroom-prod"
+    }
+    target = NEXT_ENV.get(NAMESPACE)
+
     # Determine gate verdict and Slack header
     verdict = "FAIL" if (status == "CRIT" or (regression and risk == "CRITICAL")) else "PASS"
-    if verdict == "FAIL":
-        header_emoji  = "🔴"
-        header_text   = f"PROMOTE TO {NAMESPACE}: DO NOT PROMOTE"
-        fallback_text = f"[DO NOT PROMOTE] Kargo Gate — {NAMESPACE} | {status}"
-    elif regression:
-        header_emoji  = "⚠️"
-        header_text   = f"PROMOTE TO {NAMESPACE}: YES — WITH CAUTION"
-        fallback_text = f"[PASS WITH CAUTION] Kargo Gate — {NAMESPACE} | {status}"
+
+    if target:
+        if verdict == "FAIL":
+            header_emoji  = "🔴"
+            header_text   = f"PROMOTE TO {target}: DO NOT PROMOTE"
+            fallback_text = f"[DO NOT PROMOTE] Kargo Gate — {NAMESPACE} | {status}"
+        elif regression:
+            header_emoji  = "⚠️"
+            header_text   = f"PROMOTE TO {target}: YES — WITH CAUTION"
+            fallback_text = f"[PASS WITH CAUTION] Kargo Gate — {NAMESPACE} | {status}"
+        else:
+            header_emoji  = "✅"
+            header_text   = f"PROMOTE TO {target}: YES"
+            fallback_text = f"[PASS] Kargo Gate — {NAMESPACE} | {status}"
     else:
-        header_emoji  = "✅"
-        header_text   = f"PROMOTE TO {NAMESPACE}: YES"
-        fallback_text = f"[PASS] Kargo Gate — {NAMESPACE} | {status}"
+        # For prod (no next target)
+        header_emoji = "✅" if verdict == "PASS" else ("⚠️" if regression else "🔴")
+        header_text = f"Vroom Health Verification — {NAMESPACE}"
+        if verdict == "FAIL":
+            header_text += " — ANOMALIES DETECTED"
+        elif regression:
+            header_text += " — REGRESSION DETECTED"
+        fallback_text = f"Vroom Health Gate — {NAMESPACE} | {status}"
 
     regression_flag = "🔀 Regression detected" if regression else "✅ No regression"
 
