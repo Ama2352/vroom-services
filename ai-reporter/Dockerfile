@@ -1,4 +1,5 @@
-FROM public.ecr.aws/docker/library/python:3.12-slim
+ARG BASE_IMAGE_PREFIX=""
+FROM ${BASE_IMAGE_PREFIX}python:3.12-slim
 
 WORKDIR /app
 

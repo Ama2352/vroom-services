@@ -37,7 +37,7 @@ variables:
 
 .go_test_template:
   stage: test
-  image: public.ecr.aws/docker/library/golang:1.25-alpine
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/golang:1.25-alpine
   cache:
     key: "go-test-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
     paths:
@@ -110,9 +110,9 @@ variables:
 
 .build_template:
   stage: build
-  image: public.ecr.aws/docker/library/docker:24.0.5
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24.0.5
   services:
-    - name: public.ecr.aws/docker/library/docker:24.0.5-dind
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24.0.5-dind
       alias: docker
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
@@ -120,8 +120,9 @@ variables:
     - export IMG_BASE="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
     - export IMG="$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA"
     - docker pull "$IMG_BASE:latest" || true
+    - export BP_ARG=$( [ -n "$CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX" ] && echo "--build-arg BASE_IMAGE_PREFIX=${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/" || echo "" )
     - cd "$SERVICE_PATH"
-    - docker build --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from "$IMG_BASE:latest" -t "$IMG" .
+    - docker build $BP_ARG --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from "$IMG_BASE:latest" -t "$IMG" .
     - docker save "$IMG" > "../${SERVICE_NAME}.tar"
   artifacts:
     paths: ["${SERVICE_NAME}.tar"]
@@ -251,9 +252,9 @@ build-ai-reporter:
 
 .publish_template:
   stage: publish
-  image: public.ecr.aws/docker/library/docker:24.0.5
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24.0.5
   services:
-    - name: public.ecr.aws/docker/library/docker:24.0.5-dind
+    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:24.0.5-dind
       alias: docker
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"

@@ -1,4 +1,5 @@
-FROM public.ecr.aws/docker/library/node:20-alpine
+ARG BASE_IMAGE_PREFIX=""
+FROM ${BASE_IMAGE_PREFIX}node:20-alpine
 
 WORKDIR /app
 
