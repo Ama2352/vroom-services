@@ -319,8 +319,12 @@ def main() -> int:
         run_script("post_slack.py", "--unavailable")
         return 1 if args.mode == "verify" else 0
 
-    # Smart pre-filter (report mode only) — skip Gemini when truly healthy
+    # Smart pre-filter (report mode only) — skip Gemini when truly healthy and data is complete
     if args.mode == "report":
+        all_instrumented = all(
+            svc.get("instrumented", False)
+            for svc in metrics["services"].values()
+        )
         has_any_errors = any(
             svc.get("error_logs", 0) > 0
             for svc in metrics["services"].values()
@@ -330,10 +334,16 @@ def main() -> int:
             or svc.get("pod_health", {}).get("oomkill_count", 0) > 0
             for svc in metrics["services"].values()
         )
-        if collect_exit_code == 0 and not has_any_errors and not has_pod_issues:
-            print("STATUS: all services healthy — skipping Gemini (token efficiency)")
+
+        if collect_exit_code == 0 and all_instrumented and not has_any_errors and not has_pod_issues:
+            print("STATUS: All services healthy and instrumented — skipping Gemini analysis (token efficiency)")
             run_script("post_slack.py", "--healthy")
             return 0
+        
+        if not all_instrumented:
+            print("STATUS: Some services are not instrumented (missing Prometheus data) — Gemini analysis required")
+        elif has_any_errors or has_pod_issues:
+            print("STATUS: Minor issues detected (below WARN thresholds) — using Gemini for smart summary")
 
     # Analyze with Gemini
     print(f"Calling {MODEL_NAME} for analysis…")

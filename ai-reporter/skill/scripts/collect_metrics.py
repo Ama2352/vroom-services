@@ -65,15 +65,17 @@ def query_prometheus(promql: str) -> list | None:
         return None
 
 
-def extract_value(results: list | None, label: str, label_value: str) -> float | None:
+def extract_value(results: list | None, labels: list[str], target_value: str) -> float | None:
     if not results:
         return None
     for r in results:
-        if r.get("metric", {}).get(label) == label_value:
-            try:
-                return float(r["value"][1])
-            except (KeyError, IndexError, ValueError):
-                pass
+        metric = r.get("metric", {})
+        for label in labels:
+            if metric.get(label) == target_value:
+                try:
+                    return float(r["value"][1])
+                except (KeyError, IndexError, ValueError):
+                    pass
     return None
 
 
@@ -165,14 +167,14 @@ def collect_pod_health(namespace: str) -> dict:
 def collect_for_window(window: str) -> tuple[dict, bool]:
     """Collect metrics for a given window. Returns (metrics_dict, anomaly_found)."""
     req_rate_results = query_prometheus(
-        f'sum by (service) (rate(gin_requests_total{{namespace="{NAMESPACE}"}}[{window}]))'
+        f'sum by (app, service, job) (rate(gin_requests_total{{namespace="{NAMESPACE}"}}[{window}]))'
     )
     err_rate_results = query_prometheus(
-        f'100 * sum by (service) (rate(gin_requests_total{{namespace="{NAMESPACE}",code=~"5.."}}[{window}]))'
-        f' / sum by (service) (rate(gin_requests_total{{namespace="{NAMESPACE}"}}[{window}]))'
+        f'100 * sum by (app, service, job) (rate(gin_requests_total{{namespace="{NAMESPACE}",code=~"5.."}}[{window}]))'
+        f' / sum by (app, service, job) (rate(gin_requests_total{{namespace="{NAMESPACE}"}}[{window}]))'
     )
     p99_results = query_prometheus(
-        f'histogram_quantile(0.99, sum by (le, service) (rate(gin_request_duration_seconds_bucket{{namespace="{NAMESPACE}"}}[{window}])))'
+        f'histogram_quantile(0.99, sum by (le, app, service, job) (rate(gin_request_duration_seconds_bucket{{namespace="{NAMESPACE}"}}[{window}])))'
     )
     pod_health = collect_pod_health(NAMESPACE)
 
@@ -180,9 +182,11 @@ def collect_for_window(window: str) -> tuple[dict, bool]:
     services = {}
 
     for svc in SERVICES:
-        req_rate   = extract_value(req_rate_results, "service", svc)
-        error_rate = extract_value(err_rate_results, "service", svc)
-        p99        = extract_value(p99_results,      "service", svc)
+        # Check app, service, or job labels for the service name
+        search_labels = ["app", "service", "job"]
+        req_rate   = extract_value(req_rate_results, search_labels, svc)
+        error_rate = extract_value(err_rate_results, search_labels, svc)
+        p99        = extract_value(p99_results,      search_labels, svc)
         error_logs = query_loki_error_count(svc, window)
 
         # Fetch actual log lines if errors present
@@ -203,7 +207,8 @@ def collect_for_window(window: str) -> tuple[dict, bool]:
         }
 
         if (
-            (error_rate is not None and error_rate > THRESHOLDS["error_rate_pct"])
+            (req_rate is None) # Critical: Prometheus connectivity or instrumentation issue
+            or (error_rate is not None and error_rate > THRESHOLDS["error_rate_pct"])
             or (p99 is not None and p99 > THRESHOLDS["p99_latency_s"])
             or (error_logs is not None and error_logs > THRESHOLDS["error_log_count"])
             or svc_pod_health.get("oomkill_count", 0) > 0
