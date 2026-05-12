@@ -11,6 +11,12 @@ Token efficiency:
   - User prompt uses compact pipe-delimited format (~120 tokens vs ~400 for JSON)
   - System instruction stays static (cached component); max_output_tokens capped per mode
 
+Rate limit handling:
+  - Model: gemini-2.0-flash-lite — free tier: 1,500 RPD / 30 RPM (vs 20 RPD for gemini-2.5-flash)
+  - RPM (per-minute) 429: auto-retry once after 65s
+  - RPD (daily quota) 429: post --rate-limited warning, exit 0 (never block a Kargo gate for quota)
+  - CronJob overlap: dev (:00/:30) + staging (:00) = max 2 concurrent at :00 — safe under 30 RPM
+
 Mock/test support:
   MOCK_METRICS_FILE: if set, collect_metrics.py uses that file instead of querying Prometheus/Loki
   MOCK_GEMINI:       if "1", reporter loads MOCK_REPORT_FILE instead of calling Gemini API
@@ -29,7 +35,9 @@ with warnings.catch_warnings():
     import google.generativeai as genai
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_NAME  = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# gemini-2.0-flash-lite: 1,500 RPD / 30 RPM on free tier
+# gemini-2.5-flash was 20 RPD — caused error11 rate limit incident
+MODEL_NAME  = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
 SKILL_DIR  = os.path.join(os.path.dirname(__file__), "skill")
 
 MANDATORY_RULES = """\
@@ -40,6 +48,50 @@ MANDATORY REPORTING RULES:
 3. ALWAYS include error_logs, error_rate_pct, and p99_latency_s in every service finding.
 4. Status OK means within thresholds — NOT absence of issues. Always report actual values.
 """
+
+
+class RateLimitError(Exception):
+    """Raised when the Gemini API returns a daily quota (RPD) 429 that cannot be retried."""
+    pass
+
+
+def _generate_with_retry(model, prompt: str) -> str:
+    """Call Gemini with one automatic retry for transient RPM-level 429s.
+
+    Distinguishes two cases:
+    - RPM (per-minute) limit: waits 65s and retries once. Recoverable.
+    - RPD (per-day) quota: raises RateLimitError immediately. Unrecoverable today.
+
+    The caller catches RateLimitError and exits 0 so rate limits never fail a Kargo gate.
+    """
+    for attempt in range(2):
+        try:
+            return model.generate_content(prompt).text
+        except Exception as exc:
+            msg = str(exc)
+            is_rate_limit = (
+                "429" in msg
+                or "RESOURCE_EXHAUSTED" in msg
+                or "quota" in msg.lower()
+            )
+            if not is_rate_limit:
+                raise
+
+            # "per minute" in the error message indicates an RPM limit — transient, retryable
+            is_rpm = "per minute" in msg.lower() or "per_minute" in msg.lower()
+            if attempt == 0 and is_rpm:
+                print("WARN: Gemini RPM limit hit — waiting 65s before retry…", file=sys.stderr)
+                time.sleep(65)
+                continue
+
+            # Anything else (RPD / daily quota) is unrecoverable until tomorrow
+            raise RateLimitError(
+                f"Gemini daily quota exhausted (model={MODEL_NAME}). "
+                f"Free tier: 1,500 RPD for gemini-2.0-flash-lite. "
+                f"Original error: {msg}"
+            )
+
+    raise RateLimitError("rate limit persists after RPM retry")
 
 
 def load_json(path: str, default=None):
@@ -141,8 +193,9 @@ def call_gemini(metrics: dict, retry_feedback: str = "") -> dict:
         ),
         system_instruction=system,
     )
-    response = model.generate_content(f"Analyze:\n{build_compact_prompt(metrics)}")
-    return json.loads(response.text)
+    # RateLimitError propagates to main() — never caught here
+    response_text = _generate_with_retry(model, f"Analyze:\n{build_compact_prompt(metrics)}")
+    return json.loads(response_text)
 
 
 def call_gemini_verify(metrics: dict, baseline: dict, deploy_ctx: dict, retry_feedback: str = "") -> dict:
@@ -208,8 +261,29 @@ def call_gemini_verify(metrics: dict, baseline: dict, deploy_ctx: dict, retry_fe
         ),
         system_instruction=system,
     )
-    response = model.generate_content("\n".join(parts))
-    return json.loads(response.text)
+    # RateLimitError propagates to main() — never caught here
+    response_text = _generate_with_retry(model, "\n".join(parts))
+    return json.loads(response_text)
+
+
+def _handle_rate_limit(exc: RateLimitError, mode: str) -> int:
+    """Handle a daily quota exhaustion: post a warning and always exit 0.
+
+    Rate limits are infrastructure issues, not health failures.
+    They must never block a Kargo promotion gate.
+    """
+    print(f"WARN: {exc}", file=sys.stderr)
+    run_script("post_slack.py", "--rate-limited")
+    if mode == "verify":
+        with open("gate-verdict.json", "w") as f:
+            json.dump({
+                "verdict":         "PASS_RATE_LIMITED",
+                "overall_status":  "UNKNOWN",
+                "reason":          str(exc),
+                "kargo_annotation": f"AI gate bypassed: Gemini rate limit. Manual health review required.",
+            }, f, indent=2)
+        print("[verify] Rate limited — exiting 0 (gate bypassed; manual review recommended)")
+    return 0
 
 
 def main() -> int:
@@ -263,10 +337,13 @@ def main() -> int:
 
     # Analyze with Gemini
     print(f"Calling {MODEL_NAME} for analysis…")
-    if args.mode == "verify":
-        report = call_gemini_verify(metrics, baseline, deploy_ctx)
-    else:
-        report = call_gemini(metrics)
+    try:
+        if args.mode == "verify":
+            report = call_gemini_verify(metrics, baseline, deploy_ctx)
+        else:
+            report = call_gemini(metrics)
+    except RateLimitError as exc:
+        return _handle_rate_limit(exc, args.mode)
 
     with open("report.json", "w") as f:
         json.dump(report, f, indent=2)
@@ -275,10 +352,14 @@ def main() -> int:
     rc, output = run_script("validate_report.py", "report.json")
     if rc != 0:
         print(f"Validation failed: {output.strip()} — retrying…")
-        if args.mode == "verify":
-            report = call_gemini_verify(metrics, baseline, deploy_ctx, retry_feedback=output.strip())
-        else:
-            report = call_gemini(metrics, retry_feedback=output.strip())
+        try:
+            if args.mode == "verify":
+                report = call_gemini_verify(metrics, baseline, deploy_ctx, retry_feedback=output.strip())
+            else:
+                report = call_gemini(metrics, retry_feedback=output.strip())
+        except RateLimitError as exc:
+            return _handle_rate_limit(exc, args.mode)
+
         with open("report.json", "w") as f:
             json.dump(report, f, indent=2)
         rc, _ = run_script("validate_report.py", "report.json")

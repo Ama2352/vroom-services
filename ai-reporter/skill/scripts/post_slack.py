@@ -18,8 +18,9 @@ import sys
 
 import requests
 
-SLACK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
-NAMESPACE = os.environ.get("TARGET_NAMESPACE", "vroom-dev")
+SLACK_URL  = os.environ.get("SLACK_WEBHOOK_URL", "")
+NAMESPACE  = os.environ.get("TARGET_NAMESPACE", "vroom-dev")
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
 
 STATUS_EMOJI = {"OK": "✅", "WARN": "⚠️", "CRIT": "🔴"}
 
@@ -40,6 +41,17 @@ def post_healthy() -> None:
 
 def post_unavailable() -> None:
     post({"text": f"⚠️ *Vroom AI Reporter* (`{NAMESPACE}`) — AI analysis unavailable after retry. Manual review recommended."})
+
+
+def post_rate_limited() -> None:
+    post({
+        "text": (
+            f"⚠️ *Vroom AI Reporter* (`{NAMESPACE}`) — AI analysis skipped: Gemini free-tier daily quota reached.\n"
+            f"Promotion is *not blocked*. Manual health review recommended.\n"
+            f"Model: `{MODEL_NAME}` (free tier: 1,500 RPD / 30 RPM). "
+            f"Upgrade to a paid Gemini tier if this recurs."
+        )
+    })
 
 
 def _service_lines(report: dict) -> list[str]:
@@ -198,7 +210,7 @@ def main() -> int:
     verify_mode = "--verify" in args
 
     # Separate known action flags from file paths
-    action  = next((a for a in args if a in ("--healthy", "--unavailable")), None)
+    action  = next((a for a in args if a in ("--healthy", "--unavailable", "--rate-limited")), None)
     path    = next((a for a in args if not a.startswith("--")), "")
 
     try:
@@ -206,6 +218,8 @@ def main() -> int:
             post_healthy()
         elif action == "--unavailable":
             post_unavailable()
+        elif action == "--rate-limited":
+            post_rate_limited()
         elif verify_mode:
             post_verify_report(path or "report.json")
         else:
