@@ -34,7 +34,7 @@ variables:
 
 .go_test_template:
   stage: test
-  image: golang:1.25-alpine
+  image: public.ecr.aws/docker/library/golang:1.25-alpine
   cache:
     key: "go-test-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
     paths:
@@ -107,9 +107,9 @@ variables:
 
 .build_template:
   stage: build
-  image: docker:24.0.5
+  image: public.ecr.aws/docker/library/docker:24.0.5
   services:
-    - docker:24.0.5-dind
+    - public.ecr.aws/docker/library/docker:24.0.5-dind
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   script:
