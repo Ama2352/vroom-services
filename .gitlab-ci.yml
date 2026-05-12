@@ -19,6 +19,9 @@ variables:
   GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
   # Enable Docker BuildKit for layer caching
   DOCKER_BUILDKIT: "1"
+  # Docker-in-Docker settings
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
   # Set these in GitLab CI/CD Variables (protected):
   # DOCKER_USER           — DockerHub username
   # DOCKER_PASSWORD       — DockerHub access token
@@ -109,7 +112,8 @@ variables:
   stage: build
   image: public.ecr.aws/docker/library/docker:24.0.5
   services:
-    - public.ecr.aws/docker/library/docker:24.0.5-dind
+    - name: public.ecr.aws/docker/library/docker:24.0.5-dind
+      alias: docker
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   script:
@@ -247,9 +251,10 @@ build-ai-reporter:
 
 .publish_template:
   stage: publish
-  image: docker:24.0.5
+  image: public.ecr.aws/docker/library/docker:24.0.5
   services:
-    - docker:24.0.5-dind
+    - name: public.ecr.aws/docker/library/docker:24.0.5-dind
+      alias: docker
   before_script:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   script:
