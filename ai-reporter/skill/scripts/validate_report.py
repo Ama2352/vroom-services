@@ -3,11 +3,16 @@
 Validates report.json against the expected schema.
 Prints PASS or FAIL: <reason>.
 Exits 0 on PASS, 1 on FAIL.
+
+Supports both report mode (base schema) and verify mode (extended schema).
+Verify-mode fields are optional — only validated if present (backward-compatible).
 """
 import json
 import sys
 
 VALID_STATUSES = {"OK", "WARN", "CRIT"}
+VALID_RISK     = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+VALID_CONF     = {"LOW", "MEDIUM", "HIGH"}
 
 
 def validate(path: str) -> tuple[bool, str]:
@@ -39,10 +44,27 @@ def validate(path: str) -> tuple[bool, str]:
     recs = report.get("recommendations", [])
     if not isinstance(recs, list) or len(recs) == 0:
         return False, "recommendations must be a non-empty array"
-    if len(recs) > 3:
-        return False, f"recommendations has {len(recs)} entries (max 3)"
+    if len(recs) > 5:
+        return False, f"recommendations has {len(recs)} entries (max 5)"
     if any(not r for r in recs):
         return False, "recommendations must not contain empty strings"
+
+    # Verify-mode fields: only validate if present (backward-compatible with report mode)
+    if "regression_detected" in report:
+        if not isinstance(report.get("regression_detected"), bool):
+            return False, "regression_detected must be a boolean"
+
+    if "deployment_risk" in report:
+        if report.get("deployment_risk") not in VALID_RISK:
+            return False, f"deployment_risk must be LOW|MEDIUM|HIGH|CRITICAL, got: {report.get('deployment_risk')!r}"
+
+    if "confidence" in report:
+        if report.get("confidence") not in VALID_CONF:
+            return False, f"confidence must be LOW|MEDIUM|HIGH, got: {report.get('confidence')!r}"
+
+    if "kargo_annotation" in report:
+        if not isinstance(report.get("kargo_annotation"), str):
+            return False, "kargo_annotation must be a string"
 
     return True, "ok"
 

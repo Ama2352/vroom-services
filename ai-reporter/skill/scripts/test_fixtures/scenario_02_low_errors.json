@@ -1,0 +1,11 @@
+{
+  "_scenario": "02_LOW_ERRORS — the error10.md bug scenario. ride-service + notification-service each have 2 error_logs (below WARN=10). Expected: Gemini called, findings say '2 error logs (below WARN>10)', overall_status=OK.",
+  "window": "10m",
+  "namespace": "vroom-dev",
+  "services": {
+    "user-service":         { "req_rate_rps": 9.1, "error_rate_pct": 0.0, "p99_latency_s": 0.31, "error_logs": 0, "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "ride-service":         { "req_rate_rps": 0.4, "error_rate_pct": 0.0, "p99_latency_s": 0.005, "error_logs": 2, "error_log_samples": ["[07:37:52] ERROR some transient database error", "[07:37:48] ERROR connection pool exhausted briefly"], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "dispatch-service":     { "req_rate_rps": 0.4, "error_rate_pct": 0.0, "p99_latency_s": 0.005, "error_logs": 0, "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "notification-service": { "req_rate_rps": 0.2, "error_rate_pct": 0.0, "p99_latency_s": 0.007, "error_logs": 2, "error_log_samples": ["[07:37:50] ERROR failed to publish event: connection refused", "[07:37:45] ERROR redis stream write timeout"], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "_scenario": "06_WARN_LOGS — ride-service error_logs=15 (WARN >10, below CRIT 50). Expected: overall_status=WARN, ride-service status=WARN.",
+  "window": "10m",
+  "namespace": "vroom-dev",
+  "services": {
+    "user-service":         { "req_rate_rps": 9.1, "error_rate_pct": 0.0, "p99_latency_s": 0.31, "error_logs": 0,  "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "ride-service":         { "req_rate_rps": 6.3, "error_rate_pct": 0.8, "p99_latency_s": 0.55, "error_logs": 15, "error_log_samples": ["[11:30:01] ERROR redis stream consumer lag detected", "[11:29:55] ERROR outbox event publish retry 3/3", "[11:29:50] ERROR pq: statement timeout"], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "dispatch-service":     { "req_rate_rps": 5.1, "error_rate_pct": 0.0, "p99_latency_s": 0.09, "error_logs": 0,  "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "notification-service": { "req_rate_rps": 7.8, "error_rate_pct": 0.0, "p99_latency_s": 0.19, "error_logs": 0,  "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true }
+  }
+}

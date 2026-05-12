@@ -1,26 +1,40 @@
 {
-  "example_input": {
-    "window": "30m",
-    "services": {
-      "user-service":         { "req_rate_rps": 10.2, "error_rate_pct": 0.1, "p99_latency_s": 0.31, "error_logs": 0 },
-      "ride-service":         { "req_rate_rps": 7.4,  "error_rate_pct": 6.8, "p99_latency_s": 4.2,  "error_logs": 89 },
-      "dispatch-service":     { "req_rate_rps": 5.1,  "error_rate_pct": 0.0, "p99_latency_s": 0.09, "error_logs": 0 },
-      "notification-service": { "req_rate_rps": 8.3,  "error_rate_pct": 0.3, "p99_latency_s": 0.22, "error_logs": 1 }
+  "_note": "Two worked examples. Input uses compact pipe format. RULE: always state error_logs count in finding. Never say 'No errors' when error_logs > 0.",
+
+  "example_ok_with_minor_logs": {
+    "input": "ns=vroom-dev window=10m\nsvc|rps|err%|p99s|errlogs\nuser-service|9.1|0.0|0.31|0\nride-service|6.3|0.4|0.55|2\ndispatch-service|5.1|0.0|0.09|0\nnotification-service|7.8|0.0|0.19|2",
+    "output": {
+      "overall_status": "OK",
+      "summary": "All services within thresholds. ride-service and notification-service each show 2 error log entries (below WARN threshold of 10) — worth monitoring.",
+      "services": [
+        { "name": "user-service",         "status": "OK", "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.31s." },
+        { "name": "ride-service",         "status": "OK", "finding": "Within thresholds. 2 error logs (below WARN>10), 0.4% error rate, p99=0.55s." },
+        { "name": "dispatch-service",     "status": "OK", "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.09s." },
+        { "name": "notification-service", "status": "OK", "finding": "Within thresholds. 2 error logs (below WARN>10), 0.0% error rate, p99=0.19s." }
+      ],
+      "recommendations": [
+        "Monitor ride-service and notification-service error log trend — currently 2 each; escalation warrants investigation.",
+        "No immediate action required; all metrics within thresholds."
+      ]
     }
   },
-  "example_output": {
-    "overall_status": "CRIT",
-    "summary": "ride-service is critically degraded: 6.8% error rate and p99 latency of 4.2s.",
-    "services": [
-      { "name": "user-service",         "status": "OK",   "finding": "Normal. 0.1% errors, p99=0.31s." },
-      { "name": "ride-service",         "status": "CRIT", "finding": "Error rate 6.8% (CRIT >5%), p99 4.2s (CRIT >5s), 89 error logs (CRIT >50)." },
-      { "name": "dispatch-service",     "status": "OK",   "finding": "Normal. No errors, p99=0.09s." },
-      { "name": "notification-service", "status": "OK",   "finding": "Normal. 0.3% errors within threshold." }
-    ],
-    "recommendations": [
-      "Check ride-service logs for database connection timeouts or Redis Stream consumer lag.",
-      "Verify PostgreSQL rides schema for long-running queries or lock contention.",
-      "Consider restarting ride-service pod if error rate does not drop in the next cycle."
-    ]
+
+  "example_crit": {
+    "input": "ns=vroom-dev window=30m\nsvc|rps|err%|p99s|errlogs\nuser-service|10.2|0.1|0.31|0\nride-service|7.4|6.8|4.2|89\ndispatch-service|5.1|0.0|0.09|0\nnotification-service|8.3|0.3|0.22|1",
+    "output": {
+      "overall_status": "CRIT",
+      "summary": "ride-service critically degraded: 6.8% error rate (CRIT>5%), 89 error logs (CRIT>50). notification-service has 1 error log — within thresholds.",
+      "services": [
+        { "name": "user-service",         "status": "OK",   "finding": "Healthy. 0 error logs, 0.1% error rate, p99=0.31s." },
+        { "name": "ride-service",         "status": "CRIT", "finding": "CRITICAL. 89 error logs (CRIT>50), 6.8% error rate (CRIT>5%), p99=4.2s." },
+        { "name": "dispatch-service",     "status": "OK",   "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.09s." },
+        { "name": "notification-service", "status": "OK",   "finding": "Within thresholds. 1 error log (below WARN>10), 0.3% error rate, p99=0.22s." }
+      ],
+      "recommendations": [
+        "Investigate ride-service immediately — check PostgreSQL for lock contention or Redis Stream consumer lag.",
+        "Consider restarting ride-service pod if error rate does not drop within 5 minutes.",
+        "Review notification-service logs for the single error entry as a precaution."
+      ]
+    }
   }
 }

@@ -1,0 +1,8 @@
+{
+  "verdict": "PASS",
+  "overall_status": "OK",
+  "regression_detected": false,
+  "confidence": "MEDIUM",
+  "deployment_risk": "LOW",
+  "kargo_annotation": "Mock verify \u2014 run with GEMINI_API_KEY for real gate verdict."
+}

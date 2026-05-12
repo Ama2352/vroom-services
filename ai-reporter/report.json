@@ -1,0 +1,33 @@
+{
+  "overall_status": "OK",
+  "summary": "Mock report for testing \u2014 Gemini was called (pre-filter did not bypass).",
+  "services": [
+    {
+      "name": "user-service",
+      "status": "OK",
+      "finding": "Mock. 0 error logs, 0.0% error rate, p99=0.31s."
+    },
+    {
+      "name": "ride-service",
+      "status": "OK",
+      "finding": "Mock. 2 error logs (below WARN>10), 0.4% error rate, p99=0.55s."
+    },
+    {
+      "name": "dispatch-service",
+      "status": "OK",
+      "finding": "Mock. 0 error logs, 0.0% error rate, p99=0.09s."
+    },
+    {
+      "name": "notification-service",
+      "status": "OK",
+      "finding": "Mock. 2 error logs (below WARN>10), 0.0% error rate, p99=0.19s."
+    }
+  ],
+  "recommendations": [
+    "Mock recommendation \u2014 run with GEMINI_API_KEY for real analysis."
+  ],
+  "regression_detected": false,
+  "deployment_risk": "LOW",
+  "confidence": "MEDIUM",
+  "kargo_annotation": "Mock verify \u2014 run with GEMINI_API_KEY for real gate verdict."
+}

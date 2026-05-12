@@ -13,6 +13,7 @@ stages:
 variables:
   DOCKER_REGISTRY: "vroom-mvp"
   GITHUB_GITOPS_REPO: "Ama2352/vroom-gitops"
+  VERSION: "1.0.0" # Base semantic version
   # Caching directories for Go
   GOPATH: "$CI_PROJECT_DIR/.go"
   GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
@@ -253,11 +254,12 @@ build-ai-reporter:
     - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
   script:
     - export IMG_BASE="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
+    - export IMG_TAG="v${VERSION}-build.${CI_PIPELINE_IID}-${CI_COMMIT_SHORT_SHA}"
     - docker load < "${SERVICE_NAME}.tar"
     - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:latest"
-    - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:b$CI_PIPELINE_IID-$CI_COMMIT_SHORT_SHA"
+    - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:$IMG_TAG"
     - docker push "$IMG_BASE:latest"
-    - docker push "$IMG_BASE:b$CI_PIPELINE_IID-$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMG_BASE:$IMG_TAG"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_PIPELINE_SOURCE == "web"

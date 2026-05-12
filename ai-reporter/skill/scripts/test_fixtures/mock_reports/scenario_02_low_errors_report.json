@@ -1,0 +1,14 @@
+{
+  "overall_status": "OK",
+  "summary": "All services within thresholds. ride-service and notification-service each show 2 error log entries (below WARN threshold of 10) — worth monitoring.",
+  "services": [
+    {"name": "user-service",         "status": "OK", "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.31s."},
+    {"name": "ride-service",         "status": "OK", "finding": "Within thresholds. 2 error logs (below WARN>10), 0.0% error rate, p99=0.005s."},
+    {"name": "dispatch-service",     "status": "OK", "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.005s."},
+    {"name": "notification-service", "status": "OK", "finding": "Within thresholds. 2 error logs (below WARN>10), 0.0% error rate, p99=0.007s."}
+  ],
+  "recommendations": [
+    "Monitor ride-service error log trend — currently 2, watch for escalation above 10.",
+    "Monitor notification-service error log trend — currently 2, check Redis Stream connectivity."
+  ]
+}

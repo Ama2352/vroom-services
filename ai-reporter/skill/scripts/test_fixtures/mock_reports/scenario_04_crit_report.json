@@ -1,0 +1,15 @@
+{
+  "overall_status": "CRIT",
+  "summary": "ride-service critically degraded: 7.0% error rate (CRIT >5%), 42 error logs.",
+  "services": [
+    {"name": "user-service",         "status": "OK",   "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.31s."},
+    {"name": "ride-service",         "status": "CRIT", "finding": "CRITICAL. 42 error logs (below CRIT>50), 7.0% error rate (CRIT>5%), p99=1.80s."},
+    {"name": "dispatch-service",     "status": "OK",   "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.09s."},
+    {"name": "notification-service", "status": "OK",   "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.19s."}
+  ],
+  "recommendations": [
+    "Investigate ride-service immediately: pq connection limit exceeded — PostgreSQL pool exhausted.",
+    "Run: kubectl logs -n vroom-dev -l app=ride-service --tail=50",
+    "Run: kubectl rollout restart deployment/ride-service -n vroom-dev if rate does not drop within 5 minutes."
+  ]
+}

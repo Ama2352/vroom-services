@@ -1,0 +1,36 @@
+{
+  "overall_status": "OK",
+  "summary": "Post-deploy health check passed. ride-service and notification-service gained 2 error logs vs 0 baseline — regression flagged but below absolute WARN threshold.",
+  "regression_detected": true,
+  "deployment_risk": "MEDIUM",
+  "confidence": "HIGH",
+  "kargo_annotation": "WARN: ride-service +2 error_logs vs baseline (0→2) + 1 restart. notification-service +2 error_logs (0→2). Monitor post-promotion.",
+  "services": [
+    {
+      "name": "user-service", "status": "OK",
+      "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.31s. No regression.",
+      "regression": {"detected": false}, "pod_health_finding": "0 restarts, ready."
+    },
+    {
+      "name": "ride-service", "status": "OK",
+      "finding": "Within thresholds. 2 error logs (below WARN>10), 0.4% error rate, p99=0.55s. REGRESSION: error_logs increased from 0 to 2.",
+      "regression": {"detected": true, "metric": "error_logs", "baseline_value": 0, "current_value": 2, "delta_pct": 100},
+      "pod_health_finding": "1 restart detected post-deploy. Pod is ready."
+    },
+    {
+      "name": "dispatch-service", "status": "OK",
+      "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.09s. No regression.",
+      "regression": {"detected": false}, "pod_health_finding": "0 restarts, ready."
+    },
+    {
+      "name": "notification-service", "status": "OK",
+      "finding": "Within thresholds. 2 error logs (below WARN>10), 0.0% error rate, p99=0.19s. REGRESSION: error_logs increased from 0 to 2.",
+      "regression": {"detected": true, "metric": "error_logs", "baseline_value": 0, "current_value": 2, "delta_pct": 100},
+      "pod_health_finding": "0 restarts, ready."
+    }
+  ],
+  "recommendations": [
+    "Monitor after promotion: watch ride-service error_logs for escalation above 10 (WARN threshold).",
+    "Monitor after promotion: watch notification-service error_logs; 2 new errors may indicate Redis Stream issue."
+  ]
+}

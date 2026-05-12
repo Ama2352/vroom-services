@@ -1,0 +1,14 @@
+{
+  "overall_status": "WARN",
+  "summary": "ride-service is degraded: 2.5% error rate (WARN >1%), 8 error logs.",
+  "services": [
+    {"name": "user-service",         "status": "OK",   "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.31s."},
+    {"name": "ride-service",         "status": "WARN",  "finding": "WARN. 8 error logs (below CRIT>50), 2.5% error rate (WARN>1%), p99=0.85s."},
+    {"name": "dispatch-service",     "status": "OK",   "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.09s."},
+    {"name": "notification-service", "status": "OK",   "finding": "Healthy. 0 error logs, 0.0% error rate, p99=0.19s."}
+  ],
+  "recommendations": [
+    "Investigate ride-service: check PostgreSQL connection pool for exhaustion.",
+    "Monitor ride-service error rate — at 2.5% watch for escalation above 5% (CRIT)."
+  ]
+}

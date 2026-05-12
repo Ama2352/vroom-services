@@ -1,0 +1,11 @@
+{
+  "_scenario": "05_CRIT_LATENCY — ride-service p99=6.0s (CRIT >5.0s). Expected: overall_status=CRIT.",
+  "window": "10m",
+  "namespace": "vroom-staging",
+  "services": {
+    "user-service":         { "req_rate_rps": 9.1, "error_rate_pct": 0.0, "p99_latency_s": 0.31, "error_logs": 0, "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "ride-service":         { "req_rate_rps": 6.3, "error_rate_pct": 0.3, "p99_latency_s": 6.0,  "error_logs": 5, "error_log_samples": ["[09:22:01] ERROR timeout waiting for response from dispatch-service"], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "dispatch-service":     { "req_rate_rps": 5.1, "error_rate_pct": 0.0, "p99_latency_s": 0.09, "error_logs": 0, "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true },
+    "notification-service": { "req_rate_rps": 7.8, "error_rate_pct": 0.0, "p99_latency_s": 0.19, "error_logs": 0, "error_log_samples": [], "pod_health": {"restart_count": 0, "oomkill_count": 0}, "instrumented": true }
+  }
+}
