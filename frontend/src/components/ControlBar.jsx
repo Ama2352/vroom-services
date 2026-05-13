@@ -1,6 +1,3 @@
-/**
- * ControlBar.jsx – Demo control strip: main actions + playback controls.
- */
 import { useState, useCallback } from 'react';
 import { PlusCircle, RotateCcw } from 'lucide-react';
 import { useDemo, TRIP_STATUS } from '../store/demoStore';
@@ -11,10 +8,7 @@ export default function ControlBar() {
   const { tripStatus, drivers } = state;
   const [loading, setLoading] = useState('');
 
-  const isIdle      = tripStatus === TRIP_STATUS.IDLE;
-  const isCompleted = tripStatus === TRIP_STATUS.COMPLETED;
-
-  const canSeed = isIdle;
+  const isIdle = tripStatus === TRIP_STATUS.IDLE;
 
   const run = useCallback(async (key, fn) => {
     setLoading(key);
@@ -23,19 +17,19 @@ export default function ControlBar() {
 
   return (
     <div className="controlbar">
-      {/* Guide */}
+      {/* Step guide */}
       <div className="guide-steps">
-        <div className="guide-step">
+        <div className={`guide-step ${drivers.length > 0 ? 'done' : ''}`}>
           <span className="step-num">1</span>
           <span>Seed Drivers</span>
         </div>
         <div className="guide-arrow">→</div>
-        <div className="guide-step">
+        <div className={`guide-step ${tripStatus !== TRIP_STATUS.IDLE ? 'done' : ''}`}>
           <span className="step-num">2</span>
           <span>Request Ride</span>
         </div>
         <div className="guide-arrow">→</div>
-        <div className="guide-step">
+        <div className={`guide-step ${tripStatus === TRIP_STATUS.COMPLETED ? 'done' : ''}`}>
           <span className="step-num">3</span>
           <span>Simulate &amp; Complete</span>
         </div>
@@ -43,28 +37,28 @@ export default function ControlBar() {
 
       <div className="controlbar-divider" />
 
-      {/* Main actions */}
+      {/* Action buttons */}
       <div className="action-group">
         <button
           id="btn-seed"
           className="btn-ghost"
-          disabled={!canSeed || !!loading}
+          disabled={!isIdle || !!loading}
           onClick={() => run('seed', () => actions.seedDrivers())}
         >
           {loading === 'seed' ? <Spinner /> : <PlusCircle size={14} />}
-          Seed Drivers
+          {drivers.length > 0 ? 'Re-seed Drivers' : 'Seed Drivers'}
         </button>
 
         <button
           id="btn-reset"
           className="btn-danger"
-          onClick={() => { actions.reset(); setLoading(''); }}
+          disabled={!!loading}
+          onClick={() => run('reset', () => actions.reset())}
         >
-          <RotateCcw size={14} />
+          {loading === 'reset' ? <Spinner /> : <RotateCcw size={14} />}
           Reset
         </button>
       </div>
-
     </div>
   );
 }

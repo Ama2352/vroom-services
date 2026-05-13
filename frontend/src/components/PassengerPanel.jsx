@@ -1,16 +1,23 @@
-/**
- * PassengerPanel.jsx – Passenger mock app (left column).
- * Simulates a Grab-like booking UI.
- */
-import { useState } from 'react';
 import { MapPin, Navigation, User, Clock, CreditCard } from 'lucide-react';
 import { useDemo, PICKUP_PRESETS, DROPOFF_PRESETS, TRIP_STATUS } from '../store/demoStore';
 import './PassengerPanel.css';
 
 export default function PassengerPanel() {
   const { state, actions } = useDemo();
-  const { tripStatus, pickup, dropoff, notifications, tripId, estimatedFare, estimatedTime, error } = state;
-  const isIdle = tripStatus === TRIP_STATUS.IDLE;
+  const {
+    tripStatus, pickup, dropoff, notifications,
+    tripId, estimatedFare, estimatedTime, error,
+    assignedDriver, drivers,
+  } = state;
+
+  const isIdle      = tripStatus === TRIP_STATUS.IDLE;
+  const isSearching = tripStatus === TRIP_STATUS.SEARCHING;
+  const isActive    = !isIdle &&
+    tripStatus !== TRIP_STATUS.COMPLETED &&
+    tripStatus !== TRIP_STATUS.CANCELLED;
+  const canCancel   = tripStatus === TRIP_STATUS.SEARCHING ||
+    tripStatus === TRIP_STATUS.ASSIGNED ||
+    tripStatus === TRIP_STATUS.ACCEPTED;
 
   const passengerNotifs = notifications
     .filter(n => n.side === 'passenger')
@@ -18,11 +25,10 @@ export default function PassengerPanel() {
 
   return (
     <div className="panel passenger-panel">
+
       {/* Header */}
       <div className="panel-header">
-        <div className="panel-avatar">
-          <User size={16} />
-        </div>
+        <div className="panel-avatar"><User size={16} /></div>
         <div>
           <div className="panel-title">Passenger</div>
           <div className="panel-sub">passenger-demo</div>
@@ -38,7 +44,11 @@ export default function PassengerPanel() {
       {/* Backend error banner */}
       {error && (
         <div className="panel-section">
-          <div className="notif-item notif-warning" style={{ cursor: 'pointer' }} onClick={actions.dismissError}>
+          <div
+            className="notif-item notif-warning"
+            style={{ cursor: 'pointer' }}
+            onClick={actions.dismissError}
+          >
             <span className="notif-dot" />
             <div>
               <div className="notif-msg">{error}</div>
@@ -48,16 +58,13 @@ export default function PassengerPanel() {
         </div>
       )}
 
-      {/* Location inputs */}
+      {/* Location selectors */}
       <div className="panel-section">
         <div className="loc-field">
-          <div className="loc-icon pickup-icon">
-            <MapPin size={14} />
-          </div>
+          <div className="loc-icon pickup-icon"><MapPin size={14} /></div>
           <div className="loc-content">
             <label className="loc-label">Pickup</label>
             <select
-              id="pickup-select"
               className="loc-select"
               value={pickup.label}
               disabled={!isIdle}
@@ -73,18 +80,13 @@ export default function PassengerPanel() {
           </div>
         </div>
 
-        <div className="loc-connector">
-          <div className="connector-line" />
-        </div>
+        <div className="loc-connector"><div className="connector-line" /></div>
 
         <div className="loc-field">
-          <div className="loc-icon dropoff-icon">
-            <Navigation size={14} />
-          </div>
+          <div className="loc-icon dropoff-icon"><Navigation size={14} /></div>
           <div className="loc-content">
             <label className="loc-label">Destination</label>
             <select
-              id="dropoff-select"
               className="loc-select"
               value={dropoff.label}
               disabled={!isIdle}
@@ -112,23 +114,25 @@ export default function PassengerPanel() {
           </div>
           <div className="fare-row">
             <span className="fare-label"><CreditCard size={13} /> Fare</span>
-            <span className="fare-value fare-price">{estimatedFare.toLocaleString('vi-VN')} VND</span>
+            <span className="fare-value fare-price">
+              {estimatedFare.toLocaleString('vi-VN')} VND
+            </span>
           </div>
         </div>
 
-        {/* Passenger Actions */}
+        {/* Primary actions */}
         <div className="passenger-actions mt-6">
           {isIdle && (
-            <button 
-              className="btn-primary w-full" 
-              disabled={state.drivers.length === 0}
+            <button
+              className="btn-primary w-full"
+              disabled={drivers.length === 0}
               onClick={() => actions.requestRide(pickup, dropoff)}
             >
-              Request Ride
+              {drivers.length === 0 ? 'Seed drivers first' : 'Request Ride'}
             </button>
           )}
 
-          {tripStatus === TRIP_STATUS.SEARCHING && (
+          {isSearching && (
             <div className="flex flex-col gap-2">
               <button className="btn-primary w-full opacity-75 cursor-not-allowed" disabled>
                 <div className="flex items-center justify-center gap-2">
@@ -136,7 +140,7 @@ export default function PassengerPanel() {
                   Searching for Drivers...
                 </div>
               </button>
-              <button 
+              <button
                 className="btn-ghost w-full text-sm"
                 onClick={() => actions.cancelTrip(tripId, 'Cancelled while searching')}
               >
@@ -145,8 +149,8 @@ export default function PassengerPanel() {
             </div>
           )}
 
-          {(tripStatus === TRIP_STATUS.ASSIGNED || tripStatus === TRIP_STATUS.ACCEPTED || tripStatus === TRIP_STATUS.COMING) && (
-            <button 
+          {canCancel && !isSearching && (
+            <button
               className="btn-danger-outline w-full"
               onClick={() => actions.cancelTrip(tripId, 'Cancelled by passenger')}
             >
@@ -162,48 +166,44 @@ export default function PassengerPanel() {
       <div className="panel-section notif-section">
         <div className="section-title">Notifications</div>
         <div className="notif-list">
-          {passengerNotifs.length === 0 && (
-            <div className="notif-empty">No notifications yet</div>
-          )}
-          {passengerNotifs.map(n => (
-            <div key={n.id} className={`notif-item notif-${n.variant}`}>
-              <span className="notif-dot" />
-              <div>
-                <div className="notif-msg">{n.message}</div>
-                <div className="notif-time">{n.ts.toLocaleTimeString('vi-VN')}</div>
+          {passengerNotifs.length === 0
+            ? <div className="notif-empty">No notifications yet</div>
+            : passengerNotifs.map(n => (
+              <div key={n.id} className={`notif-item notif-${n.variant}`}>
+                <span className="notif-dot" />
+                <div>
+                  <div className="notif-msg">{n.message}</div>
+                  <div className="notif-time">{n.ts.toLocaleTimeString('vi-VN')}</div>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          }
         </div>
       </div>
 
-      {/* Trip state card */}
-      {tripStatus !== TRIP_STATUS.IDLE && (
+      {/* Trip status card */}
+      {!isIdle && (
         <div className="trip-state-card">
-          <TripStateVisual status={tripStatus} driver={state.assignedDriver} />
+          <TripStateCard
+            status={tripStatus}
+            driver={assignedDriver}
+            onReset={actions.reset}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function ResetButton() {
-  const { actions } = useDemo();
-  return (
-    <button className="tsv-reset-btn" onClick={actions.reset}>
-      New Booking
-    </button>
-  );
-}
-
-function TripStateVisual({ status, driver }) {
+function TripStateCard({ status, driver, onReset }) {
   const messages = {
-    [TRIP_STATUS.SEARCHING]:  { icon: '🔍', text: 'Finding the best driver for you…' },
-    [TRIP_STATUS.ASSIGNED]:   { icon: '🚗', text: `${driver?.name ?? 'Driver'} is assigned to your trip.` },
-    [TRIP_STATUS.COMING]:     { icon: '📍', text: `${driver?.name ?? 'Driver'} is heading to your pickup.` },
-    [TRIP_STATUS.ON_TRIP]:    { icon: '🛣️',  text: 'You are on your way to destination!' },
-    [TRIP_STATUS.COMPLETED]:  { icon: '🎉', text: 'Trip completed! Have a great day.' },
-    [TRIP_STATUS.CANCELLED]:  { icon: '❌', text: 'Trip has been cancelled.' },
+    [TRIP_STATUS.SEARCHING]: { icon: '🔍', text: 'Finding the best driver for you…' },
+    [TRIP_STATUS.ASSIGNED]:  { icon: '🚗', text: `${driver?.name ?? 'Driver'} is assigned.` },
+    [TRIP_STATUS.COMING]:    { icon: '📍', text: `${driver?.name ?? 'Driver'} is on the way.` },
+    [TRIP_STATUS.ACCEPTED]:  { icon: '🚕', text: `${driver?.name ?? 'Driver'} is heading to you.` },
+    [TRIP_STATUS.ON_TRIP]:   { icon: '🛣️',  text: 'You are on your way!' },
+    [TRIP_STATUS.COMPLETED]: { icon: '🎉', text: 'Trip completed! Have a great day.' },
+    [TRIP_STATUS.CANCELLED]: { icon: '❌', text: 'Trip has been cancelled.' },
   };
   const m = messages[status];
   if (!m) return null;
@@ -226,7 +226,9 @@ function TripStateVisual({ status, driver }) {
         </div>
       )}
       {(status === TRIP_STATUS.COMPLETED || status === TRIP_STATUS.CANCELLED) && (
-        <ResetButton />
+        <button className="tsv-reset-btn" onClick={onReset}>
+          New Booking
+        </button>
       )}
     </div>
   );

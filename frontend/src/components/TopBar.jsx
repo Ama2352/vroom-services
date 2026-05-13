@@ -1,27 +1,30 @@
-/**
- * TopBar.jsx – App header with brand, trip status badge and live clock.
- */
-import { useDemo, TRIP_STATUS } from '../store/demoStore';
-import { Zap, Activity } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Zap, Activity } from 'lucide-react';
+import { useDemo, TRIP_STATUS } from '../store/demoStore';
 import './TopBar.css';
 
 const STATUS_BADGE = {
-  [TRIP_STATUS.IDLE]:       'badge-idle',
-  [TRIP_STATUS.SEARCHING]:  'badge-searching',
-  [TRIP_STATUS.ASSIGNED]:   'badge-assigned',
-  [TRIP_STATUS.COMING]:     'badge-coming',
-  [TRIP_STATUS.ON_TRIP]:    'badge-ontrip',
-  [TRIP_STATUS.COMPLETED]:  'badge-completed',
+  [TRIP_STATUS.IDLE]:      'badge-idle',
+  [TRIP_STATUS.SEARCHING]: 'badge-searching',
+  [TRIP_STATUS.ASSIGNED]:  'badge-assigned',
+  [TRIP_STATUS.COMING]:    'badge-coming',
+  [TRIP_STATUS.ON_TRIP]:   'badge-ontrip',
+  [TRIP_STATUS.COMPLETED]: 'badge-completed',
 };
 
 const STATUS_DOT = {
-  [TRIP_STATUS.IDLE]:       '#4B5563',
-  [TRIP_STATUS.SEARCHING]:  '#F59E0B',
-  [TRIP_STATUS.ASSIGNED]:   '#3B82F6',
-  [TRIP_STATUS.COMING]:     '#06B6D4',
-  [TRIP_STATUS.ON_TRIP]:    '#6C63FF',
-  [TRIP_STATUS.COMPLETED]:  '#22C55E',
+  [TRIP_STATUS.IDLE]:      '#4B5563',
+  [TRIP_STATUS.SEARCHING]: '#F59E0B',
+  [TRIP_STATUS.ASSIGNED]:  '#3B82F6',
+  [TRIP_STATUS.COMING]:    '#06B6D4',
+  [TRIP_STATUS.ON_TRIP]:   '#6C63FF',
+  [TRIP_STATUS.COMPLETED]: '#22C55E',
+};
+
+const WS_COLOR = {
+  connected:    '#22C55E',
+  disconnected: '#EF4444',
+  connecting:   '#F59E0B',
 };
 
 export default function TopBar({ onToggleMonitor, monitorOpen }) {
@@ -34,7 +37,13 @@ export default function TopBar({ onToggleMonitor, monitorOpen }) {
   }, []);
 
   const badgeClass = STATUS_BADGE[state.tripStatus] ?? 'badge-idle';
-  const dotColor   = STATUS_DOT[state.tripStatus] ?? '#4B5563';
+  const dotColor   = STATUS_DOT[state.tripStatus]   ?? '#4B5563';
+  const wsColor    = WS_COLOR[state.wsStatus]        ?? '#F59E0B';
+  const wsLabel    = state.wsStatus === 'connected'
+    ? 'LIVE'
+    : state.wsStatus === 'disconnected'
+    ? 'OFFLINE'
+    : 'CONNECTING';
 
   return (
     <header className="topbar">
@@ -63,18 +72,8 @@ export default function TopBar({ onToggleMonitor, monitorOpen }) {
           {time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </span>
         <div className="topbar-dot-row" title={`Notification WS: ${state.wsStatus}`}>
-          <span
-            className="live-dot"
-            style={{
-              background:
-                state.wsStatus === 'connected'    ? '#22C55E' :
-                state.wsStatus === 'disconnected' ? '#EF4444' : '#F59E0B',
-            }}
-          />
-          <span className="text-sm text-muted">
-            {state.wsStatus === 'connected'    ? 'LIVE'         :
-             state.wsStatus === 'disconnected' ? 'OFFLINE'      : 'CONNECTING'}
-          </span>
+          <span className="live-dot" style={{ background: wsColor }} />
+          <span className="text-sm text-muted">{wsLabel}</span>
         </div>
         <button
           id="btn-toggle-system-monitor"
