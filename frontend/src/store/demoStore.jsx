@@ -363,6 +363,13 @@ export function DemoStoreProvider({ children }) {
     console.log(`[EVENT] ${event_type}`, data);
 
     switch (event_type) {
+      case "Trip.MatchFailed":
+        pushEvent("Matching Failed", "dispatch", {
+          reason: data.reason,
+        });
+        dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.IDLE });
+        break;
+
       case "Trip.Requested":
         pushEvent("Trip.Requested", "ride", {
           tripId: data.id,
@@ -538,6 +545,7 @@ export function DemoStoreProvider({ children }) {
     requestRide: async (p, d) => {
       const pickup = p || state.pickup;
       const dropoff = d || state.dropoff;
+      console.log("[DEBUG] requestRide called with:", { pickup, dropoff });
       dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.SEARCHING });
       notify("passenger", "Looking for a driver near you…", "info");
 
@@ -819,9 +827,20 @@ export function DemoStoreProvider({ children }) {
       notify("driver", "✅ Trip completed. Great job!", "success");
     },
 
-    reset: () => {
-      dispatch({ type: "RESET" });
-      pushEvent("Demo.Reset", "system", {});
+    reset: async () => {
+      console.log("[DEBUG] Performing full system reset...");
+      try {
+        await Promise.all([
+          axios.post(`${API.ride}/v1/debug/reset`),
+          axios.post(`${API.dispatch}/v1/debug/reset`),
+        ]);
+        dispatch({ type: "RESET" });
+        pushEvent("System.FullReset", "system", { success: true });
+        notify("passenger", "System has been fully reset.", "success");
+      } catch (err) {
+        console.error("Reset failed:", err);
+        notify("passenger", "Reset failed. Check console.", "warning");
+      }
     },
 
     setPickup: (loc) => dispatch({ type: "SET_PICKUP", payload: loc }),

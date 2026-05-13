@@ -199,3 +199,12 @@ func (h *TripHandler) CancelTrip(c *gin.Context) {
 func (h *TripHandler) Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "UP"})
 }
+
+func (h *TripHandler) Reset(c *gin.Context) {
+	err := h.tripService.Reset(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "reset ok"})
+}

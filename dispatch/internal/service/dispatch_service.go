@@ -23,9 +23,10 @@ func NewDispatchService(redisClient *redis.Client) *DispatchService {
 func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, lng float64) (string, error) {
 	// Search for nearest drivers within 5km (up to 10 candidates to account for exclusions)
 	results, err := s.redisClient.GeoRadius(ctx, "drivers_location", lng, lat, &redis.GeoRadiusQuery{
-		Radius:      5,
+		Radius:      15,
 		Unit:        "km",
 		WithDist:    true,
+		WithCoord:   true,
 		Count:       10,
 		Sort:        "ASC",
 	}).Result()
@@ -33,6 +34,8 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 	if err != nil {
 		return "", err
 	}
+
+	log.Printf("[DISPATCH] Found %d potential candidates for Trip %s", len(results), tripID)
 
 	// Fetch rejected drivers for this trip
 	rejectedDrivers, _ := s.redisClient.SMembers(ctx, "trip_rejections:"+tripID).Result()
@@ -44,6 +47,7 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 	var candidates []domain.AvailableDriver
 	for _, r := range results {
 		driverID := r.Name
+		log.Printf("[DISPATCH] Checking candidate Driver %s at (%f, %f) for Trip %s", driverID, r.Latitude, r.Longitude, tripID)
 
 		if rejectedMap[driverID] {
 			log.Printf("[DISPATCH] Driver %s rejected Trip %s previously, skipping", driverID, tripID)
@@ -54,7 +58,7 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 		lastSeen, err := s.redisClient.Exists(ctx, "driver_last_seen:"+driverID).Result()
 		if err != nil || lastSeen == 0 {
 			if lastSeen == 0 {
-				log.Printf("[CLEANUP] Driver %s is stale, removing from geo index", driverID)
+				log.Printf("[CLEANUP] Driver %s is stale (no last_seen key), removing from geo index", driverID)
 				s.redisClient.ZRem(ctx, "drivers_location", driverID)
 			}
 			continue
@@ -109,4 +113,9 @@ func (s *DispatchService) UpdateDriverLocation(ctx context.Context, driverID str
 
 	log.Printf("[HEARTBEAT] Driver %s location updated: %f, %f", driverID, lat, lng)
 	return nil
+}
+
+func (s *DispatchService) Reset(ctx context.Context) error {
+	log.Println("[DEBUG] Resetting Dispatch Service (FlushDB)")
+	return s.redisClient.FlushDB(ctx).Err()
 }

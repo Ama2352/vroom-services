@@ -219,3 +219,7 @@ func (s *TripService) CancelTrip(ctx context.Context, tripID uuid.UUID, reason s
 	return s.repo.CancelWithOutbox(ctx, tripID, event)
 }
 
+func (s *TripService) Reset(ctx context.Context) error {
+	return s.repo.Reset(ctx)
+}
+

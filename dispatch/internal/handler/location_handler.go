@@ -76,3 +76,12 @@ func (h *LocationHandler) HandleWS(c *gin.Context) {
 		}
 	}
 }
+
+func (h *LocationHandler) Reset(c *gin.Context) {
+	err := h.service.Reset(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset dispatch data"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "reset ok"})
+}

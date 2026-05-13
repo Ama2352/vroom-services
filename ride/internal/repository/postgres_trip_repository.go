@@ -413,4 +413,21 @@ func toDomainTrip(t db.Trip) *domain.Trip {
 	}
 	return trip
 }
+func (r *PostgresTripRepository) Reset(ctx context.Context) error {
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
+	// Truncate tables in correct order
+	tables := []string{"trips", "outbox_events", "inbox_events"}
+	for _, table := range tables {
+		_, err := tx.ExecContext(ctx, "TRUNCATE TABLE "+table+" CASCADE")
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}

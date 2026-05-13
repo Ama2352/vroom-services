@@ -36,6 +36,7 @@ type TripRepository interface {
 	RejectOfferWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error
 	IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error)
 	MarkEventProcessed(ctx context.Context, id uuid.UUID, eventType string) error
+	Reset(ctx context.Context) error
 }
 
 

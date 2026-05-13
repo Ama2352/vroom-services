@@ -132,6 +132,7 @@ func main() {
 			trips.POST("/:id/cancel", rideHandler.CancelTrip)
 			trips.GET("/health", rideHandler.Health)
 		}
+		v1.POST("/debug/reset", rideHandler.Reset)
 	}
 
 	// Server setup

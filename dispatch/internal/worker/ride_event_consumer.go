@@ -132,8 +132,25 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			_ = c.dispatchService.RecordRejection(ctx, tripID, driverID)
 		}
 
-		lat, _ := data["source_lat"].(float64)
-		lng, _ := data["source_lng"].(float64)
+		// Helper to extract float64 robustly
+		asFloat := func(v interface{}) float64 {
+			if f, ok := v.(float64); ok {
+				return f
+			}
+			if i, ok := v.(int); ok {
+				return float64(i)
+			}
+			if i64, ok := v.(int64); ok {
+				return float64(i64)
+			}
+			return 0
+		}
+
+		lat := asFloat(data["source_lat"])
+		lng := asFloat(data["source_lng"])
+
+		log.Printf("[DISPATCH] Trip %s Payload: %s", tripID, payload)
+		log.Printf("[DISPATCH] Extracted Coords: lat=%f, lng=%f", lat, lng)
 
 		log.Printf("[STEP 2] Dispatcher matching driver for Trip: %s at (%f, %f)", tripID, lat, lng)
 		
