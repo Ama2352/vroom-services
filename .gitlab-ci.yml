@@ -8,7 +8,7 @@ stages:
   - build
   # - scan
   - publish
-  # - deploy
+  - deploy
 
 variables:
   DOCKER_REGISTRY: "vroom-mvp"
@@ -161,11 +161,11 @@ build-frontend:
     SERVICE_NAME: frontend
     SERVICE_PATH: frontend
 
-build-ai-reporter:
-  extends: .build_template
-  variables:
-    SERVICE_NAME: ai-reporter
-    SERVICE_PATH: ai-reporter
+# build-ai-reporter:
+#   extends: .build_template
+#   variables:
+#     SERVICE_NAME: ai-reporter
+#     SERVICE_PATH: ai-reporter
 
 # ---------------------------------------------------------------------------
 # STAGE 3: scan — Trivy on tarball + SonarQube (in parallel)
@@ -264,8 +264,10 @@ build-ai-reporter:
     - docker load < "${SERVICE_NAME}.tar"
     - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:latest"
     - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:$IMG_TAG"
+    - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
     - docker push "$IMG_BASE:latest"
     - docker push "$IMG_BASE:$IMG_TAG"
+    - docker push "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -300,49 +302,49 @@ publish-frontend:
     SERVICE_NAME: frontend
   needs: [build-frontend]
 
-publish-ai-reporter:
-  extends: .publish_template
-  variables:
-    SERVICE_NAME: ai-reporter
-  needs: [build-ai-reporter]
+# publish-ai-reporter:
+#   extends: .publish_template
+#   variables:
+#     SERVICE_NAME: ai-reporter
+#   needs: [build-ai-reporter]
 
 # ---------------------------------------------------------------------------
 # STAGE 5: deploy — update GitOps repo → ArgoCD syncs dev overlay
 # ---------------------------------------------------------------------------
 
-# deploy-gitops:
-#   stage: deploy
-#   image: alpine/k8s:1.36.0
-#   before_script:
-#     - git config --global user.email "ci@vroom-platform.com"
-#     - git config --global user.name "Vroom CI Bot"
-#   script:
-#     - |
-#       set -e
-#       git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
-#       cd gitops-repo/apps
+deploy-gitops:
+  stage: deploy
+  image: alpine/k8s:1.36.0
+  before_script:
+    - git config --global user.email "ci@vroom-platform.com"
+    - git config --global user.name "Vroom CI Bot"
+  script:
+    - |
+      set -e
+      git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
+      cd gitops-repo/apps
 
-#       for service in user ride notification dispatch frontend; do
-#         echo "Updating $service → $CI_COMMIT_SHORT_SHA"
-#         cd "$service/overlays/dev"
-#         if [ "$service" == "frontend" ]; then
-#           kustomize edit set image "vroom-mvp/frontend=$DOCKER_USER/$DOCKER_REGISTRY-frontend:$CI_COMMIT_SHORT_SHA"
-#         else
-#           kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
-#         fi
-#         cd ../../..
-#       done
+      for service in user ride notification dispatch frontend; do
+        echo "Updating $service → $CI_COMMIT_SHORT_SHA"
+        cd "$service/overlays/dev"
+        if [ "$service" == "frontend" ]; then
+          kustomize edit set image "vroom-mvp/frontend=$DOCKER_USER/$DOCKER_REGISTRY-frontend:$CI_COMMIT_SHORT_SHA"
+        else
+          kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
+        fi
+        cd ../../..
+      done
 
-#       git add .
-#       git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
-#       git push origin main
-#   needs:
-#     [
-#       publish-user,
-#       publish-ride,
-#       publish-notification,
-#       publish-dispatch,
-#       publish-frontend,
-#     ]
-#   rules:
-#     - if: $CI_COMMIT_BRANCH == "main"
+      git add .
+      git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
+      git push origin main
+  needs:
+    [
+      publish-user,
+      publish-ride,
+      publish-notification,
+      publish-dispatch,
+      publish-frontend,
+    ]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
