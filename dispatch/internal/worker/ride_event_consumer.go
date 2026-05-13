@@ -61,6 +61,12 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 	if err != nil {
 		if err != redis.Nil {
 			log.Printf("Error reading from Redis Stream: %v", err)
+			// If group doesn't exist, try to recreate it
+			if err.Error() == "NOGROUP No such key 'ride_events' or consumer group 'dispatch_group'" || 
+			   (len(err.Error()) > 7 && err.Error()[:7] == "NOGROUP") {
+				log.Printf("[RECOVERY] Consumer group 'dispatch_group' missing. Attempting to recreate...")
+				c.redisClient.XGroupCreateMkStream(ctx, c.streamName, c.groupName, "0")
+			}
 		}
 		return
 	}
