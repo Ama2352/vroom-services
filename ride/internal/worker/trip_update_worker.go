@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 	"vroom-mvp/ride/internal/repository"
 
@@ -61,10 +62,13 @@ func (w *TripUpdateWorker) consume(ctx context.Context) {
 		if err != redis.Nil {
 			log.Printf("Error reading from stream (ride update): %v", err)
 			// If group doesn't exist, try to recreate it
-			if err.Error() == "NOGROUP No such key 'ride_events' or consumer group 'ride_update_group'" || 
-			   (len(err.Error()) > 7 && err.Error()[:7] == "NOGROUP") {
-				log.Printf("[RECOVERY] Consumer group 'ride_update_group' missing. Attempting to recreate...")
-				w.redisClient.XGroupCreateMkStream(ctx, w.streamName, w.groupName, "0")
+			if strings.Contains(err.Error(), "NOGROUP") {
+				log.Printf("[RECOVERY] Consumer group 'ride_update_group' missing (NOGROUP). Attempting to recreate...")
+				if err := w.redisClient.XGroupCreateMkStream(ctx, w.streamName, w.groupName, "0").Err(); err != nil {
+					log.Printf("[RECOVERY ERROR] Failed to recreate group: %v", err)
+				} else {
+					log.Printf("[RECOVERY SUCCESS] Consumer group 'ride_update_group' recreated.")
+				}
 			}
 		}
 		return

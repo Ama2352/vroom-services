@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 	"vroom-mvp/dispatch/internal/service"
 
@@ -62,10 +63,13 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 		if err != redis.Nil {
 			log.Printf("Error reading from Redis Stream: %v", err)
 			// If group doesn't exist, try to recreate it
-			if err.Error() == "NOGROUP No such key 'ride_events' or consumer group 'dispatch_group'" || 
-			   (len(err.Error()) > 7 && err.Error()[:7] == "NOGROUP") {
-				log.Printf("[RECOVERY] Consumer group 'dispatch_group' missing. Attempting to recreate...")
-				c.redisClient.XGroupCreateMkStream(ctx, c.streamName, c.groupName, "0")
+			if strings.Contains(err.Error(), "NOGROUP") {
+				log.Printf("[RECOVERY] Consumer group 'dispatch_group' missing (NOGROUP). Attempting to recreate...")
+				if err := c.redisClient.XGroupCreateMkStream(ctx, c.streamName, c.groupName, "0").Err(); err != nil {
+					log.Printf("[RECOVERY ERROR] Failed to recreate group: %v", err)
+				} else {
+					log.Printf("[RECOVERY SUCCESS] Consumer group 'dispatch_group' recreated.")
+				}
 			}
 		}
 		return
