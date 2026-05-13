@@ -117,5 +117,7 @@ func (s *DispatchService) UpdateDriverLocation(ctx context.Context, driverID str
 
 func (s *DispatchService) Reset(ctx context.Context) error {
 	log.Println("[DEBUG] Resetting Dispatch Service (FlushDB)")
-	return s.redisClient.FlushDB(ctx).Err()
+	resetCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.redisClient.FlushDB(resetCtx).Err()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"time"
 	"vroom-mvp/ride/internal/domain"
 	"vroom-mvp/ride/internal/repository/db"
@@ -42,10 +43,15 @@ func (r *PostgresTripRepository) CreateWithOutbox(ctx context.Context, trip *dom
 		DestLat:        trip.Destination.Point.Lat,
 		DestLng:        trip.Destination.Point.Lng,
 		EstimatedPrice: trip.EstimatedPrice.Amount,
-		Currency:       sql.NullString{String: func() string { if trip.EstimatedPrice.Currency == "" { return "VND" }; return trip.EstimatedPrice.Currency }(), Valid: true},
-		SourceAddress:  sql.NullString{String: trip.Source.Address, Valid: trip.Source.Address != ""},
-		DestAddress:    sql.NullString{String: trip.Destination.Address, Valid: trip.Destination.Address != ""},
-		CreatedAt:      sql.NullTime{Time: trip.CreatedAt, Valid: true},
+		Currency: sql.NullString{String: func() string {
+			if trip.EstimatedPrice.Currency == "" {
+				return "VND"
+			}
+			return trip.EstimatedPrice.Currency
+		}(), Valid: true},
+		SourceAddress: sql.NullString{String: trip.Source.Address, Valid: trip.Source.Address != ""},
+		DestAddress:   sql.NullString{String: trip.Destination.Address, Valid: trip.Destination.Address != ""},
+		CreatedAt:     sql.NullTime{Time: trip.CreatedAt, Valid: true},
 	})
 	if err != nil {
 		return err
@@ -258,7 +264,6 @@ func (r *PostgresTripRepository) GetUnpublishedEvents(ctx context.Context, limit
 	return events, nil
 }
 
-
 func (r *PostgresTripRepository) UpdateEventStatus(ctx context.Context, id uuid.UUID, status string) error {
 	return r.queries.UpdateEventStatus(ctx, db.UpdateEventStatusParams{
 		ID:     id,
@@ -279,7 +284,6 @@ func (r *PostgresTripRepository) GetStuckTrips(ctx context.Context, timeout time
 	return trips, nil
 }
 
-
 func (r *PostgresTripRepository) CancelWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error {
 	tx, err := r.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -297,7 +301,6 @@ func (r *PostgresTripRepository) CancelWithOutbox(ctx context.Context, tripID uu
 	if err != nil {
 		return err
 	}
-
 
 	// 2. Create Outbox Event
 	payload, _ := json.Marshal(event.Payload)
@@ -414,17 +417,19 @@ func toDomainTrip(t db.Trip) *domain.Trip {
 	return trip
 }
 func (r *PostgresTripRepository) Reset(ctx context.Context) error {
+	log.Println("[DEBUG] Resetting Ride Repository (Deleting all records)")
 	tx, err := r.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// Truncate tables in correct order
-	tables := []string{"trips", "outbox_events", "inbox_events"}
+	// Delete in correct order to respect FKs (if any)
+	tables := []string{"inbox_events", "outbox_events", "trips"}
 	for _, table := range tables {
-		_, err := tx.ExecContext(ctx, "TRUNCATE TABLE "+table+" CASCADE")
+		_, err := tx.ExecContext(ctx, "DELETE FROM "+table)
 		if err != nil {
+			log.Printf("[RESET ERROR] Failed to delete from %s: %v", table, err)
 			return err
 		}
 	}

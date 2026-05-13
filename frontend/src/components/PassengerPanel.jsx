@@ -9,7 +9,7 @@ import './PassengerPanel.css';
 
 export default function PassengerPanel() {
   const { state, actions } = useDemo();
-  const { tripStatus, pickup, dropoff, notifications, tripId, estimatedFare, estimatedTime } = state;
+  const { tripStatus, pickup, dropoff, notifications, tripId, estimatedFare, estimatedTime, error } = state;
   const isIdle = tripStatus === TRIP_STATUS.IDLE;
 
   const passengerNotifs = notifications
@@ -34,6 +34,19 @@ export default function PassengerPanel() {
       </div>
 
       <div className="divider" />
+
+      {/* Backend error banner */}
+      {error && (
+        <div className="panel-section">
+          <div className="notif-item notif-warning" style={{ cursor: 'pointer' }} onClick={actions.dismissError}>
+            <span className="notif-dot" />
+            <div>
+              <div className="notif-msg">{error}</div>
+              <div className="notif-time">Tap to dismiss</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Location inputs */}
       <div className="panel-section">
@@ -174,6 +187,15 @@ export default function PassengerPanel() {
   );
 }
 
+function ResetButton() {
+  const { actions } = useDemo();
+  return (
+    <button className="tsv-reset-btn" onClick={actions.reset}>
+      New Booking
+    </button>
+  );
+}
+
 function TripStateVisual({ status, driver }) {
   const messages = {
     [TRIP_STATUS.SEARCHING]:  { icon: '🔍', text: 'Finding the best driver for you…' },
@@ -204,9 +226,7 @@ function TripStateVisual({ status, driver }) {
         </div>
       )}
       {(status === TRIP_STATUS.COMPLETED || status === TRIP_STATUS.CANCELLED) && (
-        <button className="tsv-reset-btn" onClick={() => window.location.reload()}>
-          New Booking
-        </button>
+        <ResetButton />
       )}
     </div>
   );

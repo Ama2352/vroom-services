@@ -62,9 +62,19 @@ export default function TopBar({ onToggleMonitor, monitorOpen }) {
         <span className="topbar-time mono">
           {time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </span>
-        <div className="topbar-dot-row">
-          <span className="live-dot" />
-          <span className="text-sm text-muted">LIVE</span>
+        <div className="topbar-dot-row" title={`Notification WS: ${state.wsStatus}`}>
+          <span
+            className="live-dot"
+            style={{
+              background:
+                state.wsStatus === 'connected'    ? '#22C55E' :
+                state.wsStatus === 'disconnected' ? '#EF4444' : '#F59E0B',
+            }}
+          />
+          <span className="text-sm text-muted">
+            {state.wsStatus === 'connected'    ? 'LIVE'         :
+             state.wsStatus === 'disconnected' ? 'OFFLINE'      : 'CONNECTING'}
+          </span>
         </div>
         <button
           id="btn-toggle-system-monitor"

@@ -106,7 +106,7 @@ export default function DriverPanel() {
               )}
             </div>
             {(tripStatus === TRIP_STATUS.COMPLETED || tripStatus === TRIP_STATUS.CANCELLED) && (
-              <button className="driver-reset-btn" onClick={() => window.location.reload()}>
+              <button className="driver-reset-btn" onClick={actions.reset}>
                 Ready for Next Trip
               </button>
             )}
