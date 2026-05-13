@@ -157,6 +157,9 @@ const initialState = {
   estimatedTime: _t,
   wsStatus: "connecting",
   error: null,
+  sessionTrips:    0,
+  sessionEarnings: 0,
+  tripDetails:     null,
   // kept for component compat
   autoPlay: false,
   stepMode: false,
@@ -274,6 +277,16 @@ function reducer(state, action) {
     case "SET_STEP_MODE":
       return { ...state, stepMode: action.payload };
 
+    case "SET_TRIP_DETAILS":
+      return { ...state, tripDetails: action.payload };
+
+    case "INCREMENT_SESSION":
+      return {
+        ...state,
+        sessionTrips:    state.sessionTrips + 1,
+        sessionEarnings: state.sessionEarnings + action.payload,
+      };
+
     case "RESET": {
       const { fare, time } = calcMetrics(state.pickup, state.dropoff);
       return {
@@ -376,7 +389,7 @@ export function DemoStoreProvider({ children }) {
     });
     setTimeout(
       () => dispatch({ type: "DISMISS_NOTIFICATION", payload: id }),
-      12000,
+      60000,
     );
   }, []);
 
@@ -491,6 +504,9 @@ export function DemoStoreProvider({ children }) {
             dispatch({ type: "SET_DRIVER", payload: driver });
           }
         }
+
+        // Always store latest trip details for rich UI display
+        dispatch({ type: "SET_TRIP_DETAILS", payload: trip });
 
         // Sync status
         if (newStatus !== curStatus) {
@@ -950,6 +966,7 @@ export function DemoStoreProvider({ children }) {
           res.data,
         );
         dispatch({ type: "SET_STATUS", payload: TRIP_STATUS.COMPLETED });
+        dispatch({ type: "INCREMENT_SESSION", payload: finalPrice });
         notify(
           "passenger",
           "Trip completed! Thanks for riding with Vroom.",

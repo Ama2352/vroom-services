@@ -1,11 +1,17 @@
 import { useState, useCallback } from 'react';
-import { PlusCircle, RotateCcw } from 'lucide-react';
+import { PlusCircle, RotateCcw, Users } from 'lucide-react';
 import { useDemo, TRIP_STATUS } from '../store/demoStore';
 import './ControlBar.css';
 
+const WS_COLOR = {
+  connected:    '#22C55E',
+  disconnected: '#EF4444',
+  connecting:   '#F59E0B',
+};
+
 export default function ControlBar() {
   const { state, actions } = useDemo();
-  const { tripStatus, drivers } = state;
+  const { tripStatus, drivers, wsStatus } = state;
   const [loading, setLoading] = useState('');
 
   const isIdle = tripStatus === TRIP_STATUS.IDLE;
@@ -15,29 +21,13 @@ export default function ControlBar() {
     try { return await fn(); } finally { setLoading(''); }
   }, []);
 
+  const wsLabel =
+    wsStatus === 'connected'    ? 'LIVE' :
+    wsStatus === 'disconnected' ? 'OFFLINE' : 'CONNECTING';
+
   return (
     <div className="controlbar">
-      {/* Step guide */}
-      <div className="guide-steps">
-        <div className={`guide-step ${drivers.length > 0 ? 'done' : ''}`}>
-          <span className="step-num">1</span>
-          <span>Seed Drivers</span>
-        </div>
-        <div className="guide-arrow">→</div>
-        <div className={`guide-step ${tripStatus !== TRIP_STATUS.IDLE ? 'done' : ''}`}>
-          <span className="step-num">2</span>
-          <span>Request Ride</span>
-        </div>
-        <div className="guide-arrow">→</div>
-        <div className={`guide-step ${tripStatus === TRIP_STATUS.COMPLETED ? 'done' : ''}`}>
-          <span className="step-num">3</span>
-          <span>Simulate &amp; Complete</span>
-        </div>
-      </div>
-
-      <div className="controlbar-divider" />
-
-      {/* Action buttons */}
+      {/* Primary actions */}
       <div className="action-group">
         <button
           id="btn-seed"
@@ -46,7 +36,7 @@ export default function ControlBar() {
           onClick={() => run('seed', () => actions.seedDrivers())}
         >
           {loading === 'seed' ? <Spinner /> : <PlusCircle size={14} />}
-          {drivers.length > 0 ? 'Re-seed Drivers' : 'Seed Drivers'}
+          {drivers.length > 0 ? 'Re-seed' : 'Seed Drivers'}
         </button>
 
         <button
@@ -58,6 +48,29 @@ export default function ControlBar() {
           {loading === 'reset' ? <Spinner /> : <RotateCcw size={14} />}
           Reset
         </button>
+      </div>
+
+      {/* System health (right side) */}
+      <div className="controlbar-health">
+        <div className="controlbar-sep" />
+
+        <div className="health-item">
+          <span
+            style={{
+              width: 7, height: 7,
+              borderRadius: '50%',
+              background: WS_COLOR[wsStatus] ?? '#F59E0B',
+              flexShrink: 0,
+              boxShadow: wsStatus === 'connected' ? '0 0 5px rgba(34,197,94,0.6)' : 'none',
+            }}
+          />
+          WS {wsLabel}
+        </div>
+
+        <div className={`health-item ${drivers.length > 0 ? 'health-item-green' : ''}`}>
+          <Users size={12} />
+          {drivers.length} online
+        </div>
       </div>
     </div>
   );

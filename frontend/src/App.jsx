@@ -1,25 +1,12 @@
-/**
- * App.jsx – Root layout for the Vroom Ride Hailing Demo.
- *
- * Layout:
- *   TopBar (fixed header)
- *   ┌──────────────────────────────────┐
- *   │ Left col          │  Center      │
- *   │  PassengerPanel   │  MapView     │
- *   │  DriverPanel      │  (full)      │
- *   └──────────────────────────────────┘
- *   ControlBar (fixed footer)
- *   ApiInspector (collapsible footer)
- *
- *   SystemMonitor – slide-in overlay (toggle via TopBar)
- */
 import { useState } from 'react';
 import { DemoStoreProvider } from './store/demoStore';
 import TopBar         from './components/TopBar';
 import PassengerPanel from './components/PassengerPanel';
-import MapView        from './components/MapView';
 import DriverPanel    from './components/DriverPanel';
+import MapView        from './components/MapView';
+import TripProgress   from './components/TripProgress';
 import ControlBar     from './components/ControlBar';
+import EventFeed      from './components/EventFeed';
 import ApiInspector   from './components/ApiInspector';
 import SystemMonitor  from './components/SystemMonitor';
 import './App.css';
@@ -36,28 +23,31 @@ export default function App() {
         />
 
         <main className="app-main">
-          {/* Left: Passenger + Driver stacked */}
+          {/* Left: Passenger perspective */}
           <aside className="col-left">
-            <div className="left-top">
-              <PassengerPanel />
-            </div>
-            <div className="left-bottom">
-              <DriverPanel />
-            </div>
+            <PassengerPanel />
           </aside>
 
-          {/* Center: Map (full height) */}
+          {/* Center: Map + trip progress strip */}
           <section className="col-center">
-            <MapView />
+            <div className="center-map">
+              <MapView />
+            </div>
+            <TripProgress />
           </section>
+
+          {/* Right: Driver perspective */}
+          <aside className="col-right">
+            <DriverPanel />
+          </aside>
         </main>
 
         <footer className="app-footer">
           <ControlBar />
+          <EventFeed />
           <ApiInspector />
         </footer>
 
-        {/* System Monitor – slide-in overlay */}
         <SystemMonitor open={monitorOpen} onClose={() => setMonitorOpen(false)} />
       </div>
     </DemoStoreProvider>

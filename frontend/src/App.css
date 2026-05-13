@@ -8,10 +8,10 @@
   background: var(--bg);
 }
 
-/* ── Main 2-column grid ── */
+/* ── Main 3-column grid ── */
 .app-main {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 320px 1fr 320px;
   grid-template-rows: 1fr;
   flex: 1;
   gap: var(--gap);
@@ -20,33 +20,28 @@
   min-height: 0;
 }
 
-/* ── Columns ── */
+/* ── Side columns ── */
 .col-left,
-.col-center {
+.col-right {
   min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
-.col-left {
+/* ── Center column: map stacked above TripProgress ── */
+.col-center {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
+  min-height: 0;
   overflow: hidden;
 }
 
-.col-center { display: flex; flex-direction: column; overflow: hidden; }
-
-/* Left column split: 50% passenger / 50% driver */
-.left-top {
+.center-map {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-.left-bottom {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: hidden;
 }
 
 /* ── Footer ── */
@@ -56,10 +51,20 @@
   flex-direction: column;
 }
 
-/* ── Responsive: tablet ── */
-@media (max-width: 1100px) {
+/* ── Responsive: large tablet ── */
+@media (max-width: 1300px) {
   .app-main {
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: 290px 1fr 290px;
+  }
+}
+
+/* ── Responsive: tablet — collapse to 2-col, driver moves to right ── */
+@media (max-width: 1060px) {
+  .app-main {
+    grid-template-columns: 280px 1fr;
+  }
+  .col-right {
+    display: none;
   }
 }
 
@@ -67,11 +72,12 @@
 @media (max-width: 768px) {
   .app-main {
     grid-template-columns: 1fr;
-    grid-template-rows: 300px auto auto;
+    grid-template-rows: 260px auto auto;
     overflow-y: auto;
+    gap: 8px;
   }
-  .col-left   { order: 2; }
-  .col-center { order: 1; height: 300px; }
-  .left-top   { flex: none; height: 280px; }
-  .left-bottom { flex: none; height: 280px; }
+  .col-left   { order: 2; height: auto; }
+  .col-right  { display: flex; order: 3; height: auto; }
+  .col-center { order: 1; height: 260px; }
+  .center-map { flex: none; height: 220px; }
 }

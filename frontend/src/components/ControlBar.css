@@ -2,55 +2,16 @@
 .controlbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 0 16px;
-  height: 52px;
+  height: 48px;
   background: var(--surface);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
   overflow-x: auto;
 }
 
-/* Guide steps */
-.guide-steps {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.guide-step {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.step-num {
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  background: var(--surface-3);
-  border: 1px solid var(--border-light);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--brand-light);
-  flex-shrink: 0;
-}
-.guide-arrow {
-  color: var(--text-muted);
-  font-size: 12px;
-  opacity: 0.5;
-}
-
-.controlbar-divider {
-  width: 1px;
-  height: 28px;
-  background: var(--border);
-  flex-shrink: 0;
-}
-
-/* Action group */
+/* Action group (left) */
 .action-group {
   display: flex;
   align-items: center;
@@ -58,39 +19,32 @@
   flex-shrink: 0;
 }
 
-/* Playback group */
-.playback-group {
+/* Health row (right) */
+.controlbar-health {
+  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  gap: 12px;
   flex-shrink: 0;
 }
 
-.speed-group {
+.health-item {
   display: flex;
   align-items: center;
-  gap: 3px;
-}
-.speed-icon { color: var(--text-muted); }
-.speed-btn {
-  padding: 4px 8px;
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-muted);
+  gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  font-family: var(--font-mono);
-  transition: all 0.15s;
-  cursor: pointer;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
-.speed-btn:hover { color: var(--text-primary); border-color: var(--border-light); }
-.speed-btn.active {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: #fff;
-  box-shadow: 0 0 8px var(--brand-glow);
+
+.health-item-green { color: var(--green); }
+
+.controlbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 /* Spinner */

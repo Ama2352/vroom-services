@@ -1,0 +1,115 @@
+.trip-progress {
+  height: 52px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.tp-cancelled {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.tp-steps {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  position: relative;
+}
+
+/* Each step is a flex item that takes equal space */
+.tp-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  gap: 4px;
+}
+
+/* Connector line between steps */
+.tp-connector {
+  position: absolute;
+  top: 10px;
+  right: 50%;
+  left: -50%;
+  height: 2px;
+  background: var(--border);
+  z-index: 0;
+  transition: background 0.4s ease;
+}
+.tp-connector--filled {
+  background: var(--green);
+}
+
+/* Node circle */
+.tp-node {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  position: relative;
+  z-index: 1;
+  transition: all 0.3s ease;
+}
+
+.tp-step--done .tp-node {
+  background: rgba(34, 197, 94, 0.2);
+  border: 1.5px solid var(--green);
+}
+
+.tp-step--active .tp-node {
+  background: rgba(108, 99, 255, 0.25);
+  border: 1.5px solid var(--brand);
+}
+
+.tp-step--future .tp-node {
+  background: var(--surface-3);
+  border: 1.5px solid var(--border);
+  opacity: 0.4;
+}
+
+/* Pulsing ring on active step */
+.tp-pulse {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--brand);
+  animation: pulse-ring 1.8s ease-out infinite;
+  pointer-events: none;
+}
+
+/* Step labels */
+.tp-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  line-height: 1;
+}
+.tp-step--done .tp-label   { color: var(--green); }
+.tp-step--active .tp-label { color: var(--brand-light); }
+.tp-step--future .tp-label { color: var(--text-muted); }
+
+/* Cancelled overlay */
+.tp-cancelled-badge {
+  position: absolute;
+  right: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 99px;
+  padding: 2px 10px;
+}
