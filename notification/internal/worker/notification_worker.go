@@ -2,29 +2,30 @@ package worker
 
 import (
 	"context"
-	"encoding/json" // Added for payload parsing
+	"encoding/json"
 	"log"
 	"strings"
 	"time"
 
+	"vroom-mvp/notification/internal/repository"
 	"vroom-mvp/notification/internal/service"
 
-	"database/sql"
 	"github.com/redis/go-redis/v9"
 )
+
 type NotificationWorker struct {
 	redisClient *redis.Client
-	db          *sql.DB
+	repo        repository.NotificationRepository
 	streamName  string
 	groupName   string
 	consumerID  string
 	hub         *service.Hub
 }
 
-func NewNotificationWorker(redisClient *redis.Client, db *sql.DB, streamName, groupName, consumerID string, hub *service.Hub) *NotificationWorker {
+func NewNotificationWorker(redisClient *redis.Client, repo repository.NotificationRepository, streamName, groupName, consumerID string, hub *service.Hub) *NotificationWorker {
 	return &NotificationWorker{
 		redisClient: redisClient,
-		db:          db,
+		repo:        repo,
 		streamName:  streamName,
 		groupName:   groupName,
 		consumerID:  consumerID,
@@ -104,19 +105,13 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 		return
 	}
 
-	// 1. Persist to History DB (Idempotency check)
-	// We do this in a way that doesn't block the actual notification if it's the first time
-	_, err := w.db.ExecContext(ctx, 
-		"INSERT INTO notification_history (event_id, event_type, aggregate_type, aggregate_id, payload) VALUES ($1, $2, $3, $4, $5)",
-		msg.ID, eventType, aggregateType, aggregateID, payload)
-	
-	if err != nil {
-		// If it's a unique constraint violation (Postgres error 23505), it's a duplicate
-		if err.Error() == "pq: duplicate key value violates unique constraint \"notification_history_event_id_key\"" {
+	// Persist to history DB; unique constraint on event_id acts as idempotency guard.
+	if err := w.repo.SaveEvent(ctx, msg.ID, eventType, aggregateType, aggregateID, payload); err != nil {
+		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
 			log.Printf("[DUPLICATE] Event %s already processed, skipping", msg.ID)
 			return
 		}
-		// Log other errors but proceed with notification (don't let DB failure break the real-time feature)
+		// DB failure is non-fatal — don't block the real-time WebSocket notification.
 		log.Printf("[DB ERROR] Failed to persist notification history: %v", err)
 	}
 

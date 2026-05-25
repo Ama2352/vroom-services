@@ -21,14 +21,17 @@ func NewDispatchService(redisClient *redis.Client) *DispatchService {
 }
 
 func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, lng float64) (string, error) {
-	// Search for nearest drivers within 5km (up to 10 candidates to account for exclusions)
-	results, err := s.redisClient.GeoRadius(ctx, "drivers_location", lng, lat, &redis.GeoRadiusQuery{
-		Radius:      15,
-		Unit:        "km",
-		WithDist:    true,
-		WithCoord:   true,
-		Count:       10,
-		Sort:        "ASC",
+	results, err := s.redisClient.GeoSearchLocation(ctx, "drivers_location", &redis.GeoSearchLocationQuery{
+		GeoSearchQuery: redis.GeoSearchQuery{
+			Longitude:  lng,
+			Latitude:   lat,
+			Radius:     15,
+			RadiusUnit: "km",
+			Sort:       "ASC",
+			Count:      10,
+		},
+		WithDist:  true,
+		WithCoord: true,
 	}).Result()
 
 	if err != nil {
@@ -73,7 +76,7 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 	}
 
 	pool := domain.NewDriverPool(candidates)
-	bestMatch, err := pool.WaterfallMatch()
+	bestMatch, err := pool.Nearest()
 	if err != nil {
 		return "", nil // No drivers found
 	}

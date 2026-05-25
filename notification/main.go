@@ -2,11 +2,17 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
 	"vroom-mvp/notification/internal/handler"
+	"vroom-mvp/notification/internal/repository"
 	"vroom-mvp/notification/internal/service"
 	"vroom-mvp/notification/internal/worker"
 
@@ -14,9 +20,7 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
-	"github.com/zsais/go-gin-prometheus"
-	"database/sql"
-	"fmt"
+	ginprometheus "github.com/zsais/go-gin-prometheus"
 )
 
 func main() {
@@ -31,7 +35,7 @@ func main() {
 	consumerID := uuid.New().String()
 
 	// 2. Database connection
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable search_path=notifications", 
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable search_path=notifications",
 		dbHost, dbPort, dbUser, dbPass, dbName)
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -39,33 +43,37 @@ func main() {
 	}
 	defer db.Close()
 
-	// 2. Redis connection
+	// 3. Redis connection
 	rdb := redis.NewClient(&redis.Options{
 		Addr: redisAddr,
 	})
 	defer rdb.Close()
 
-	// Wait for Redis
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	
-	if err := rdb.Ping(ctx).Err(); err != nil {
+	// Wait for dependencies
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer waitCancel()
+
+	if err := rdb.Ping(waitCtx).Err(); err != nil {
 		log.Fatalf("Redis not ready: %v", err)
 	}
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.PingContext(waitCtx); err != nil {
 		log.Fatalf("Database not ready: %v", err)
 	}
 
-	// 4. Initialize Hub and WebSocket
+	// 4. Initialize layers
+	notifRepo := repository.NewPostgresNotificationRepository(db)
 	hub := service.NewHub()
 	go hub.Run()
-	notificationHandler := handler.NewNotificationHandler(hub)
+	notificationHandler := handler.NewNotificationHandler(hub, notifRepo)
 
-	// 5. Start Notification Worker (Background)
-	worker := worker.NewNotificationWorker(rdb, db, "ride_events", "notification_group", consumerID, hub)
-	go worker.Start(context.Background())
+	// 5. Start worker
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	defer stopWorker()
 
-	// 4. Router Setup
+	notifWorker := worker.NewNotificationWorker(rdb, notifRepo, "ride_events", "notification_group", consumerID, hub)
+	go notifWorker.Start(workerCtx)
+
+	// 6. Router setup
 	r := gin.Default()
 
 	p := ginprometheus.NewPrometheus("gin")
@@ -81,50 +89,60 @@ func main() {
 		}
 		c.Next()
 	})
+
 	r.Static("/static", "./static")
-
-	v1 := r.Group("/v1")
-	{
-		v1.GET("/history", func(c *gin.Context) {
-			rows, err := db.QueryContext(c.Request.Context(), 
-				"SELECT event_id as id, event_type, aggregate_type, aggregate_id, payload, created_at FROM notification_history ORDER BY created_at DESC LIMIT 50")
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			defer rows.Close()
-
-			var events []map[string]interface{}
-			for rows.Next() {
-				var id, eventType, aggType, aggID, payloadStr string
-				var createdAt time.Time
-				if err := rows.Scan(&id, &eventType, &aggType, &aggID, &payloadStr, &createdAt); err != nil {
-					continue
-				}
-				events = append(events, map[string]interface{}{
-					"id":             id,
-					"event_type":     eventType,
-					"aggregate_type": aggType,
-					"aggregate_id":   aggID,
-					"payload":        payloadStr,
-					"created_at":     createdAt,
-				})
-			}
-			c.JSON(http.StatusOK, events)
-		})
-
-		// WebSocket endpoint
-		v1.GET("/ws", notificationHandler.HandleWS)
-	}
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "UP", "consumer_id": consumerID})
 	})
 
-	log.Printf("Notification Service starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	r.GET("/readyz", func(c *gin.Context) {
+		redisErr := rdb.Ping(c.Request.Context()).Err()
+		dbErr := db.PingContext(c.Request.Context())
+		if redisErr != nil || dbErr != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status": "DOWN",
+				"redis":  redisErr == nil,
+				"db":     dbErr == nil,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "READY"})
+	})
+
+	v1 := r.Group("/v1")
+	{
+		v1.GET("/history", notificationHandler.HandleHistory)
+		v1.GET("/ws", notificationHandler.HandleWS)
 	}
+
+	// 7. Start server + graceful shutdown
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
+
+	go func() {
+		log.Printf("Notification Service starting on port %s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Listen: %s\n", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down Notification Service...")
+
+	stopWorker()
+
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctxShutdown); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	log.Println("Notification Service exited gracefully")
 }
 
 func getEnv(key, fallback string) string {

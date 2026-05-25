@@ -29,15 +29,15 @@ import subprocess
 import sys
 import time
 
-import warnings
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", FutureWarning)
-    import google.generativeai as genai
+import requests
 
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-# gemini-2.0-flash-lite: 1,500 RPD / 30 RPM on free tier
-# gemini-2.5-flash was 20 RPD — caused error11 rate limit incident
-MODEL_NAME  = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+MODEL_NAME  = os.environ.get("OPENROUTER_MODEL", "google/gemini-2.0-flash-lite-preview-02-05:free").strip()
+
+if not MODEL_NAME.endswith(":free") and "free" not in MODEL_NAME.lower():
+    print(f"WARN: Model {MODEL_NAME} is not a free model. Constraining to free model.", file=sys.stderr)
+    MODEL_NAME = "google/gemini-2.0-flash-lite-preview-02-05:free"
+
 SKILL_DIR  = os.path.join(os.path.dirname(__file__), "skill")
 
 MANDATORY_RULES = """\
@@ -55,8 +55,8 @@ class RateLimitError(Exception):
     pass
 
 
-def _generate_with_retry(model, prompt: str) -> str:
-    """Call Gemini with one automatic retry for transient RPM-level 429s.
+def _generate_with_retry(system_instruction: str, prompt: str, schema: dict, max_tokens: int) -> str:
+    """Call OpenRouter with one automatic retry for transient RPM-level 429s.
 
     Distinguishes two cases:
     - RPM (per-minute) limit: waits 65s and retries once. Recoverable.
@@ -64,32 +64,61 @@ def _generate_with_retry(model, prompt: str) -> str:
 
     The caller catches RateLimitError and exits 0 so rate limits never fail a Kargo gate.
     """
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+        "response_format": {
+            "type": "json_object"
+        }
+    }
+
     for attempt in range(2):
         try:
-            return model.generate_content(prompt).text
-        except Exception as exc:
-            msg = str(exc)
-            is_rate_limit = (
-                "429" in msg
-                or "RESOURCE_EXHAUSTED" in msg
-                or "quota" in msg.lower()
-            )
+            resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            
+            msg = resp.text
+            print(f"DEBUG: OpenRouter Error Response: {msg}", file=sys.stderr)
+            is_rate_limit = resp.status_code == 429 or "quota" in msg.lower() or "resource_exhausted" in msg.lower()
+            
             if not is_rate_limit:
-                raise
+                resp.raise_for_status()
 
             # "per minute" in the error message indicates an RPM limit — transient, retryable
-            is_rpm = "per minute" in msg.lower() or "per_minute" in msg.lower()
+            is_rpm = "per minute" in msg.lower() or "per_minute" in msg.lower() or "surpassed" in msg.lower()
             if attempt == 0 and is_rpm:
-                print("WARN: Gemini RPM limit hit — waiting 65s before retry…", file=sys.stderr)
+                print("WARN: OpenRouter RPM limit hit — waiting 65s before retry…", file=sys.stderr)
                 time.sleep(65)
                 continue
 
             # Anything else (RPD / daily quota) is unrecoverable until tomorrow
             raise RateLimitError(
-                f"Gemini daily quota exhausted (model={MODEL_NAME}). "
-                f"Free tier: 1,500 RPD for gemini-2.0-flash-lite. "
+                f"OpenRouter daily quota exhausted (model={MODEL_NAME}). "
                 f"Original error: {msg}"
             )
+
+        except requests.exceptions.RequestException as exc:
+            msg = str(exc)
+            if attempt == 0 and "429" in msg:
+                print("WARN: OpenRouter RPM limit hit — waiting 65s before retry…", file=sys.stderr)
+                time.sleep(65)
+                continue
+            if attempt == 0:
+                raise
+            raise RateLimitError(f"Network or API error: {msg}")
 
     raise RateLimitError("rate limit persists after RPM retry")
 
@@ -177,25 +206,29 @@ def call_gemini(metrics: dict, retry_feedback: str = "") -> dict:
         f"EXAMPLE 1 OUTPUT: {ex1_out}\n\n"
         f"EXAMPLE 2 INPUT:\n{ex2_in}\n"
         f"EXAMPLE 2 OUTPUT: {ex2_out}\n\n"
-        "Analyze the provided metrics. Follow the exact same structure."
+        "Analyze the provided metrics. Follow the exact same structure.\n"
+        "OUTPUT ONLY VALID JSON. Do not include markdown formatting like ```json."
     )
     if retry_feedback:
         system += f"\n\nPrevious attempt failed validation: {retry_feedback}. Fix the issue."
 
-    genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-            response_schema=schema,
-            max_output_tokens=1024,
-            temperature=0.1,
-        ),
+    response_text = _generate_with_retry(
         system_instruction=system,
+        prompt=f"Analyze:\n{build_compact_prompt(metrics)}",
+        schema=schema,
+        max_tokens=1024
     )
-    # RateLimitError propagates to main() — never caught here
-    response_text = _generate_with_retry(model, f"Analyze:\n{build_compact_prompt(metrics)}")
-    return json.loads(response_text)
+    
+    # Clean up markdown if any
+    response_text = response_text.strip()
+    if response_text.startswith("```json"):
+        response_text = response_text[7:]
+    if response_text.startswith("```"):
+        response_text = response_text[3:]
+    if response_text.endswith("```"):
+        response_text = response_text[:-3]
+        
+    return json.loads(response_text.strip())
 
 
 def call_gemini_verify(metrics: dict, baseline: dict, deploy_ctx: dict, retry_feedback: str = "") -> dict:
@@ -227,7 +260,8 @@ def call_gemini_verify(metrics: dict, baseline: dict, deploy_ctx: dict, retry_fe
         "   - If PASS clean: write 'Platform is healthy. Proceed with promotion.'\n\n"
         f"EXAMPLE INPUT: {json.dumps(ex_in)}\n"
         f"EXAMPLE OUTPUT: {ex_out}\n\n"
-        "Analyze the post-deploy metrics and produce a gate verdict."
+        "Analyze the post-deploy metrics and produce a gate verdict.\n"
+        "OUTPUT ONLY VALID JSON. Do not include markdown formatting like ```json."
     )
     if retry_feedback:
         system += f"\n\nPrevious attempt failed validation: {retry_feedback}. Fix the issue."
@@ -250,20 +284,23 @@ def call_gemini_verify(metrics: dict, baseline: dict, deploy_ctx: dict, retry_fe
     parts.append(f"\nCurrent metrics:")
     parts.append(build_compact_prompt(metrics))
 
-    genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-            response_schema=schema,
-            max_output_tokens=2048,
-            temperature=0.1,
-        ),
+    response_text = _generate_with_retry(
         system_instruction=system,
+        prompt="\n".join(parts),
+        schema=schema,
+        max_tokens=2048
     )
-    # RateLimitError propagates to main() — never caught here
-    response_text = _generate_with_retry(model, "\n".join(parts))
-    return json.loads(response_text)
+    
+    # Clean up markdown if any
+    response_text = response_text.strip()
+    if response_text.startswith("```json"):
+        response_text = response_text[7:]
+    if response_text.startswith("```"):
+        response_text = response_text[3:]
+    if response_text.endswith("```"):
+        response_text = response_text[:-3]
+        
+    return json.loads(response_text.strip())
 
 
 def _handle_rate_limit(exc: RateLimitError, mode: str) -> int:

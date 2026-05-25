@@ -226,8 +226,12 @@ def main() -> int:
     mock_file = os.environ.get("MOCK_METRICS_FILE", "")
     if mock_file:
         out_path = "baseline_metrics.json" if baseline_mode else "metrics.json"
-        shutil.copy(mock_file, out_path)
-        print(f"STATUS: using mock metrics from {mock_file} → {out_path}")
+        # Avoid shutil.SameFileError if mock_file and out_path are the same
+        if os.path.abspath(mock_file) != os.path.abspath(out_path):
+            shutil.copy(mock_file, out_path)
+            print(f"STATUS: using mock metrics from {mock_file} → {out_path}")
+        else:
+            print(f"STATUS: using existing mock metrics file: {out_path}")
         return 0
 
     if baseline_mode:

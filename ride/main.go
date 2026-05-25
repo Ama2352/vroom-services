@@ -80,14 +80,23 @@ func main() {
 
 	// 5. Router Setup
 	r := gin.Default()
-	
+
 	p := ginprometheus.NewPrometheus("gin")
 	p.Use(r)
 
 	r.Use(handler.CorrelationMiddleware())
 
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Correlation-ID, X-User-ID")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
 
-	// Probes
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "UP"})
 	})
@@ -107,18 +116,6 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "READY"})
 	})
 
-	// CORS middleware
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Correlation-ID, X-User-ID")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		c.Next()
-	})
-
 	v1 := r.Group("/v1")
 	{
 		trips := v1.Group("/trips")
@@ -130,9 +127,10 @@ func main() {
 			trips.POST("/:id/reject", rideHandler.RejectOffer)
 			trips.POST("/:id/start", rideHandler.StartTrip)
 			trips.POST("/:id/cancel", rideHandler.CancelTrip)
-			trips.GET("/health", rideHandler.Health)
 		}
-		v1.POST("/debug/reset", rideHandler.Reset)
+		if os.Getenv("APP_ENV") == "dev" {
+			v1.POST("/debug/reset", rideHandler.Reset)
+		}
 	}
 
 	// Server setup

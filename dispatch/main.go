@@ -86,7 +86,9 @@ func main() {
 		{
 			dispatch.GET("/ws/location", locationHandler.HandleWS)
 		}
-		v1.POST("/debug/reset", locationHandler.Reset)
+		if os.Getenv("APP_ENV") == "dev" {
+			v1.POST("/debug/reset", locationHandler.Reset)
+		}
 	}
 
 	srv := &http.Server{

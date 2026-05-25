@@ -9,7 +9,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
 	"vroom-mvp/user/internal/handler"
 	"vroom-mvp/user/internal/repository"
 	"vroom-mvp/user/internal/service"
@@ -17,7 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
-	"github.com/zsais/go-gin-prometheus"
+	ginprometheus "github.com/zsais/go-gin-prometheus"
 )
 
 func main() {
@@ -40,11 +43,11 @@ func main() {
 	defer db.Close()
 
 	// Wait for DB to be ready
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer waitCancel()
 
 	for i := 0; i < 10; i++ {
-		err = db.PingContext(ctx)
+		err = db.PingContext(waitCtx)
 		if err == nil {
 			break
 		}
@@ -55,25 +58,37 @@ func main() {
 		log.Fatalf("Database not ready: %v", err)
 	}
 
-	// 3. Security: RSA Keys for JWT (RS256)
-	// In production, these should be loaded from secrets/files
-	privateKey, publicKey, err := loadOrGenerateKeys()
+	// 3. RSA keys for JWT (RS256)
+	// In production, mount the private key from a Sealed Secret and load it here instead.
+	log.Println("Generating ephemeral RSA keys (dev only — tokens invalidated on restart)")
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		log.Fatalf("Failed to initialize security keys: %v", err)
+		log.Fatalf("Failed to generate RSA key: %v", err)
 	}
+	jwtManager := util.NewJWTManager(privateKey, &privateKey.PublicKey, 24*time.Hour)
 
-	jwtManager := util.NewJWTManager(privateKey, publicKey, 24*time.Hour)
-
-	// 4. Initialize Layers
+	// 4. Initialize layers
 	userRepo := repository.NewPostgresUserRepository(db)
 	authService := service.NewAuthService(userRepo, jwtManager)
 	authHandler := handler.NewAuthHandler(authService)
 
-	// 5. Router Setup
+	// 5. Router setup
 	r := gin.Default()
 
 	p := ginprometheus.NewPrometheus("gin")
 	p.Use(r)
+
+	r.GET("/health", func(c *gin.Context) {
+		c.String(http.StatusOK, "OK")
+	})
+
+	r.GET("/readyz", func(c *gin.Context) {
+		if err := db.PingContext(c.Request.Context()); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "DOWN", "db": false})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "READY"})
+	})
 
 	v1 := r.Group("/v1")
 	{
@@ -81,19 +96,34 @@ func main() {
 		{
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
-			auth.GET("/health", authHandler.Health)
 		}
 	}
 
-	// Root health check
-	r.GET("/health", func(c *gin.Context) {
-		c.String(http.StatusOK, "I am fine!")
-	})
-
-	log.Printf("User Service starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// 6. Start server + graceful shutdown
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
 	}
+
+	go func() {
+		log.Printf("User Service starting on port %s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Listen: %s\n", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down User Service...")
+
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctxShutdown); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	log.Println("User Service exited gracefully")
 }
 
 func getEnv(key, fallback string) string {
@@ -101,15 +131,4 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func loadOrGenerateKeys() (*rsa.PrivateKey, *rsa.PublicKey, error) {
-	// For MVP/Dev, we generate a new pair on startup if not provided
-	// In a real app, you'd load these from a file or environment variable
-	log.Println("Generating ephemeral RSA keys for dev environment...")
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, nil, err
-	}
-	return privateKey, &privateKey.PublicKey, nil
 }

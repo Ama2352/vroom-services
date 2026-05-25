@@ -25,14 +25,11 @@ func NewDriverPool(candidates []AvailableDriver) *DriverPool {
 	}
 }
 
-// WaterfallMatch implements the matching logic. 
-// In a real waterfall, this might involve multiple steps or criteria.
-func (p *DriverPool) WaterfallMatch() (*AvailableDriver, error) {
+// Nearest returns the closest available candidate from the pre-filtered pool.
+// The waterfall retry logic (offer → reject → re-match) is orchestrated by the caller.
+func (p *DriverPool) Nearest() (*AvailableDriver, error) {
 	if len(p.Candidates) == 0 {
 		return nil, ErrNoDriversAvailable
 	}
-	
-	// For now, the "waterfall" just picks the first valid candidate (nearest)
-	// We can extend this logic later (e.g., checking driver rating, preference, etc.)
 	return &p.Candidates[0], nil
 }

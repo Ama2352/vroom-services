@@ -38,22 +38,17 @@ type Location struct {
 }
 
 type Trip struct {
-	ID             uuid.UUID     `json:"id"`
-	PassengerID    uuid.UUID     `json:"passenger_id"`
-	DriverID       *uuid.UUID    `json:"driver_id,omitempty"`
-	Status         TripStatus    `json:"status"`
-	Source         Location      `json:"source"`
-	Destination    Location      `json:"destination"`
-	EstimatedPrice Price         `json:"estimated_price"`
-	FinalPrice     *Price        `json:"final_price,omitempty"`
-	CreatedAt      time.Time     `json:"created_at"`
-	AcceptedAt     *time.Time    `json:"accepted_at,omitempty"`
-	CompletedAt    *time.Time    `json:"completed_at,omitempty"`
-	DomainEvents   []interface{} `json:"-"`
-}
-
-func (t *Trip) RecordEvent(event interface{}) {
-	t.DomainEvents = append(t.DomainEvents, event)
+	ID             uuid.UUID  `json:"id"`
+	PassengerID    uuid.UUID  `json:"passenger_id"`
+	DriverID       *uuid.UUID `json:"driver_id,omitempty"`
+	Status         TripStatus `json:"status"`
+	Source         Location   `json:"source"`
+	Destination    Location   `json:"destination"`
+	EstimatedPrice Price      `json:"estimated_price"`
+	FinalPrice     *Price     `json:"final_price,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
 }
 
 func (t *Trip) AcceptByDriver(driverID uuid.UUID) error {
@@ -69,13 +64,6 @@ func (t *Trip) AcceptByDriver(driverID uuid.UUID) error {
 	t.Status = StatusAccepted
 	now := time.Now()
 	t.AcceptedAt = &now
-
-	t.RecordEvent(map[string]interface{}{
-		"type":    "Trip.Accepted",
-		"trip_id": t.ID,
-		"driver":  driverID,
-	})
-
 	return nil
 }
 
@@ -84,12 +72,6 @@ func (t *Trip) Start() error {
 		return ErrInvalidTripStatus
 	}
 	t.Status = StatusStarted
-
-	t.RecordEvent(map[string]interface{}{
-		"type":    "Trip.Started",
-		"trip_id": t.ID,
-	})
-
 	return nil
 }
 
@@ -101,13 +83,6 @@ func (t *Trip) Complete(finalPrice float64) error {
 	now := time.Now()
 	t.CompletedAt = &now
 	t.FinalPrice = &Price{Amount: finalPrice, Currency: t.EstimatedPrice.Currency}
-
-	t.RecordEvent(map[string]interface{}{
-		"type":    "Trip.Completed",
-		"trip_id": t.ID,
-		"price":   finalPrice,
-	})
-
 	return nil
 }
 
@@ -122,14 +97,7 @@ func (t *Trip) RejectOffer(driverID uuid.UUID) error {
 	}
 
 	t.DriverID = nil
-	t.Status = StatusRequested // Go back to requested so it can be re-matched
-	
-	t.RecordEvent(map[string]interface{}{
-		"type":    "Trip.OfferRejected",
-		"trip_id": t.ID,
-		"driver":  driverID,
-	})
-	
+	t.Status = StatusRequested
 	return nil
 }
 
@@ -139,13 +107,6 @@ func (t *Trip) Cancel(reason string) error {
 	}
 	
 	t.Status = StatusCancelled
-	
-	t.RecordEvent(map[string]interface{}{
-		"type":    "Trip.Cancelled",
-		"trip_id": t.ID,
-		"reason":  reason,
-	})
-	
 	return nil
 }
 

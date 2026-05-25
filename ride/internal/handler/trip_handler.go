@@ -196,10 +196,6 @@ func (h *TripHandler) CancelTrip(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "CANCELLED", "trip_id": id})
 }
 
-func (h *TripHandler) Health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "UP"})
-}
-
 func (h *TripHandler) Reset(c *gin.Context) {
 	err := h.tripService.Reset(c.Request.Context())
 	if err != nil {

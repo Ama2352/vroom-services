@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"net/http"
+	"vroom-mvp/notification/internal/repository"
 	"vroom-mvp/notification/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -13,16 +14,29 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // For demo purposes, allow all origins
+		return true
 	},
 }
 
 type NotificationHandler struct {
-	Hub *service.Hub
+	Hub  *service.Hub
+	repo repository.NotificationRepository
 }
 
-func NewNotificationHandler(hub *service.Hub) *NotificationHandler {
-	return &NotificationHandler{Hub: hub}
+func NewNotificationHandler(hub *service.Hub, repo repository.NotificationRepository) *NotificationHandler {
+	return &NotificationHandler{Hub: hub, repo: repo}
+}
+
+func (h *NotificationHandler) HandleHistory(c *gin.Context) {
+	events, err := h.repo.GetHistory(c.Request.Context(), 50)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if events == nil {
+		events = []repository.NotificationEvent{}
+	}
+	c.JSON(http.StatusOK, events)
 }
 
 func (h *NotificationHandler) HandleWS(c *gin.Context) {
