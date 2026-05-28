@@ -1,7 +1,10 @@
 # vroom-services/.gitlab-ci.yml
 # Monorepo CI/CD Pipeline for Vroom Microservices
-# Stage order: test → build → scan → publish → deploy
-# Trivy scans the image tarball BEFORE any push to DockerHub
+# Stage order: test → build → publish → deploy
+# Images pushed to GHCR only (ghcr.io/ama2352/vroom-mvp-*) — Kargo polls GHCR, no rate limits
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
 
 stages:
   - test
@@ -12,23 +15,18 @@ stages:
   - deploy
 
 variables:
-  DOCKER_REGISTRY: "vroom-mvp"
+  IMG_PREFIX: "ghcr.io/ama2352/vroom-mvp"
   GITHUB_GITOPS_REPO: "Ama2352/vroom-gitops"
-  VERSION: "1.0.0" # Base semantic version
-  # Caching directories for Go
+  # Required GitLab CI/CD Variables (Settings → CI/CD → Variables, protected):
+  # GHCR_USER             — GitHub username (ama2352)
+  # GHCR_TOKEN            — GitHub PAT with write:packages scope
+  # GITHUB_GITOPS_TOKEN   — GitHub classic PAT (repo scope) for vroom-gitops push
+  VERSION: "1.0.0"
   GOPATH: "$CI_PROJECT_DIR/.go"
   GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
-  # Enable Docker BuildKit for layer caching
   DOCKER_BUILDKIT: "1"
-  # Docker-in-Docker settings
   DOCKER_HOST: tcp://docker:2375
   DOCKER_TLS_CERTDIR: ""
-  # Set these in GitLab CI/CD Variables (protected):
-  # DOCKER_USER           — DockerHub username
-  # DOCKER_PASSWORD       — DockerHub access token
-  # GITHUB_GITOPS_TOKEN   — GitHub classic PAT (repo scope) with write access to vroom-gitops
-  # SONAR_TOKEN           — From local SonarQube: My Account → Security → Generate Token
-  # SONAR_HOST_URL        — http://<k3s-server-node-ip>:<sonarqube-nodeport>
   GIT_STRATEGY: clone
   GIT_DEPTH: 1
 
@@ -168,9 +166,9 @@ integration-dispatch:
     - name: mirror.gcr.io/library/docker:24.0.5-dind
       alias: docker
   before_script:
-    - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
+    - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
   script:
-    - export IMG_BASE="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
+    - export IMG_BASE="${IMG_PREFIX}-${SERVICE_NAME}"
     - export IMG="$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA"
     - docker pull "$IMG_BASE:latest" || true
     - export BP_ARG="--build-arg BASE_IMAGE_PREFIX=mirror.gcr.io/library/"
@@ -300,7 +298,7 @@ build-frontend:
 #   allow_failure: true # don't block if SonarQube is temporarily unavailable
 
 # ---------------------------------------------------------------------------
-# STAGE 4: publish — load tarball → push to DockerHub (after clean scan)
+# STAGE 4: publish — load tarball → push to GHCR (Kargo polls here)
 # ---------------------------------------------------------------------------
 
 .publish_template:
@@ -310,9 +308,9 @@ build-frontend:
     - name: mirror.gcr.io/library/docker:24.0.5-dind
       alias: docker
   before_script:
-    - docker login -u "$DOCKER_USER" -p "$DOCKER_PASSWORD"
+    - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
   script:
-    - export IMG_BASE="$DOCKER_USER/$DOCKER_REGISTRY-${SERVICE_NAME}"
+    - export IMG_BASE="${IMG_PREFIX}-${SERVICE_NAME}"
     - export IMG_TAG="v${VERSION}-build.${CI_PIPELINE_IID}-${CI_COMMIT_SHORT_SHA}"
     - docker load < "${SERVICE_NAME}.tar"
     - docker tag "$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA" "$IMG_BASE:latest"
@@ -378,12 +376,12 @@ deploy-gitops:
       cd gitops-repo/apps
 
       for service in user ride notification dispatch frontend; do
-        echo "Updating $service → $CI_COMMIT_SHORT_SHA"
+        echo "Updating $service → ${IMG_PREFIX}-*:$CI_COMMIT_SHORT_SHA"
         cd "$service/overlays/dev"
         if [ "$service" == "frontend" ]; then
-          kustomize edit set image "vroom-mvp/frontend=$DOCKER_USER/$DOCKER_REGISTRY-frontend:$CI_COMMIT_SHORT_SHA"
+          kustomize edit set image "vroom-mvp/frontend=${IMG_PREFIX}-frontend:$CI_COMMIT_SHORT_SHA"
         else
-          kustomize edit set image "vroom-mvp/${service}-service=$DOCKER_USER/$DOCKER_REGISTRY-${service}-service:$CI_COMMIT_SHORT_SHA"
+          kustomize edit set image "vroom-mvp/${service}-service=${IMG_PREFIX}-${service}-service:$CI_COMMIT_SHORT_SHA"
         fi
         cd ../../..
       done
@@ -401,3 +399,31 @@ deploy-gitops:
     ]
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+
+# ---------------------------------------------------------------------------
+# AI Agent services — build + publish (Python, no Go tests needed)
+# ---------------------------------------------------------------------------
+
+build-runbook-retriever:
+  extends: .build_template
+  variables:
+    SERVICE_NAME: runbook-retriever
+    SERVICE_PATH: runbook-retriever
+
+build-kubectl-executor:
+  extends: .build_template
+  variables:
+    SERVICE_NAME: kubectl-executor
+    SERVICE_PATH: kubectl-executor
+
+publish-runbook-retriever:
+  extends: .publish_template
+  variables:
+    SERVICE_NAME: runbook-retriever
+  needs: [build-runbook-retriever]
+
+publish-kubectl-executor:
+  extends: .publish_template
+  variables:
+    SERVICE_NAME: kubectl-executor
+  needs: [build-kubectl-executor]
