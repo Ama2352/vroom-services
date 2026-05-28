@@ -132,6 +132,11 @@ func (w *TripUpdateWorker) handleMessage(ctx context.Context, msg redis.XMessage
 			log.Printf("[RIDE ERROR] Error assigning driver in DB: %v", err)
 		} else {
 			log.Printf("[STEP 3] Driver %s assigned to Trip %s. Waiting for manual acceptance.", data.DriverID, data.ID)
+			// Saga: record offer deadline so TripTimeoutWorker can trigger per-offer expiry
+			deadline := time.Now().Add(10 * time.Second)
+			if err := w.repo.SetOfferDeadline(ctx, data.ID, deadline); err != nil {
+				log.Printf("[SAGA] Failed to set offer_deadline for Trip %s: %v", data.ID, err)
+			}
 		}
 	} else if eventType == "Trip.MatchFailed" {
 		var data struct {

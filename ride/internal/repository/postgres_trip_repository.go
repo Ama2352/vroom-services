@@ -284,6 +284,37 @@ func (r *PostgresTripRepository) GetStuckTrips(ctx context.Context, timeout time
 	return trips, nil
 }
 
+func (r *PostgresTripRepository) SetOfferDeadline(ctx context.Context, tripID uuid.UUID, deadline time.Time) error {
+	return r.queries.SetOfferDeadline(ctx, db.SetOfferDeadlineParams{
+		ID:            tripID,
+		OfferDeadline: sql.NullTime{Time: deadline, Valid: true},
+	})
+}
+
+func (r *PostgresTripRepository) GetExpiredOffers(ctx context.Context, cutoff time.Time) ([]*domain.Trip, error) {
+	rows, err := r.queries.GetExpiredOffers(ctx, sql.NullTime{Time: cutoff, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	trips := make([]*domain.Trip, len(rows))
+	for i, row := range rows {
+		trips[i] = toDomainTrip(row)
+	}
+	return trips, nil
+}
+
+func (r *PostgresTripRepository) GetStuckAcceptedTrips(ctx context.Context, cutoff time.Time) ([]*domain.Trip, error) {
+	rows, err := r.queries.GetStuckAcceptedTrips(ctx, sql.NullTime{Time: cutoff, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	trips := make([]*domain.Trip, len(rows))
+	for i, row := range rows {
+		trips[i] = toDomainTrip(row)
+	}
+	return trips, nil
+}
+
 func (r *PostgresTripRepository) CancelWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error {
 	tx, err := r.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -413,6 +444,9 @@ func toDomainTrip(t db.Trip) *domain.Trip {
 	}
 	if t.CompletedAt.Valid {
 		trip.CompletedAt = &t.CompletedAt.Time
+	}
+	if t.OfferDeadline.Valid {
+		trip.OfferDeadline = &t.OfferDeadline.Time
 	}
 	return trip
 }

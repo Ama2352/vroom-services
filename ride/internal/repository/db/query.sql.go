@@ -120,8 +120,105 @@ func (q *Queries) CreateTrip(ctx context.Context, arg CreateTripParams) error {
 	return err
 }
 
+const getExpiredOffers = `-- name: GetExpiredOffers :many
+SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address, offer_deadline FROM trips
+WHERE driver_id IS NOT NULL
+  AND status = 'REQUESTED'
+  AND offer_deadline IS NOT NULL
+  AND offer_deadline < $1
+`
+
+func (q *Queries) GetExpiredOffers(ctx context.Context, offerDeadline sql.NullTime) ([]Trip, error) {
+	rows, err := q.db.QueryContext(ctx, getExpiredOffers, offerDeadline)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Trip
+	for rows.Next() {
+		var i Trip
+		if err := rows.Scan(
+			&i.ID,
+			&i.PassengerID,
+			&i.DriverID,
+			&i.Status,
+			&i.SourceLat,
+			&i.SourceLng,
+			&i.DestLat,
+			&i.DestLng,
+			&i.EstimatedPrice,
+			&i.FinalPrice,
+			&i.CreatedAt,
+			&i.AcceptedAt,
+			&i.CompletedAt,
+			&i.Currency,
+			&i.SourceAddress,
+			&i.DestAddress,
+			&i.OfferDeadline,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getStuckAcceptedTrips = `-- name: GetStuckAcceptedTrips :many
+SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address, offer_deadline FROM trips
+WHERE status = 'ACCEPTED'
+  AND accepted_at IS NOT NULL
+  AND accepted_at < $1
+`
+
+func (q *Queries) GetStuckAcceptedTrips(ctx context.Context, acceptedAt sql.NullTime) ([]Trip, error) {
+	rows, err := q.db.QueryContext(ctx, getStuckAcceptedTrips, acceptedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Trip
+	for rows.Next() {
+		var i Trip
+		if err := rows.Scan(
+			&i.ID,
+			&i.PassengerID,
+			&i.DriverID,
+			&i.Status,
+			&i.SourceLat,
+			&i.SourceLng,
+			&i.DestLat,
+			&i.DestLng,
+			&i.EstimatedPrice,
+			&i.FinalPrice,
+			&i.CreatedAt,
+			&i.AcceptedAt,
+			&i.CompletedAt,
+			&i.Currency,
+			&i.SourceAddress,
+			&i.DestAddress,
+			&i.OfferDeadline,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStuckTrips = `-- name: GetStuckTrips :many
-SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address FROM trips 
+SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address, offer_deadline FROM trips 
 WHERE status = 'REQUESTED' AND created_at < $1
 `
 
@@ -151,6 +248,7 @@ func (q *Queries) GetStuckTrips(ctx context.Context, createdAt sql.NullTime) ([]
 			&i.Currency,
 			&i.SourceAddress,
 			&i.DestAddress,
+			&i.OfferDeadline,
 		); err != nil {
 			return nil, err
 		}
@@ -166,7 +264,7 @@ func (q *Queries) GetStuckTrips(ctx context.Context, createdAt sql.NullTime) ([]
 }
 
 const getTrip = `-- name: GetTrip :one
-SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address FROM trips WHERE id = $1 LIMIT 1
+SELECT id, passenger_id, driver_id, status, source_lat, source_lng, dest_lat, dest_lng, estimated_price, final_price, created_at, accepted_at, completed_at, currency, source_address, dest_address, offer_deadline FROM trips WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
@@ -189,6 +287,7 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 		&i.Currency,
 		&i.SourceAddress,
 		&i.DestAddress,
+		&i.OfferDeadline,
 	)
 	return i, err
 }
@@ -254,6 +353,20 @@ type MarkEventProcessedParams struct {
 
 func (q *Queries) MarkEventProcessed(ctx context.Context, arg MarkEventProcessedParams) error {
 	_, err := q.db.ExecContext(ctx, markEventProcessed, arg.ID, arg.EventType)
+	return err
+}
+
+const setOfferDeadline = `-- name: SetOfferDeadline :exec
+UPDATE trips SET offer_deadline = $2 WHERE id = $1
+`
+
+type SetOfferDeadlineParams struct {
+	ID            uuid.UUID    `json:"id"`
+	OfferDeadline sql.NullTime `json:"offer_deadline"`
+}
+
+func (q *Queries) SetOfferDeadline(ctx context.Context, arg SetOfferDeadlineParams) error {
+	_, err := q.db.ExecContext(ctx, setOfferDeadline, arg.ID, arg.OfferDeadline)
 	return err
 }
 

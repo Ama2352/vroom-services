@@ -80,6 +80,7 @@ func main() {
 	})
 
 	v1 := r.Group("/v1")
+	v1.Use(handler.JWTMiddleware())
 	{
 		v1.PUT("/drivers/:id/location", locationHandler.UpdateLocation)
 		dispatch := v1.Group("/dispatch")

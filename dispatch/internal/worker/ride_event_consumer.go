@@ -50,6 +50,20 @@ func (c *RideEventConsumer) Start(ctx context.Context) {
 }
 
 func (c *RideEventConsumer) consume(ctx context.Context) {
+	// Reclaim messages stuck in PEL > 30 s (handles consumer crash mid-processing)
+	autoclaimed, _, _ := c.redisClient.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+		Stream:   c.streamName,
+		Group:    c.groupName,
+		Consumer: c.consumerID,
+		MinIdle:  30 * time.Second,
+		Start:    "0-0",
+		Count:    10,
+	}).Result()
+	for _, msg := range autoclaimed {
+		c.handleMessage(ctx, msg)
+		c.redisClient.XAck(ctx, c.streamName, c.groupName, msg.ID)
+	}
+
 	// Read from group
 	entries, err := c.redisClient.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    c.groupName,
@@ -130,7 +144,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal payload for trip %s: %v", aggregateID, err)
 			return
 		}
-		
+
 		tripID := aggregateID
 		if id, ok := data["id"].(string); ok {
 			tripID = id
@@ -140,6 +154,14 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			driverID, _ := data["driver_id"].(string)
 			log.Printf("[REJECT] Driver %s rejected Trip %s. Recording rejection and re-matching...", driverID, tripID)
 			_ = c.dispatchService.RecordRejection(ctx, tripID, driverID)
+			// Saga compensation: release driver reservation so they can be matched again
+			if driverID != "" {
+				if err := c.dispatchService.ReleaseDriver(ctx, driverID); err != nil {
+					log.Printf("[SAGA COMPENSATE] Failed to release driver %s: %v", driverID, err)
+				} else {
+					log.Printf("[SAGA COMPENSATE] Driver %s released (compensation for rejected offer)", driverID)
+				}
+			}
 		}
 
 		// Helper to extract float64 robustly
@@ -163,7 +185,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		log.Printf("[DISPATCH] Extracted Coords: lat=%f, lng=%f", lat, lng)
 
 		log.Printf("[STEP 2] Dispatcher matching driver for Trip: %s at (%f, %f)", tripID, lat, lng)
-		
+
 		// Match Driver
 		driverID, err := c.dispatchService.MatchDriver(ctx, tripID, lat, lng)
 		if err != nil {
@@ -173,23 +195,23 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 
 		if driverID == "" {
 			log.Printf("[STEP 2.X] MATCH FAILED: No available drivers found within radius for trip: %s", tripID)
-			
+
 			// Publish Trip.MatchFailed event
 			failedPayload := map[string]interface{}{
-				"id":           tripID,
-				"reason":       "NO_DRIVERS_AVAILABLE_AFTER_REJECTIONS",
-				"updated_at":   time.Now().Format(time.RFC3339),
+				"id":         tripID,
+				"reason":     "NO_DRIVERS_AVAILABLE_AFTER_REJECTIONS",
+				"updated_at": time.Now().Format(time.RFC3339),
 			}
 			payloadJSON, _ := json.Marshal(failedPayload)
 
 			err = c.redisClient.XAdd(ctx, &redis.XAddArgs{
 				Stream: c.streamName,
 				Values: map[string]interface{}{
-					"id":           uuid.New().String(),
-					"type":         "Trip.MatchFailed",
-					"aggregate":    "TRIP",
-					"aggregate_id": tripID,
-					"payload":      string(payloadJSON),
+					"id":             uuid.New().String(),
+					"type":           "Trip.MatchFailed",
+					"aggregate":      "TRIP",
+					"aggregate_id":   tripID,
+					"payload":        string(payloadJSON),
 					"correlation_id": correlationID,
 				},
 			}).Err()
@@ -200,9 +222,8 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			return
 		}
 
-
 		log.Printf("[STEP 2] MATCH SUCCESS: Trip %s assigned to Driver %s. Publishing 'Trip.Matched'...", tripID, driverID)
-		
+
 		// Publish Trip.Matched event
 		matchPayload := map[string]interface{}{
 			"id":           tripID,
@@ -216,11 +237,11 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		err = c.redisClient.XAdd(ctx, &redis.XAddArgs{
 			Stream: c.streamName,
 			Values: map[string]interface{}{
-				"id":           uuid.New().String(),
-				"type":         "Trip.Matched",
-				"aggregate":    "TRIP",
-				"aggregate_id": tripID,
-				"payload":      string(payloadJSON),
+				"id":             uuid.New().String(),
+				"type":           "Trip.Matched",
+				"aggregate":      "TRIP",
+				"aggregate_id":   tripID,
+				"payload":        string(payloadJSON),
 				"correlation_id": correlationID,
 			},
 		}).Err()
@@ -229,6 +250,63 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			log.Printf("[DISPATCH ERROR] Failed to publish Trip.Matched for trip %s: %v", tripID, err)
 		} else {
 			log.Printf("[STEP 2.1] Event 'Trip.Matched' published successfully for Trip: %s", tripID)
+			// Saga step 2: commit driver reservation in Redis
+			if err := c.dispatchService.ReserveDriver(ctx, driverID); err != nil {
+				log.Printf("[SAGA] Failed to reserve driver %s: %v", driverID, err)
+			} else {
+				log.Printf("[SAGA] Driver %s reserved (ON_OFFER) for Trip %s", driverID, tripID)
+			}
+		}
+	} else if eventType == "Trip.Accepted" {
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal Trip.Accepted payload: %v", err)
+			return
+		}
+		driverID, _ := data["driver_id"].(string)
+		if driverID != "" {
+			// Saga step 4: transition ON_OFFER → ON_TRIP
+			if err := c.dispatchService.ConfirmDriverOnTrip(ctx, driverID); err != nil {
+				log.Printf("[SAGA] Failed to confirm driver %s ON_TRIP: %v", driverID, err)
+			} else {
+				log.Printf("[SAGA] Driver %s confirmed ON_TRIP", driverID)
+			}
+		}
+	} else if eventType == "Trip.Cancelled" {
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal Trip.Cancelled payload: %v", err)
+			return
+		}
+		driverID, _ := data["driver_id"].(string)
+		tripID := aggregateID
+		if id, ok := data["id"].(string); ok {
+			tripID = id
+		}
+		// Cleanup rejection tracking
+		_ = c.redisClient.Del(ctx, "trip_rejections:"+tripID)
+		// Saga compensation: release driver if one was assigned
+		if driverID != "" {
+			if err := c.dispatchService.ReleaseDriver(ctx, driverID); err != nil {
+				log.Printf("[SAGA COMPENSATE] Failed to release driver %s on cancellation: %v", driverID, err)
+			} else {
+				log.Printf("[SAGA COMPENSATE] Driver %s released (Trip.Cancelled)", driverID)
+			}
+		}
+	} else if eventType == "Trip.Completed" {
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &data); err != nil {
+			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal Trip.Completed payload: %v", err)
+			return
+		}
+		driverID, _ := data["driver_id"].(string)
+		if driverID != "" {
+			// Saga cleanup: remove ON_TRIP commitment after successful completion
+			if err := c.dispatchService.ReleaseDriver(ctx, driverID); err != nil {
+				log.Printf("[SAGA] Failed to release driver %s after completion: %v", driverID, err)
+			} else {
+				log.Printf("[SAGA] Driver %s released after Trip.Completed", driverID)
+			}
 		}
 	}
 }

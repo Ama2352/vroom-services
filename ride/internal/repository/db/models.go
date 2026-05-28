@@ -45,4 +45,5 @@ type Trip struct {
 	Currency       sql.NullString  `json:"currency"`
 	SourceAddress  sql.NullString  `json:"source_address"`
 	DestAddress    sql.NullString  `json:"dest_address"`
+	OfferDeadline  sql.NullTime    `json:"offer_deadline"`
 }

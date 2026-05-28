@@ -2,6 +2,8 @@ package util
 
 import (
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -52,4 +54,13 @@ func (m *JWTManager) Validate(tokenStr string) (jwt.MapClaims, error) {
 	}
 
 	return claims, nil
+}
+
+func (m *JWTManager) PublicKeyPEM() (string, error) {
+	der, err := x509.MarshalPKIXPublicKey(m.publicKey)
+	if err != nil {
+		return "", err
+	}
+	block := &pem.Block{Type: "PUBLIC KEY", Bytes: der}
+	return string(pem.EncodeToMemory(block)), nil
 }

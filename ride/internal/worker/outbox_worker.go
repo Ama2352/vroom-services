@@ -40,6 +40,12 @@ func (w *OutboxWorker) Start(ctx context.Context) {
 	}
 }
 
+// ProcessOnce fetches and publishes all pending outbox events in a single pass.
+// Exported for use in integration tests; production code calls this via Start().
+func (w *OutboxWorker) ProcessOnce(ctx context.Context) {
+	w.processEvents(ctx)
+}
+
 func (w *OutboxWorker) processEvents(ctx context.Context) {
 	events, err := w.repo.GetUnpublishedEvents(ctx, 10)
 	if err != nil {

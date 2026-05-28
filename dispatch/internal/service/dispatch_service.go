@@ -56,7 +56,13 @@ func (s *DispatchService) MatchDriver(ctx context.Context, tripID string, lat, l
 			log.Printf("[DISPATCH] Driver %s rejected Trip %s previously, skipping", driverID, tripID)
 			continue
 		}
-		
+
+		// Skip drivers who already have an active saga commitment (ON_OFFER or ON_TRIP)
+		if status, _ := s.redisClient.Get(ctx, "driver_status:"+driverID).Result(); status != "" {
+			log.Printf("[DISPATCH] Driver %s has active status '%s', skipping", driverID, status)
+			continue
+		}
+
 		// Check if driver is still "fresh" (sent heartbeat recently)
 		lastSeen, err := s.redisClient.Exists(ctx, "driver_last_seen:"+driverID).Result()
 		if err != nil || lastSeen == 0 {
@@ -116,6 +122,22 @@ func (s *DispatchService) UpdateDriverLocation(ctx context.Context, driverID str
 
 	log.Printf("[HEARTBEAT] Driver %s location updated: %f, %f", driverID, lat, lng)
 	return nil
+}
+
+// ReserveDriver commits driver as ON_OFFER (saga step 2).
+// TTL is 35s — slightly longer than the 10s offer window plus the 10s poll interval.
+func (s *DispatchService) ReserveDriver(ctx context.Context, driverID string) error {
+	return s.redisClient.Set(ctx, "driver_status:"+driverID, "ON_OFFER", 35*time.Second).Err()
+}
+
+// ConfirmDriverOnTrip transitions driver ON_OFFER → ON_TRIP (saga step 4).
+func (s *DispatchService) ConfirmDriverOnTrip(ctx context.Context, driverID string) error {
+	return s.redisClient.Set(ctx, "driver_status:"+driverID, "ON_TRIP", 4*time.Hour).Err()
+}
+
+// ReleaseDriver is the compensation transaction — removes the saga reservation.
+func (s *DispatchService) ReleaseDriver(ctx context.Context, driverID string) error {
+	return s.redisClient.Del(ctx, "driver_status:"+driverID).Err()
 }
 
 func (s *DispatchService) Reset(ctx context.Context) error {

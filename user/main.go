@@ -96,6 +96,14 @@ func main() {
 		{
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
+			auth.GET("/public-key", func(c *gin.Context) {
+				pemStr, err := jwtManager.PublicKeyPEM()
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export key"})
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"public_key": pemStr})
+			})
 		}
 	}
 

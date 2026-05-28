@@ -1,0 +1,1 @@
+ALTER TABLE trips ADD COLUMN offer_deadline TIMESTAMPTZ;

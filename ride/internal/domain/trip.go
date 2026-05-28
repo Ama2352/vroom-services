@@ -49,6 +49,7 @@ type Trip struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
 	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	OfferDeadline  *time.Time `json:"offer_deadline,omitempty"`
 }
 
 func (t *Trip) AcceptByDriver(driverID uuid.UUID) error {

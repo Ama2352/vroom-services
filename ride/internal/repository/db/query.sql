@@ -54,3 +54,19 @@ SELECT EXISTS(SELECT 1 FROM inbox_events WHERE id = $1);
 
 -- name: MarkEventProcessed :exec
 INSERT INTO inbox_events (id, event_type) VALUES ($1, $2);
+
+-- name: SetOfferDeadline :exec
+UPDATE trips SET offer_deadline = $2 WHERE id = $1;
+
+-- name: GetExpiredOffers :many
+SELECT * FROM trips
+WHERE driver_id IS NOT NULL
+  AND status = 'REQUESTED'
+  AND offer_deadline IS NOT NULL
+  AND offer_deadline < $1;
+
+-- name: GetStuckAcceptedTrips :many
+SELECT * FROM trips
+WHERE status = 'ACCEPTED'
+  AND accepted_at IS NOT NULL
+  AND accepted_at < $1;

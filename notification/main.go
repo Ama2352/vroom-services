@@ -111,6 +111,7 @@ func main() {
 	})
 
 	v1 := r.Group("/v1")
+	v1.Use(handler.JWTMiddleware())
 	{
 		v1.GET("/history", notificationHandler.HandleHistory)
 		v1.GET("/ws", notificationHandler.HandleWS)

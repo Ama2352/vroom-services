@@ -4,7 +4,8 @@
 # Trivy scans the image tarball BEFORE any push to DockerHub
 
 stages:
-  # - test
+  - test
+  - integration
   - build
   # - scan
   - publish
@@ -56,53 +57,105 @@ variables:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-# test-user:
-#   extends: .go_test_template
-#   variables:
-#     SERVICE_PATH: user
-#   allow_failure: true # no tests written yet
-#
-# test-ride:
-#   extends: .go_test_template
-#   variables:
-#     SERVICE_PATH: ride
-#   allow_failure: false # trip_test.go exists and must pass
-#
-# test-dispatch:
-#   extends: .go_test_template
-#   variables:
-#     SERVICE_PATH: dispatch
-#   allow_failure: true
-#
-# test-notification:
-#   extends: .go_test_template
-#   variables:
-#     SERVICE_PATH: notification
-#   allow_failure: true
-#
-# gosec:
-#   stage: test
-#   image: golang:1.25-alpine
-#   cache:
-#     key: "go-gosec-${CI_COMMIT_REF_SLUG}"
-#     paths:
-#       - .go/pkg/mod/
-#       - .go/build-cache/
-#       - .go/bin/
-#   before_script:
-#     - export PATH="$CI_PROJECT_DIR/.go/bin:$PATH"
-#     - command -v gosec || go install github.com/securego/gosec/v2/cmd/gosec@latest
-#   script:
-#     - gosec -fmt=sarif -out=gosec-report.sarif ./... || true
-#   artifacts:
-#     reports:
-#       sast: gosec-report.sarif
-#     when: always
-#   allow_failure: true
-#   rules:
-#     - if: $CI_COMMIT_BRANCH == "main"
-#     - if: $CI_PIPELINE_SOURCE == "web"
-#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+test-user:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: user
+  allow_failure: true
+
+test-ride:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: ride
+  allow_failure: false # trip_test.go exists and must pass
+
+test-dispatch:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: dispatch
+  allow_failure: true
+
+test-notification:
+  extends: .go_test_template
+  variables:
+    SERVICE_PATH: notification
+  allow_failure: true
+
+gosec:
+  stage: test
+  image: mirror.gcr.io/library/golang:1.25-alpine
+  cache:
+    key: "go-gosec-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .go/pkg/mod/
+      - .go/build-cache/
+      - .go/bin/
+  before_script:
+    - export PATH="$CI_PROJECT_DIR/.go/bin:$PATH"
+    - command -v gosec || go install github.com/securego/gosec/v2/cmd/gosec@latest
+  script:
+    - for svc in user ride dispatch notification; do
+        cd "$svc" && gosec -fmt=sarif -out="../gosec-$svc.sarif" ./... || true && cd ..;
+      done
+  artifacts:
+    reports:
+      sast:
+        - gosec-ride.sarif
+        - gosec-user.sarif
+        - gosec-dispatch.sarif
+        - gosec-notification.sarif
+    when: always
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ---------------------------------------------------------------------------
+# STAGE 2: integration — testcontainers tests (Docker-in-Docker required)
+# Runs after unit tests; gated on ride unit tests passing.
+# Uses -tags integration to activate testcontainers-backed test files.
+# ---------------------------------------------------------------------------
+
+.integration_test_template:
+  stage: integration
+  image: mirror.gcr.io/library/golang:1.25-alpine
+  services:
+    - name: mirror.gcr.io/library/docker:24.0.5-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    GOPATH: "$CI_PROJECT_DIR/.go"
+    GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
+    # Disable Ryuk (reaper container) — dind has no reachable Docker socket for it
+    RYUK_DISABLED: "true"
+  cache:
+    key: "go-integration-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .go/pkg/mod/
+      - .go/build-cache/
+  script:
+    - cd "$SERVICE_PATH"
+    - go test ./internal/integration/... -tags integration -v -timeout 120s
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+integration-ride:
+  extends: .integration_test_template
+  variables:
+    SERVICE_PATH: ride
+  needs: [test-ride]
+  allow_failure: false
+
+integration-dispatch:
+  extends: .integration_test_template
+  variables:
+    SERVICE_PATH: dispatch
+  needs: [test-dispatch]
+  allow_failure: false
 
 # ---------------------------------------------------------------------------
 # STAGE 2: build — docker build → .tar artifact (NO push to registry yet)

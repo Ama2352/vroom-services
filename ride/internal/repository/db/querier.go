@@ -16,11 +16,14 @@ type Querier interface {
 	CompleteTrip(ctx context.Context, arg CompleteTripParams) error
 	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error
 	CreateTrip(ctx context.Context, arg CreateTripParams) error
+	GetExpiredOffers(ctx context.Context, offerDeadline sql.NullTime) ([]Trip, error)
+	GetStuckAcceptedTrips(ctx context.Context, acceptedAt sql.NullTime) ([]Trip, error)
 	GetStuckTrips(ctx context.Context, createdAt sql.NullTime) ([]Trip, error)
 	GetTrip(ctx context.Context, id uuid.UUID) (Trip, error)
 	GetUnpublishedEvents(ctx context.Context, dollar_1 int32) ([]OutboxEvent, error)
 	IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error)
 	MarkEventProcessed(ctx context.Context, arg MarkEventProcessedParams) error
+	SetOfferDeadline(ctx context.Context, arg SetOfferDeadlineParams) error
 	UpdateEventStatus(ctx context.Context, arg UpdateEventStatusParams) error
 	UpdateTripDriver(ctx context.Context, arg UpdateTripDriverParams) error
 	UpdateTripStatus(ctx context.Context, arg UpdateTripStatusParams) error

@@ -117,6 +117,7 @@ func main() {
 	})
 
 	v1 := r.Group("/v1")
+	v1.Use(handler.JWTMiddleware())
 	{
 		trips := v1.Group("/trips")
 		{

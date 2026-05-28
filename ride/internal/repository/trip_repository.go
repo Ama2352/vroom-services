@@ -32,6 +32,9 @@ type TripRepository interface {
 	GetUnpublishedEvents(ctx context.Context, limit int) ([]*OutboxEvent, error)
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string) error
 	GetStuckTrips(ctx context.Context, timeout time.Time) ([]*domain.Trip, error)
+	SetOfferDeadline(ctx context.Context, tripID uuid.UUID, deadline time.Time) error
+	GetExpiredOffers(ctx context.Context, cutoff time.Time) ([]*domain.Trip, error)
+	GetStuckAcceptedTrips(ctx context.Context, cutoff time.Time) ([]*domain.Trip, error)
 	CancelWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error
 	RejectOfferWithOutbox(ctx context.Context, tripID uuid.UUID, event *OutboxEvent) error
 	IsEventProcessed(ctx context.Context, id uuid.UUID) (bool, error)
