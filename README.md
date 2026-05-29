@@ -1,44 +1,65 @@
-# Vroom Services: AI-Enhanced Microservices
+# vroom-services
 
-This repository contains the Go-based microservices and CI/CD logic for the **Vroom** ride-hailing platform.
+Source code, CI/CD pipeline, and AI agent tooling for the **Vroom** ride-hailing platform.
 
-## 🏗️ Architecture
+Part of a three-repo GitOps setup:
+- **vroom-services** (this repo) — application source + CI
+- [vroom-gitops](https://github.com/Ama2352/vroom-gitops) — Kustomize overlays, ArgoCD + Kargo delivery
+- [vroom-infra](https://github.com/Ama2352/vroom-infra) — Vagrant + Ansible K3s cluster provisioning
 
-The platform follows a distributed architecture designed for reliability and eventual consistency.
+---
 
-| Service          | Responsibility          | Stack                         |
-| :--------------- | :---------------------- | :---------------------------- |
-| **User**         | Identity & JWT (RS256)  | Go, PostgreSQL, SQLC          |
-| **Ride**         | Booking & State Machine | Go, PostgreSQL, Redis Streams |
-| **Dispatch**     | Driver Matching (Geo)   | Go, Redis GeoSearch           |
-| **Notification** | Slack & User Alerts     | Go, Redis Streams             |
-| **AI Reporter**  | Health Analysis         | Go, Gemini Flash, Prometheus  |
+## Repository Layout
 
-## 🌟 Key Technical Patterns
+```
+vroom-services/
+├── user/               Go — identity, JWT RS256, PostgreSQL
+├── ride/               Go — trip state machine, Outbox pattern, PostgreSQL + Redis Streams
+├── dispatch/           Go — driver geo-matching, Saga coordinator, Redis Geo
+├── notification/       Go — event consumer, WebSocket push, PostgreSQL
+├── frontend/           React 19 + Vite — passenger and driver UI
+├── ai-agent/           ReAct incident response agent (Plan 10)
+│   ├── kubectl-executor/   Python — allowlist-gated kubectl HTTP gateway
+│   ├── runbook-retriever/  Python — keyword-search RAG over runbooks
+│   └── runbooks/           Operational runbooks (Markdown)
+├── load-tests/         k6 load scenarios (baseline, spike, geo flood)
+├── scripts/            DB init and utility scripts
+└── docker-compose.yml  Full local stack (Postgres + Redis + all services)
+```
 
-### Transactional Outbox Pattern
+---
 
-Ensures that domain events (e.g., `TripCreated`) are never lost. The event is saved to the database in the same transaction as the domain object and then published to **Redis Streams** by a background worker.
+## Quick Start (local, no Kubernetes needed)
 
-### Async Event-Driven Communication
+```bash
+docker-compose up --build
+# User:         http://localhost:8081
+# Ride:         http://localhost:8082
+# Dispatch:     http://localhost:8083
+# Notification: http://localhost:8084
+# Frontend:     http://localhost:5173
+```
 
-Services communicate asynchronously via **Redis Streams** using Consumer Groups, allowing for horizontal scalability and fault tolerance.
+---
 
-### AI-Driven Observability
+## CI/CD Pipeline (GitLab CI)
 
-The **AI Reporter** service acts as a "Virtual SRE." It periodically queries Prometheus metrics and uses **Gemini Flash** to perform root-cause analysis, sending natural-language health reports to Slack.
+```
+test → integration → build → publish → deploy
+```
 
-## 🎡 CI/CD Pipeline (GitLab CI)
+| Stage | What happens |
+|-------|-------------|
+| `test` | `go test ./...` + gosec SAST |
+| `integration` | testcontainers (real Postgres + Redis), `//go:build integration` |
+| `build` | Docker multi-stage build |
+| `publish` | Push to GHCR (`ghcr.io/ama2352/vroom-mvp-*`) |
+| `deploy` | Update image tag in vroom-gitops dev overlay → ArgoCD syncs → Kargo promotes |
 
-The `.gitlab-ci.yml` defines a robust DevSecOps pipeline:
+---
 
-1.  **Test**: Unit and integration testing.
-2.  **Scan**: Static analysis with **SonarQube** and security scanning with **Trivy**.
-3.  **Build**: Multi-arch Docker builds.
-4.  **Publish**: Pushing to Docker Hub/ECR with automated versioning.
-5.  **Deploy**: Triggering [vroom-gitops](https://github.com/Ama2352/vroom-gitops) updates.
+## Documentation
 
-## 🔗 Related Repositories
-
-- **[vroom-gitops](https://github.com/Ama2352/vroom-gitops)**: The GitOps promotion engine.
-- **[vroom-infra](https://github.com/Ama2352/vroom-infra)**: Cluster provisioning logic.
+- [Architecture & patterns](docs/architecture.md)
+- [API reference](docs/api.md)
+- [AI agent (ReAct incident responder)](docs/ai-agent.md)

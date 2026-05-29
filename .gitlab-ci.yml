@@ -1,7 +1,11 @@
 # vroom-services/.gitlab-ci.yml
 # Monorepo CI/CD Pipeline for Vroom Microservices
-# Stage order: test → build → publish → deploy
-# Images pushed to GHCR only (ghcr.io/ama2352/vroom-mvp-*) — Kargo polls GHCR, no rate limits
+# Stage order: test → integration → build → publish → deploy
+# Images are pushed to GHCR only (ghcr.io/ama2352/vroom-mvp-*).
+# This refactor intentionally keeps CI simple:
+# - keep only Go module cache
+# - remove Docker layer cache / inline cache
+# - use standard Docker Hub images instead of mirror.gcr.io
 
 include:
   - template: Security/SAST.gitlab-ci.yml
@@ -17,13 +21,14 @@ stages:
 variables:
   IMG_PREFIX: "ghcr.io/ama2352/vroom-mvp"
   GITHUB_GITOPS_REPO: "Ama2352/vroom-gitops"
+
   # Required GitLab CI/CD Variables (Settings → CI/CD → Variables, protected):
   # GHCR_USER             — GitHub username (ama2352)
   # GHCR_TOKEN            — GitHub PAT with write:packages scope
   # GITHUB_GITOPS_TOKEN   — GitHub classic PAT (repo scope) for vroom-gitops push
+
   VERSION: "1.0.0"
   GOPATH: "$CI_PROJECT_DIR/.go"
-  GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
   DOCKER_BUILDKIT: "1"
   DOCKER_HOST: tcp://docker:2375
   DOCKER_TLS_CERTDIR: ""
@@ -36,12 +41,11 @@ variables:
 
 .go_test_template:
   stage: test
-  image: mirror.gcr.io/library/golang:1.25-alpine
+  image: golang:1.25-alpine
   cache:
-    key: "go-test-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
+    key: "go-mod-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
     paths:
       - .go/pkg/mod/
-      - .go/build-cache/
   script:
     - cd "$SERVICE_PATH"
     - go test ./... -v -coverprofile=coverage.out -covermode=atomic
@@ -65,7 +69,7 @@ test-ride:
   extends: .go_test_template
   variables:
     SERVICE_PATH: ride
-  allow_failure: false # trip_test.go exists and must pass
+  allow_failure: false
 
 test-dispatch:
   extends: .go_test_template
@@ -81,19 +85,16 @@ test-notification:
 
 gosec:
   stage: test
-  image: mirror.gcr.io/library/golang:1.25-alpine
+  image: golang:1.25-alpine
   cache:
-    key: "go-gosec-${CI_COMMIT_REF_SLUG}"
+    key: "go-mod-gosec-${CI_COMMIT_REF_SLUG}"
     paths:
       - .go/pkg/mod/
-      - .go/build-cache/
-      - .go/bin/
   before_script:
-    - export PATH="$CI_PROJECT_DIR/.go/bin:$PATH"
-    - command -v gosec || go install github.com/securego/gosec/v2/cmd/gosec@latest
+    - go install github.com/securego/gosec/v2/cmd/gosec@latest
   script:
     - for svc in user ride dispatch notification; do
-        cd "$svc" && gosec -fmt=sarif -out="../gosec-$svc.sarif" ./... || true && cd ..;
+        cd "$svc" && "$GOPATH/bin/gosec" -fmt=sarif -out="../gosec-$svc.sarif" ./... || true && cd ..;
       done
   artifacts:
     reports:
@@ -111,28 +112,20 @@ gosec:
 
 # ---------------------------------------------------------------------------
 # STAGE 2: integration — testcontainers tests (Docker-in-Docker required)
-# Runs after unit tests; gated on ride unit tests passing.
-# Uses -tags integration to activate testcontainers-backed test files.
 # ---------------------------------------------------------------------------
 
 .integration_test_template:
   stage: integration
-  image: mirror.gcr.io/library/golang:1.25-alpine
+  image: golang:1.25-alpine
   services:
-    - name: mirror.gcr.io/library/docker:24.0.5-dind
+    - name: docker:24.0.5-dind
       alias: docker
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    GOPATH: "$CI_PROJECT_DIR/.go"
-    GOCACHE: "$CI_PROJECT_DIR/.go/build-cache"
-    # Disable Ryuk (reaper container) — dind has no reachable Docker socket for it
     RYUK_DISABLED: "true"
   cache:
-    key: "go-integration-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
+    key: "go-mod-integration-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
     paths:
       - .go/pkg/mod/
-      - .go/build-cache/
   script:
     - cd "$SERVICE_PATH"
     - go test ./internal/integration/... -tags integration -v -timeout 120s
@@ -156,24 +149,23 @@ integration-dispatch:
   allow_failure: false
 
 # ---------------------------------------------------------------------------
-# STAGE 2: build — docker build → .tar artifact (NO push to registry yet)
+# STAGE 3: build — docker build → .tar artifact, no registry push yet
 # ---------------------------------------------------------------------------
 
 .build_template:
   stage: build
-  image: mirror.gcr.io/library/docker:24.0.5
+  image: docker:24.0.5
   services:
-    - name: mirror.gcr.io/library/docker:24.0.5-dind
+    - name: docker:24.0.5-dind
       alias: docker
   before_script:
     - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
   script:
     - export IMG_BASE="${IMG_PREFIX}-${SERVICE_NAME}"
     - export IMG="$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA"
-    - docker pull "$IMG_BASE:latest" || true
-    - export BP_ARG="--build-arg BASE_IMAGE_PREFIX=mirror.gcr.io/library/"
     - cd "$SERVICE_PATH"
-    - docker build $BP_ARG --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from "$IMG_BASE:latest" -t "$IMG" .
+    # Keep BASE_IMAGE_PREFIX empty so Dockerfiles using ${BASE_IMAGE_PREFIX} resolve to Docker Hub.
+    - docker build --build-arg BASE_IMAGE_PREFIX= -t "$IMG" .
     - docker save "$IMG" > "../${SERVICE_NAME}.tar"
   artifacts:
     paths: ["${SERVICE_NAME}.tar"]
@@ -212,81 +204,30 @@ build-frontend:
     SERVICE_NAME: frontend
     SERVICE_PATH: frontend
 
-# build-ai-reporter:
-#   extends: .build_template
-#   variables:
-#     SERVICE_NAME: ai-reporter
-#     SERVICE_PATH: ai-reporter
-
 # ---------------------------------------------------------------------------
-# STAGE 3: scan — Trivy on tarball + SonarQube (in parallel)
-# Trivy MUST pass before anything is pushed to DockerHub
+# Optional scan stage — keep disabled unless you add `scan` back to stages.
 # ---------------------------------------------------------------------------
 
-.trivy_template:
-  stage: scan
-  image:
-    name: aquasec/trivy:latest
-    entrypoint: [""]
-  script:
-    # Informational: show HIGH findings without failing
-    - trivy image --input "${SERVICE_NAME}.tar" --exit-code 0 --severity HIGH --format table
-    # Hard fail on CRITICAL CVEs — blocks the publish stage
-    - trivy image --input "${SERVICE_NAME}.tar" --exit-code 1 --severity CRITICAL --format sarif --output "trivy-${SERVICE_NAME}.sarif"
-  artifacts:
-    reports:
-      container_scanning: "trivy-${SERVICE_NAME}.sarif"
-    when: always
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_PIPELINE_SOURCE == "web"
-
-# scan-user:
-#   extends: .trivy_template
-#   variables:
-#     SERVICE_NAME: user-service
-#   needs: [build-user]
-#
-# scan-ride:
-#   extends: .trivy_template
-#   variables:
-#     SERVICE_NAME: ride-service
-#   needs: [build-ride]
-#
-# scan-notification:
-#   extends: .trivy_template
-#   variables:
-#     SERVICE_NAME: notification-service
-#   needs: [build-notification]
-#
-# scan-dispatch:
-#   extends: .trivy_template
-#   variables:
-#     SERVICE_NAME: dispatch-service
-#   needs: [build-dispatch]
-#
-# scan-frontend:
-#   extends: .trivy_template
-#   variables:
-#     SERVICE_NAME: frontend
-#   needs: [build-frontend]
-#
-# scan-ai-reporter:
-#   extends: .trivy_template
-#   variables:
-#     SERVICE_NAME: ai-reporter
-#   needs: [build-ai-reporter]
+# .trivy_template:
+#   stage: scan
+#   image:
+#     name: aquasec/trivy:latest
+#     entrypoint: [""]
+#   script:
+#     - trivy image --input "${SERVICE_NAME}.tar" --exit-code 0 --severity HIGH --format table
+#     - trivy image --input "${SERVICE_NAME}.tar" --exit-code 1 --severity CRITICAL --format sarif --output "trivy-${SERVICE_NAME}.sarif"
+#   artifacts:
+#     reports:
+#       container_scanning: "trivy-${SERVICE_NAME}.sarif"
+#     when: always
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "main"
+#     - if: $CI_PIPELINE_SOURCE == "web"
 
 # sonarqube:
 #   stage: scan
 #   image: sonarsource/sonar-scanner-cli:latest
 #   needs: [test-user, test-ride, test-dispatch, test-notification]
-#   variables:
-#     SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
-#   cache:
-#     key: "sonar-cache-${CI_COMMIT_REF_SLUG}"
-#     paths:
-#       - .sonar/cache
 #   script:
 #     - sonar-scanner
 #       -Dsonar.host.url="$SONAR_HOST_URL"
@@ -295,17 +236,17 @@ build-frontend:
 #   rules:
 #     - if: $CI_COMMIT_BRANCH == "main" && $SONAR_TOKEN && $SONAR_HOST_URL
 #     - if: $CI_PIPELINE_SOURCE == "web" && $SONAR_TOKEN && $SONAR_HOST_URL
-#   allow_failure: true # don't block if SonarQube is temporarily unavailable
+#   allow_failure: true
 
 # ---------------------------------------------------------------------------
-# STAGE 4: publish — load tarball → push to GHCR (Kargo polls here)
+# STAGE 4: publish — load tarball → push to GHCR
 # ---------------------------------------------------------------------------
 
 .publish_template:
   stage: publish
-  image: mirror.gcr.io/library/docker:24.0.5
+  image: docker:24.0.5
   services:
-    - name: mirror.gcr.io/library/docker:24.0.5-dind
+    - name: docker:24.0.5-dind
       alias: docker
   before_script:
     - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
@@ -353,52 +294,46 @@ publish-frontend:
     SERVICE_NAME: frontend
   needs: [build-frontend]
 
-# publish-ai-reporter:
-#   extends: .publish_template
-#   variables:
-#     SERVICE_NAME: ai-reporter
-#   needs: [build-ai-reporter]
-
 # ---------------------------------------------------------------------------
 # STAGE 5: deploy — update GitOps repo → ArgoCD syncs dev overlay
 # ---------------------------------------------------------------------------
 
-deploy-gitops:
-  stage: deploy
-  image: alpine/k8s:1.36.0
-  before_script:
-    - git config --global user.email "ci@vroom-platform.com"
-    - git config --global user.name "Vroom CI Bot"
-  script:
-    - |
-      set -e
-      git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
-      cd gitops-repo/apps
-
-      for service in user ride notification dispatch frontend; do
-        echo "Updating $service → ${IMG_PREFIX}-*:$CI_COMMIT_SHORT_SHA"
-        cd "$service/overlays/dev"
-        if [ "$service" == "frontend" ]; then
-          kustomize edit set image "vroom-mvp/frontend=${IMG_PREFIX}-frontend:$CI_COMMIT_SHORT_SHA"
-        else
-          kustomize edit set image "vroom-mvp/${service}-service=${IMG_PREFIX}-${service}-service:$CI_COMMIT_SHORT_SHA"
-        fi
-        cd ../../..
-      done
-
-      git add .
-      git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
-      git push origin main
-  needs:
-    [
-      publish-user,
-      publish-ride,
-      publish-notification,
-      publish-dispatch,
-      publish-frontend,
-    ]
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
+# deploy-gitops:
+#   stage: deploy
+#   image: alpine/k8s:1.36.0
+#   before_script:
+#     - git config --global user.email "ci@vroom-platform.com"
+#     - git config --global user.name "Vroom CI Bot"
+#   script:
+#     - |
+#       set -e
+#       git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
+#       cd gitops-repo/apps
+#
+#       for service in user ride notification dispatch frontend; do
+#         echo "Updating $service → ${IMG_PREFIX}-*:$CI_COMMIT_SHORT_SHA"
+#         cd "$service/overlays/dev"
+#         if [ "$service" = "frontend" ]; then
+#           kustomize edit set image "vroom-mvp/frontend=${IMG_PREFIX}-frontend:$CI_COMMIT_SHORT_SHA"
+#         else
+#           kustomize edit set image "vroom-mvp/${service}-service=${IMG_PREFIX}-${service}-service:$CI_COMMIT_SHORT_SHA"
+#         fi
+#         cd ../../..
+#       done
+#
+#       git add .
+#       git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
+#       git push origin main
+#   needs:
+#     [
+#       publish-user,
+#       publish-ride,
+#       publish-notification,
+#       publish-dispatch,
+#       publish-frontend,
+#     ]
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "main"
 
 # ---------------------------------------------------------------------------
 # AI Agent services — build + publish (Python, no Go tests needed)
