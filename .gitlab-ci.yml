@@ -91,18 +91,16 @@ gosec:
     paths:
       - .go/pkg/mod/
   before_script:
+    - apk add --no-cache jq
     - go install github.com/securego/gosec/v2/cmd/gosec@latest
   script:
     - for svc in user ride dispatch notification; do
         cd "services/$svc" && "$GOPATH/bin/gosec" -fmt=sarif -out="../../gosec-$svc.sarif" ./... || true && cd ../..;
       done
+    - jq -s '{version:"2.1.0","$schema":.[0]["$schema"],runs:[.[].runs[]]}' gosec-*.sarif > gosec-merged.sarif
   artifacts:
     reports:
-      sast:
-        - gosec-ride.sarif
-        - gosec-user.sarif
-        - gosec-dispatch.sarif
-        - gosec-notification.sarif
+      sast: gosec-merged.sarif
     when: always
   allow_failure: true
   rules:
@@ -166,7 +164,7 @@ integration-dispatch:
     - cd "$SERVICE_PATH"
     # Keep BASE_IMAGE_PREFIX empty so Dockerfiles using ${BASE_IMAGE_PREFIX} resolve to Docker Hub.
     - docker build --build-arg BASE_IMAGE_PREFIX= -t "$IMG" .
-    - docker save "$IMG" > "../${SERVICE_NAME}.tar"
+    - docker save "$IMG" > "$CI_PROJECT_DIR/${SERVICE_NAME}.tar"
   artifacts:
     paths: ["${SERVICE_NAME}.tar"]
     expire_in: 1 hour
