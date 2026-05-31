@@ -34,7 +34,7 @@ services:
   user-migrate:
     image: migrate/migrate
     volumes:
-      - ./user/migrations:/migrations
+      - ./services/user/migrations:/migrations
     command:
       - -path=/migrations/
       - -database=postgres://user_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=users&x-migrations-table=user_migrations
@@ -44,7 +44,7 @@ services:
 
   user-service:
     build:
-      context: ./user
+      context: ./services/user
       dockerfile: Dockerfile.dev # Hot reload in dev (Air)
     ports: ["8081:8080"]
     environment:
@@ -59,12 +59,12 @@ services:
       postgres: { condition: service_healthy }
       user-migrate: { condition: service_completed_successfully }
     volumes:
-      - ./user:/app # Mount source for hot reload
+      - ./services/user:/app # Mount source for hot reload
 
   ride-migrate:
     image: migrate/migrate
     volumes:
-      - ./ride/migrations:/migrations
+      - ./services/ride/migrations:/migrations
     command:
       - -path=/migrations/
       - -database=postgres://ride_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=rides&x-migrations-table=ride_migrations
@@ -74,7 +74,7 @@ services:
 
   ride-service:
     build:
-      context: ./ride
+      context: ./services/ride
       dockerfile: Dockerfile.dev
     ports: ["8082:8080"]
     environment:
@@ -90,11 +90,11 @@ services:
       redis: { condition: service_healthy }
       ride-migrate: { condition: service_completed_successfully }
     volumes:
-      - ./ride:/app
+      - ./services/ride:/app
 
   dispatch-service:
     build:
-      context: ./dispatch
+      context: ./services/dispatch
       dockerfile: Dockerfile.dev
     ports: ["8083:8080"]
     environment:
@@ -104,12 +104,12 @@ services:
     depends_on:
       redis: { condition: service_healthy }
     volumes:
-      - ./dispatch:/app
+      - ./services/dispatch:/app
 
   notification-migrate:
     image: migrate/migrate
     volumes:
-      - ./notification/migrations:/migrations
+      - ./services/notification/migrations:/migrations
     command:
       - -path=/migrations/
       - -database=postgres://notification_svc:vroom_dev@postgres:5432/vroom?sslmode=disable&search_path=notifications&x-migrations-table=notification_migrations
@@ -119,7 +119,7 @@ services:
 
   notification-service:
     build:
-      context: ./notification
+      context: ./services/notification
       dockerfile: Dockerfile.dev
     ports: ["8084:8080"]
     environment:
@@ -135,18 +135,18 @@ services:
       postgres: { condition: service_healthy }
       notification-migrate: { condition: service_completed_successfully }
     volumes:
-      - ./notification:/app
+      - ./services/notification:/app
 
   frontend:
     build:
-      context: ./frontend
+      context: ./services/frontend
     ports: ["5173:5173"]
     depends_on:
       - ride-service
       - dispatch-service
       - notification-service
     volumes:
-      - ./frontend:/app
+      - ./services/frontend:/app
       - /app/node_modules
 
 volumes:

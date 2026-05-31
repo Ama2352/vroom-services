@@ -62,25 +62,25 @@ variables:
 test-user:
   extends: .go_test_template
   variables:
-    SERVICE_PATH: user
+    SERVICE_PATH: services/user
   allow_failure: true
 
 test-ride:
   extends: .go_test_template
   variables:
-    SERVICE_PATH: ride
+    SERVICE_PATH: services/ride
   allow_failure: false
 
 test-dispatch:
   extends: .go_test_template
   variables:
-    SERVICE_PATH: dispatch
+    SERVICE_PATH: services/dispatch
   allow_failure: true
 
 test-notification:
   extends: .go_test_template
   variables:
-    SERVICE_PATH: notification
+    SERVICE_PATH: services/notification
   allow_failure: true
 
 gosec:
@@ -94,7 +94,7 @@ gosec:
     - go install github.com/securego/gosec/v2/cmd/gosec@latest
   script:
     - for svc in user ride dispatch notification; do
-        cd "$svc" && "$GOPATH/bin/gosec" -fmt=sarif -out="../gosec-$svc.sarif" ./... || true && cd ..;
+        cd "services/$svc" && "$GOPATH/bin/gosec" -fmt=sarif -out="../../gosec-$svc.sarif" ./... || true && cd ../..;
       done
   artifacts:
     reports:
@@ -137,14 +137,14 @@ gosec:
 integration-ride:
   extends: .integration_test_template
   variables:
-    SERVICE_PATH: ride
+    SERVICE_PATH: services/ride
   needs: [test-ride]
   allow_failure: false
 
 integration-dispatch:
   extends: .integration_test_template
   variables:
-    SERVICE_PATH: dispatch
+    SERVICE_PATH: services/dispatch
   needs: [test-dispatch]
   allow_failure: false
 
@@ -178,31 +178,31 @@ build-user:
   extends: .build_template
   variables:
     SERVICE_NAME: user-service
-    SERVICE_PATH: user
+    SERVICE_PATH: services/user
 
 build-ride:
   extends: .build_template
   variables:
     SERVICE_NAME: ride-service
-    SERVICE_PATH: ride
+    SERVICE_PATH: services/ride
 
 build-notification:
   extends: .build_template
   variables:
     SERVICE_NAME: notification-service
-    SERVICE_PATH: notification
+    SERVICE_PATH: services/notification
 
 build-dispatch:
   extends: .build_template
   variables:
     SERVICE_NAME: dispatch-service
-    SERVICE_PATH: dispatch
+    SERVICE_PATH: services/dispatch
 
 build-frontend:
   extends: .build_template
   variables:
     SERVICE_NAME: frontend
-    SERVICE_PATH: frontend
+    SERVICE_PATH: services/frontend
 
 # ---------------------------------------------------------------------------
 # Optional scan stage — keep disabled unless you add `scan` back to stages.
@@ -295,47 +295,6 @@ publish-frontend:
   needs: [build-frontend]
 
 # ---------------------------------------------------------------------------
-# STAGE 5: deploy — update GitOps repo → ArgoCD syncs dev overlay
-# ---------------------------------------------------------------------------
-
-# deploy-gitops:
-#   stage: deploy
-#   image: alpine/k8s:1.36.0
-#   before_script:
-#     - git config --global user.email "ci@vroom-platform.com"
-#     - git config --global user.name "Vroom CI Bot"
-#   script:
-#     - |
-#       set -e
-#       git clone "https://x-access-token:${GITHUB_GITOPS_TOKEN}@github.com/${GITHUB_GITOPS_REPO}.git" gitops-repo
-#       cd gitops-repo/apps
-#
-#       for service in user ride notification dispatch frontend; do
-#         echo "Updating $service → ${IMG_PREFIX}-*:$CI_COMMIT_SHORT_SHA"
-#         cd "$service/overlays/dev"
-#         if [ "$service" = "frontend" ]; then
-#           kustomize edit set image "vroom-mvp/frontend=${IMG_PREFIX}-frontend:$CI_COMMIT_SHORT_SHA"
-#         else
-#           kustomize edit set image "vroom-mvp/${service}-service=${IMG_PREFIX}-${service}-service:$CI_COMMIT_SHORT_SHA"
-#         fi
-#         cd ../../..
-#       done
-#
-#       git add .
-#       git commit -m "chore(gitops): update images to $CI_COMMIT_SHORT_SHA [skip ci]" || true
-#       git push origin main
-#   needs:
-#     [
-#       publish-user,
-#       publish-ride,
-#       publish-notification,
-#       publish-dispatch,
-#       publish-frontend,
-#     ]
-#   rules:
-#     - if: $CI_COMMIT_BRANCH == "main"
-
-# ---------------------------------------------------------------------------
 # AI Agent services — build + publish (Python, no Go tests needed)
 # ---------------------------------------------------------------------------
 
@@ -343,13 +302,13 @@ build-runbook-retriever:
   extends: .build_template
   variables:
     SERVICE_NAME: runbook-retriever
-    SERVICE_PATH: runbook-retriever
+    SERVICE_PATH: ai-agent/runbook-retriever
 
 build-kubectl-executor:
   extends: .build_template
   variables:
     SERVICE_NAME: kubectl-executor
-    SERVICE_PATH: kubectl-executor
+    SERVICE_PATH: ai-agent/kubectl-executor
 
 publish-runbook-retriever:
   extends: .publish_template
