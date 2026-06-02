@@ -1,13 +1,18 @@
 from flask import Flask, request, jsonify
+from rank_bm25 import BM25Okapi
 import os, re
 
 app = Flask(__name__)
 DOCS_DIR = os.environ.get("DOCS_DIR", "/docs")
 
 
+def tokenize(text):
+    return [w for w in re.split(r'\W+', text.lower()) if w]
+
+
 def load_docs():
     paragraphs = []
-    for fname in os.listdir(DOCS_DIR):
+    for fname in sorted(os.listdir(DOCS_DIR)):
         if not fname.endswith(".md"):
             continue
         try:
@@ -21,22 +26,17 @@ def load_docs():
     return paragraphs
 
 
-def score(text, query_words):
-    t = text.lower()
-    return sum(t.count(w) for w in query_words)
-
-
 PARAGRAPHS = load_docs()
+BM25 = BM25Okapi([tokenize(p["text"]) for p in PARAGRAPHS]) if PARAGRAPHS else None
 
 
 @app.route("/search")
 def search():
-    q = request.args.get("q", "").lower()
-    words = [w for w in re.split(r'\W+', q) if len(w) > 3]
-    if not words or not PARAGRAPHS:
+    q = request.args.get("q", "")
+    if not q or BM25 is None:
         return jsonify({"result": "No runbook content available.", "source": ""})
-    scored = sorted([(score(p["text"], words), p) for p in PARAGRAPHS], reverse=True)
-    best = scored[0][1]
+    scores = BM25.get_scores(tokenize(q))
+    best = PARAGRAPHS[int(scores.argmax())]
     return jsonify({"result": best["text"][:300].replace("\n", " "), "source": best["source"]})
 
 
