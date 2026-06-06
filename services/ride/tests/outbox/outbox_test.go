@@ -340,7 +340,7 @@ func TestOutbox_FailedStatusRetry(t *testing.T) {
 	logArrow(t, "event created with status PENDING")
 
 	logStep(t, 3, 6, "Create bad Redis client (wrong port) for a worker that will fail to publish")
-	badRdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:19999"})
+	badRdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:19999", DialTimeout: 500 * time.Millisecond})
 	t.Cleanup(func() { badRdb.Close() })
 	badWorker := worker.NewOutboxWorker(repo, badRdb, streamName)
 

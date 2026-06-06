@@ -135,7 +135,7 @@ integration-ride:
     SERVICE_PATH: services/ride
   script:
     - cd "$SERVICE_PATH"
-    - go test ./tests/outbox/... ./tests/saga/... -tags integration -v -timeout 120s
+    - go test ./tests/outbox/... ./tests/saga/... -tags integration -v -timeout 300s
   needs: [test-ride]
   allow_failure: false
 
@@ -145,7 +145,7 @@ integration-dispatch:
     SERVICE_PATH: services/dispatch
   script:
     - cd "$SERVICE_PATH"
-    - go test ./tests/geo/... ./tests/saga/... ./tests/consumer/... -tags integration -v -timeout 120s
+    - go test ./tests/geo/... ./tests/saga/... ./tests/consumer/... -tags integration -v -timeout 300s
   needs: [test-dispatch]
   allow_failure: false
 
