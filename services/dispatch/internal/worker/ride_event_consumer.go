@@ -310,3 +310,8 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		}
 	}
 }
+
+// ConsumeOnce runs a single consume cycle — used by integration tests for deterministic control.
+func (c *RideEventConsumer) ConsumeOnce(ctx context.Context) {
+	c.consume(ctx)
+}

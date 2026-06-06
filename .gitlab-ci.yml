@@ -124,9 +124,6 @@ gosec:
     key: "go-mod-integration-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
     paths:
       - .go/pkg/mod/
-  script:
-    - cd "$SERVICE_PATH"
-    - go test ./internal/integration/... -tags integration -v -timeout 120s
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -136,6 +133,9 @@ integration-ride:
   extends: .integration_test_template
   variables:
     SERVICE_PATH: services/ride
+  script:
+    - cd "$SERVICE_PATH"
+    - go test ./tests/outbox/... ./tests/saga/... -tags integration -v -timeout 120s
   needs: [test-ride]
   allow_failure: false
 
@@ -143,7 +143,20 @@ integration-dispatch:
   extends: .integration_test_template
   variables:
     SERVICE_PATH: services/dispatch
+  script:
+    - cd "$SERVICE_PATH"
+    - go test ./tests/geo/... ./tests/saga/... ./tests/consumer/... -tags integration -v -timeout 120s
   needs: [test-dispatch]
+  allow_failure: false
+
+integration-choreography:
+  extends: .integration_test_template
+  variables:
+    SERVICE_PATH: services/tests
+  script:
+    - cd "$SERVICE_PATH"
+    - go test ./choreography/... -tags integration -v -timeout 300s
+  needs: [integration-ride, integration-dispatch]
   allow_failure: false
 
 # ---------------------------------------------------------------------------

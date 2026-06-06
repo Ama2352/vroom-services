@@ -161,3 +161,8 @@ func (w *TripUpdateWorker) handleMessage(ctx context.Context, msg redis.XMessage
 	}
 }
 
+// ConsumeOnce runs a single consume cycle — used by integration tests for deterministic control.
+func (w *TripUpdateWorker) ConsumeOnce(ctx context.Context) {
+	w.consume(ctx)
+}
+
