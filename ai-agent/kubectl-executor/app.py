@@ -12,7 +12,7 @@ ALLOWLIST_PATTERNS = [
     r"^kubectl rollout status deployment/[\w][\w-]* -n \w[\w-]*$",
 ]
 
-BEARER_TOKEN = os.environ.get("EXECUTOR_TOKEN", "change-me")
+BEARER_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
 
 
 def is_allowed(command: str) -> bool:
