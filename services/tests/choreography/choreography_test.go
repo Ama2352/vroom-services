@@ -497,9 +497,13 @@ func TestChoreography_OfferRejectionRetry(t *testing.T) {
 	env := setupChoreography(ctx, t)
 	passengerID := uuid.New()
 
-	// driver-1 is nearer; driver-2 is slightly further but still within radius
-	driver1 := "offer-retry-driver-1"
-	driver2 := "offer-retry-driver-2"
+	// driver-1 is nearer; driver-2 is slightly further but still within radius.
+	// UUIDs are required: TripUpdateWorker unmarshals driver_id into uuid.UUID,
+	// and the trips.driver_id Postgres column is UUID type.
+	driver1UUID := uuid.MustParse("00000000-0000-0000-0000-000000000011")
+	driver2UUID := uuid.MustParse("00000000-0000-0000-0000-000000000012")
+	driver1 := driver1UUID.String()
+	driver2 := driver2UUID.String()
 
 	log.Step(1, 10, "Seed 2 drivers")
 	seedDriver(ctx, env.rdb, driver1, 10.763000, 106.661000) // ~150 m
@@ -548,9 +552,7 @@ func TestChoreography_OfferRejectionRetry(t *testing.T) {
 	env.updateWkr.ConsumeOnce(ctx)
 
 	// Step 10 – accept with driver-2
-	// Use a deterministic UUID derived from driver2's string ID
 	log.Step(10, 10, "AcceptWithOutbox with driver-2 → ACCEPTED")
-	driver2UUID := uuid.NewSHA1(uuid.NameSpaceDNS, []byte(driver2))
 	require.NoError(t, env.repo.AcceptWithOutbox(ctx, trip.ID, driver2UUID,
 		newEventWithDriver(trip.ID, driver2UUID, "Trip.Accepted")))
 
