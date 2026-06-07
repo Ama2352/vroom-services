@@ -31,17 +31,24 @@ def execute():
     if not is_allowed(command):
         return jsonify({"error": f"Command not in allowlist: {command}", "stdout": ""}), 400
 
-    result = subprocess.run(
-        command.split(),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return jsonify({
-        "stdout": result.stdout[:2000],
-        "stderr": result.stderr[:500],
-        "returncode": result.returncode,
-    })
+    try:
+        result = subprocess.run(
+            command.split(),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return jsonify({
+            "stdout": result.stdout[:2000],
+            "stderr": result.stderr[:500],
+            "returncode": result.returncode,
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "kubectl timed out after 30s", "stdout": "", "returncode": -1}), 500
+    except FileNotFoundError as e:
+        return jsonify({"error": f"Executable not found: {e}", "stdout": "", "returncode": -1}), 500
+    except Exception as e:
+        return jsonify({"error": str(e), "stdout": "", "returncode": -1}), 500
 
 
 @app.route("/health")
