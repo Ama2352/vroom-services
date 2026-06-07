@@ -71,6 +71,7 @@ func (r *PostgresTripRepository) CreateWithOutbox(ctx context.Context, trip *dom
 		Payload:       payload,
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
 	})
 	if err != nil {
 		return err
