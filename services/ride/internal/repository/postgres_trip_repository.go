@@ -390,6 +390,7 @@ func (r *PostgresTripRepository) RejectOfferWithOutbox(ctx context.Context, trip
 		Payload:       payload,
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
 	})
 	if err != nil {
 		return err

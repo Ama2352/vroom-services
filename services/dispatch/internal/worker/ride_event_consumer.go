@@ -69,7 +69,7 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 		Group:    c.groupName,
 		Consumer: c.consumerID,
 		Streams:  []string{c.streamName, ">"},
-		Count:    1,
+		Count:    10,
 		Block:    5 * time.Second,
 	}).Result()
 

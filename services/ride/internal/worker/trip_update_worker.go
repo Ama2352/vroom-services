@@ -54,7 +54,7 @@ func (w *TripUpdateWorker) consume(ctx context.Context) {
 		Group:    w.groupName,
 		Consumer: w.consumerID,
 		Streams:  []string{w.streamName, ">"},
-		Count:    1,
+		Count:    10,
 		Block:    5 * time.Second,
 	}).Result()
 
