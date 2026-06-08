@@ -1,5 +1,14 @@
 # Vroom Operations Runbook
 
+## Namespace Convention
+
+Vroom app services run in one of three namespaces depending on environment:
+- `vroom-dev` — development
+- `vroom-staging` — staging
+- `vroom-prod` — production
+
+The correct namespace for the current alert is provided in the diagnostic context as `namespace=<value>`. Use this exact value in kubectl commands — never guess or default to `default`.
+
 ## High error rate on ride-service
 
 Symptom: http_requests_total with status 5xx rising above 1% in vroom-dev/staging/prod.

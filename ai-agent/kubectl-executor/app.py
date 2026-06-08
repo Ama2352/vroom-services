@@ -7,9 +7,13 @@ ALLOWLIST_PATTERNS = [
     r"^kubectl get pods( -n \w[\w-]*)?$",
     r"^kubectl describe pod [\w][\w-]* -n \w[\w-]*$",
     r"^kubectl logs [\w][\w-]* -n \w[\w-]*( --tail=\d+)?$",
+    r"^kubectl logs -n \w[\w-]* -l \w[\w-]*=\w[\w-]*( --since=\d+[smh])?( --tail=\d+)?$",
     r"^kubectl top pods( -n \w[\w-]*)?$",
     r"^kubectl get events -n \w[\w-]*$",
     r"^kubectl rollout status deployment/[\w][\w-]* -n \w[\w-]*$",
+    r"^kubectl get deployments( -n \w[\w-]*)?$",
+    r"^kubectl get services( -n \w[\w-]*)?$",
+    r"^kubectl get nodes$",
 ]
 
 BEARER_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
