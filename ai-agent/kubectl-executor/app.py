@@ -6,8 +6,8 @@ app = Flask(__name__)
 ALLOWLIST_PATTERNS = [
     r"^kubectl get pods( -n \w[\w-]*)?$",
     r"^kubectl describe pod [\w][\w-]* -n \w[\w-]*$",
-    r"^kubectl logs [\w][\w-]* -n \w[\w-]*( --tail=\d+)?$",
-    r"^kubectl logs -n \w[\w-]* -l \w[\w-]*=\w[\w-]*( --since=\d+[smh])?( --tail=\d+)?$",
+    r"^kubectl logs [\w][\w-]* -n \w[\w-]*( --tail=\d+)?( \| grep( -[iv])? \S+)?$",
+    r"^kubectl logs -n \w[\w-]* -l \w[\w-]*=\w[\w-]*( --since=\d+[smh])?( --tail=\d+)?( \| grep( -[iv])? \S+)?$",
     r"^kubectl top pods( -n \w[\w-]*)?$",
     r"^kubectl get events -n \w[\w-]*$",
     r"^kubectl rollout status deployment/[\w][\w-]* -n \w[\w-]*$",
@@ -35,9 +35,12 @@ def execute():
     if not is_allowed(command):
         return jsonify({"error": f"Command not in allowlist: {command}", "stdout": ""}), 400
 
+    # Strip pipe suffix — subprocess.run doesn't support shell pipes without shell=True
+    exec_command = command.split(' | ')[0].strip()
+
     try:
         result = subprocess.run(
-            command.split(),
+            exec_command.split(),
             capture_output=True,
             text=True,
             timeout=30,
