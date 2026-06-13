@@ -11,6 +11,9 @@ import (
 	"vroom-mvp/notification/internal/service"
 
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type NotificationWorker struct {
@@ -86,6 +89,27 @@ func (w *NotificationWorker) consume(ctx context.Context) {
 }
 
 func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessage) {
+	tracer := otel.Tracer("notification-consumer")
+	carrier := propagation.MapCarrier{}
+	if tp, ok := msg.Values["traceparent"]; ok && tp != nil {
+		carrier["traceparent"] = tp.(string)
+	}
+	if ts, ok := msg.Values["tracestate"]; ok && ts != nil {
+		carrier["tracestate"] = ts.(string)
+	}
+	remoteCtx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
+	remoteSpan := trace.SpanContextFromContext(remoteCtx)
+
+	eventType := ""
+	if v, ok := msg.Values["type"]; ok && v != nil {
+		eventType = v.(string)
+	}
+	ctx, span := tracer.Start(ctx, "notification.consume."+eventType,
+		trace.WithLinks(trace.Link{SpanContext: remoteSpan}),
+	)
+	defer span.End()
+
+	// Existing getVal helper follows:
 	getVal := func(key string) string {
 		if val, ok := msg.Values[key]; ok && val != nil {
 			return val.(string)
@@ -93,7 +117,7 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 		return ""
 	}
 
-	eventType := getVal("type")
+	eventType = getVal("type")
 	aggregateType := getVal("aggregate")
 	aggregateID := getVal("aggregate_id")
 	payload := getVal("payload")
