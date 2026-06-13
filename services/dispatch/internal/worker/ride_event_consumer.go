@@ -3,17 +3,30 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
 	"vroom-mvp/dispatch/internal/service"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
+
+const (
+	maxEventRetries = 3
+	dlqStreamName   = "ride_events_dlq"
+)
+
+var dlqEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vroom_dlq_events_total",
+	Help: "Total number of events sent to the DLQ after exhausting retries",
+}, []string{"event_type"})
 
 type RideEventConsumer struct {
 	redisClient     *redis.Client
@@ -78,7 +91,7 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 			log.Printf("[DISPATCH ERROR] Failed to check idempotency for reclaimed event %s: %v", eventID, setErr)
 		}
 		if setErr == nil {
-			c.handleMessage(ctx, msg)
+			c.processWithDLQ(ctx, msg)
 		} else if setErr == redis.Nil {
 			log.Printf("[IDEMPOTENCY] Reclaimed event %s already processed by dispatch, skipping", eventID)
 		}
@@ -133,13 +146,50 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 				continue
 			}
 
-			c.handleMessage(ctx, message)
+			c.processWithDLQ(ctx, message)
 			// Acknowledge message
 			c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
 		}
 	}
 }
 
+
+func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessage) {
+	retryKey := "event:retry:" + msg.ID
+	retries, _ := c.redisClient.Incr(ctx, retryKey).Result()
+	c.redisClient.Expire(ctx, retryKey, 24*time.Hour)
+
+	c.handleMessage(ctx, msg)
+
+	eventType := ""
+	if v, ok := msg.Values["type"]; ok {
+		eventType = v.(string)
+	}
+	known := eventType == "Trip.Requested" || eventType == "Trip.OfferRejected" ||
+		eventType == "Trip.Accepted" || eventType == "Trip.Cancelled" ||
+		eventType == "Trip.Completed" || eventType == "Trip.Matched" ||
+		eventType == "Trip.MatchFailed"
+
+	if !known && retries >= maxEventRetries {
+		payload := ""
+		if v, ok := msg.Values["payload"]; ok {
+			payload = v.(string)
+		}
+		_ = c.redisClient.XAdd(ctx, &redis.XAddArgs{
+			Stream: dlqStreamName,
+			Values: map[string]any{
+				"original_id": msg.ID,
+				"event_type":  eventType,
+				"error":       fmt.Sprintf("unknown event type after %d retries", retries),
+				"payload":     payload,
+				"failed_at":   time.Now().Format(time.RFC3339),
+			},
+		}).Err()
+		_ = c.redisClient.Del(ctx, retryKey).Err()
+		dlqEventsTotal.WithLabelValues(eventType).Inc()
+		log.Printf("[DLQ] Event %s (type=%s) moved to DLQ after %d retries", msg.ID, eventType, retries)
+	}
+}
 
 func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) {
 	// Extract trace context propagated from the Outbox publisher
