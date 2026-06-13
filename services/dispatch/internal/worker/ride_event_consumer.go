@@ -10,6 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type RideEventConsumer struct {
@@ -60,7 +63,25 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 		Count:    10,
 	}).Result()
 	for _, msg := range autoclaimed {
-		c.handleMessage(ctx, msg)
+		eventID := ""
+		if val, ok := msg.Values["id"]; ok {
+			eventID = val.(string)
+		} else {
+			eventID = msg.ID
+		}
+		key := "processed_event:dispatch:" + eventID
+		setErr := c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
+			TTL:  24 * time.Hour,
+			Mode: "NX",
+		}).Err()
+		if setErr != nil && setErr != redis.Nil {
+			log.Printf("[DISPATCH ERROR] Failed to check idempotency for reclaimed event %s: %v", eventID, setErr)
+		}
+		if setErr == nil {
+			c.handleMessage(ctx, msg)
+		} else if setErr == redis.Nil {
+			log.Printf("[IDEMPOTENCY] Reclaimed event %s already processed by dispatch, skipping", eventID)
+		}
 		c.redisClient.XAck(ctx, c.streamName, c.groupName, msg.ID)
 	}
 
@@ -100,10 +121,13 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 			}
 
 			key := "processed_event:dispatch:" + eventID
-			ok, err := c.redisClient.SetNX(ctx, key, "true", 24*time.Hour).Result()
-			if err != nil {
-				log.Printf("[DISPATCH ERROR] Failed to check idempotency for event %s: %v", eventID, err)
-			} else if !ok {
+			setErr := c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
+				TTL:  24 * time.Hour,
+				Mode: "NX",
+			}).Err()
+			if setErr != nil && setErr != redis.Nil {
+				log.Printf("[DISPATCH ERROR] Failed to check idempotency for event %s: %v", eventID, setErr)
+			} else if setErr == redis.Nil {
 				log.Printf("[IDEMPOTENCY] Event %s already processed by dispatch, skipping", eventID)
 				c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
 				continue
@@ -118,6 +142,27 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 
 
 func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) {
+	// Extract trace context propagated from the Outbox publisher
+	tracer := otel.Tracer("dispatch-consumer")
+	carrier := propagation.MapCarrier{}
+	if tp, ok := msg.Values["traceparent"]; ok && tp != nil {
+		carrier["traceparent"] = tp.(string)
+	}
+	if ts, ok := msg.Values["tracestate"]; ok && ts != nil {
+		carrier["tracestate"] = ts.(string)
+	}
+	remoteCtx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
+	remoteSpan := trace.SpanContextFromContext(remoteCtx)
+
+	eventType := ""
+	if v, ok := msg.Values["type"]; ok {
+		eventType = v.(string)
+	}
+	ctx, span := tracer.Start(ctx, "dispatch.consume."+eventType,
+		trace.WithLinks(trace.Link{SpanContext: remoteSpan}),
+	)
+	defer span.End()
+
 	// Robust field extraction
 	getVal := func(key string) string {
 		if val, ok := msg.Values[key]; ok {
@@ -126,7 +171,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		return ""
 	}
 
-	eventType := getVal("type")
+	eventType = getVal("type")
 	aggregateType := getVal("aggregate")
 	aggregateID := getVal("aggregate_id")
 	if aggregateID == "" {

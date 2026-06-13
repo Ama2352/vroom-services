@@ -11,12 +11,15 @@ import (
 
 	"vroom-mvp/dispatch/internal/handler"
 	"vroom-mvp/dispatch/internal/service"
+	"vroom-mvp/dispatch/internal/telemetry"
 	"vroom-mvp/dispatch/internal/worker"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
-	"github.com/zsais/go-gin-prometheus"
+	ginprometheus "github.com/zsais/go-gin-prometheus"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 func main() {
@@ -25,11 +28,23 @@ func main() {
 	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
 	consumerID := uuid.New().String()
 
+	// 1b. Telemetry
+	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	shutdownTracer, err := telemetry.Init(context.Background(), "dispatch-service", otlpEndpoint)
+	if err != nil {
+		log.Printf("Warning: failed to init tracer: %v", err)
+	}
+	defer shutdownTracer()
+
 	// 2. Redis connection
 	rdb := redis.NewClient(&redis.Options{
 		Addr: redisAddr,
 	})
 	defer rdb.Close()
+
+	if err := redisotel.InstrumentTracing(rdb); err != nil {
+		log.Printf("Warning: failed to instrument redis tracing: %v", err)
+	}
 
 	// Wait for Redis
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -55,6 +70,8 @@ func main() {
 
 	p := ginprometheus.NewPrometheus("gin")
 	p.Use(r)
+
+	r.Use(otelgin.Middleware("dispatch-service"))
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "UP"})
