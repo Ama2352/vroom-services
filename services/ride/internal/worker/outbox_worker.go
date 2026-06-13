@@ -8,6 +8,8 @@ import (
 	"vroom-mvp/ride/internal/repository"
 
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 type OutboxWorker struct {
@@ -77,19 +79,27 @@ func (w *OutboxWorker) publishToRedis(ctx context.Context, event *repository.Out
 		return err
 	}
 
-	// Publish to Redis Stream
-	err = w.redisClient.XAdd(ctx, &redis.XAddArgs{
+	// Extract W3C trace context to propagate into the stream
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+
+	values := map[string]interface{}{
+		"id":             event.ID.String(),
+		"type":           event.EventType,
+		"aggregate":      event.AggregateType,
+		"aggregate_id":   event.AggregateID.String(),
+		"payload":        string(payloadBytes),
+		"correlation_id": event.CorrelationID,
+	}
+	if tp := carrier["traceparent"]; tp != "" {
+		values["traceparent"] = tp
+	}
+	if ts := carrier["tracestate"]; ts != "" {
+		values["tracestate"] = ts
+	}
+
+	return w.redisClient.XAdd(ctx, &redis.XAddArgs{
 		Stream: w.streamName,
-		Values: map[string]interface{}{
-			"id":           event.ID.String(),
-			"type":         event.EventType,
-			"aggregate":    event.AggregateType,
-			"aggregate_id":  event.AggregateID.String(),
-			"payload":       string(payloadBytes),
-			"correlation_id": event.CorrelationID,
-		},
+		Values: values,
 	}).Err()
-
-
-	return err
 }
