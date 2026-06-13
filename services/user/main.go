@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,11 +15,15 @@ import (
 	"vroom-mvp/user/internal/handler"
 	"vroom-mvp/user/internal/repository"
 	"vroom-mvp/user/internal/service"
+	"vroom-mvp/user/internal/telemetry"
 	"vroom-mvp/user/internal/util"
 
+	"github.com/XSAM/otelsql"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 func main() {
@@ -32,11 +35,21 @@ func main() {
 	dbPassword := getEnv("DB_PASSWORD", "vroom_dev")
 	dbName := getEnv("DB_NAME", "vroom")
 
+	// 1b. Telemetry
+	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	shutdownTracer, err := telemetry.Init(context.Background(), "user-service", otlpEndpoint)
+	if err != nil {
+		log.Printf("Warning: failed to init tracer: %v", err)
+	}
+	defer shutdownTracer()
+
 	// 2. Database connection
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable search_path=users",
 		dbHost, dbPort, dbUser, dbPassword, dbName)
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := otelsql.Open("postgres", dsn,
+		otelsql.WithAttributes(semconv.DBSystemPostgreSQL),
+	)
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
@@ -77,6 +90,8 @@ func main() {
 
 	p := ginprometheus.NewPrometheus("gin")
 	p.Use(r)
+
+	r.Use(otelgin.Middleware("user-service"))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "OK")
