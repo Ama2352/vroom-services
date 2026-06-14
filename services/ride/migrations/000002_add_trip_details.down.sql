@@ -1,0 +1,3 @@
+ALTER TABLE trips DROP COLUMN IF EXISTS currency;
+ALTER TABLE trips DROP COLUMN IF EXISTS source_address;
+ALTER TABLE trips DROP COLUMN IF EXISTS dest_address;
