@@ -175,8 +175,7 @@ integration-choreography:
     - export IMG_BASE="${IMG_PREFIX}-${SERVICE_NAME}"
     - export IMG="$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA"
     - cd "$SERVICE_PATH"
-    # Keep BASE_IMAGE_PREFIX empty so Dockerfiles using ${BASE_IMAGE_PREFIX} resolve to Docker Hub.
-    - docker build --build-arg BASE_IMAGE_PREFIX= -t "$IMG" .
+    - docker build --build-arg BASE_IMAGE_PREFIX="public.ecr.aws/docker/library/" -t "$IMG" .
     - docker save "$IMG" > "$CI_PROJECT_DIR/${SERVICE_NAME}.tar"
   artifacts:
     paths: ["${SERVICE_NAME}.tar"]
