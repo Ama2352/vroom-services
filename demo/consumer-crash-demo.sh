@@ -6,7 +6,7 @@
 set -euo pipefail
 
 CLUSTER_IP="${CLUSTER_IP:-192.168.242.10}"
-NAMESPACE="${NAMESPACE:-vroom-prod}"
+NAMESPACE="${NAMESPACE:-vroom-dev}"
 TOKEN="${TOKEN:-}"
 
 if [ -z "$TOKEN" ]; then

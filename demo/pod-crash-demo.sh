@@ -5,7 +5,7 @@
 set -euo pipefail
 
 CLUSTER_IP="${CLUSTER_IP:-192.168.242.10}"
-NAMESPACE="${NAMESPACE:-vroom-prod}"
+NAMESPACE="${NAMESPACE:-vroom-dev}"
 
 echo "=== Pod Crash + Traefik Retry Demo ==="
 echo "Ensuring 2 ride-service replicas are running..."

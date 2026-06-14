@@ -4,7 +4,7 @@
 # After 3 failed processing attempts, dispatch consumer moves it to ride_events_dlq.
 set -euo pipefail
 
-NAMESPACE="${NAMESPACE:-vroom-prod}"
+NAMESPACE="${NAMESPACE:-vroom-dev}"
 
 echo "=== Dead Letter Queue Demo ==="
 
