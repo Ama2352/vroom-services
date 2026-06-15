@@ -14,7 +14,7 @@ stages:
   - test
   - integration
   - build
-  # - scan
+  - scan
   - publish
   - deploy
 
@@ -215,38 +215,76 @@ build-frontend:
     SERVICE_PATH: services/frontend
 
 # ---------------------------------------------------------------------------
-# Optional scan stage — keep disabled unless you add `scan` back to stages.
+# STAGE 4: scan — Trivy vulnerability scan on built .tar artifacts
 # ---------------------------------------------------------------------------
 
-# .trivy_template:
-#   stage: scan
-#   image:
-#     name: aquasec/trivy:latest
-#     entrypoint: [""]
-#   script:
-#     - trivy image --input "${SERVICE_NAME}.tar" --exit-code 0 --severity HIGH --format table
-#     - trivy image --input "${SERVICE_NAME}.tar" --exit-code 1 --severity CRITICAL --format sarif --output "trivy-${SERVICE_NAME}.sarif"
-#   artifacts:
-#     reports:
-#       container_scanning: "trivy-${SERVICE_NAME}.sarif"
-#     when: always
-#   rules:
-#     - if: $CI_COMMIT_BRANCH == "main"
-#     - if: $CI_PIPELINE_SOURCE == "web"
+.trivy_template:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy image --input "${SERVICE_NAME}.tar"
+        --exit-code 0
+        --severity HIGH,CRITICAL
+        --ignore-unfixed
+        --format table
+    - trivy image --input "${SERVICE_NAME}.tar"
+        --exit-code 0
+        --severity HIGH,CRITICAL
+        --ignore-unfixed
+        --format sarif
+        --output "trivy-${SERVICE_NAME}.sarif"
+  artifacts:
+    reports:
+      container_scanning: "trivy-${SERVICE_NAME}.sarif"
+    when: always
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
 
-# sonarqube:
-#   stage: scan
-#   image: sonarsource/sonar-scanner-cli:latest
-#   needs: [test-user, test-ride, test-dispatch, test-notification]
-#   script:
-#     - sonar-scanner
-#       -Dsonar.host.url="$SONAR_HOST_URL"
-#       -Dsonar.login="$SONAR_TOKEN"
-#       -Dsonar.projectBaseDir=.
-#   rules:
-#     - if: $CI_COMMIT_BRANCH == "main" && $SONAR_TOKEN && $SONAR_HOST_URL
-#     - if: $CI_PIPELINE_SOURCE == "web" && $SONAR_TOKEN && $SONAR_HOST_URL
-#   allow_failure: true
+scan-user:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: user-service
+  needs: [build-user]
+
+scan-ride:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: ride-service
+  needs: [build-ride]
+
+scan-notification:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: notification-service
+  needs: [build-notification]
+
+scan-dispatch:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: dispatch-service
+  needs: [build-dispatch]
+
+scan-frontend:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: frontend
+  needs: [build-frontend]
+
+scan-runbook-retriever:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: runbook-retriever
+  needs: [build-runbook-retriever]
+
+scan-kubectl-executor:
+  extends: .trivy_template
+  variables:
+    SERVICE_NAME: kubectl-executor
+  needs: [build-kubectl-executor]
 
 # ---------------------------------------------------------------------------
 # STAGE 4: publish — load tarball → push to GHCR
@@ -278,31 +316,31 @@ publish-user:
   extends: .publish_template
   variables:
     SERVICE_NAME: user-service
-  needs: [build-user]
+  needs: [build-user, scan-user]
 
 publish-ride:
   extends: .publish_template
   variables:
     SERVICE_NAME: ride-service
-  needs: [build-ride]
+  needs: [build-ride, scan-ride]
 
 publish-notification:
   extends: .publish_template
   variables:
     SERVICE_NAME: notification-service
-  needs: [build-notification]
+  needs: [build-notification, scan-notification]
 
 publish-dispatch:
   extends: .publish_template
   variables:
     SERVICE_NAME: dispatch-service
-  needs: [build-dispatch]
+  needs: [build-dispatch, scan-dispatch]
 
 publish-frontend:
   extends: .publish_template
   variables:
     SERVICE_NAME: frontend
-  needs: [build-frontend]
+  needs: [build-frontend, scan-frontend]
 
 # ---------------------------------------------------------------------------
 # AI Agent services — build + publish (Python, no Go tests needed)
@@ -324,10 +362,10 @@ publish-runbook-retriever:
   extends: .publish_template
   variables:
     SERVICE_NAME: runbook-retriever
-  needs: [build-runbook-retriever]
+  needs: [build-runbook-retriever, scan-runbook-retriever]
 
 publish-kubectl-executor:
   extends: .publish_template
   variables:
     SERVICE_NAME: kubectl-executor
-  needs: [build-kubectl-executor]
+  needs: [build-kubectl-executor, scan-kubectl-executor]
