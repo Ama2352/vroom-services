@@ -43,7 +43,7 @@ variables:
   stage: test
   image: golang:1.25-alpine
   cache:
-    key: "go-mod-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
+    key: "go-mod-${SERVICE_PATH}"
     paths:
       - .go/pkg/mod/
   script:
@@ -87,9 +87,10 @@ gosec:
   stage: test
   image: golang:1.25-alpine
   cache:
-    key: "go-mod-gosec-${CI_COMMIT_REF_SLUG}"
+    key: "go-mod-gosec"
     paths:
       - .go/pkg/mod/
+      - .go/bin/
   before_script:
     - apk add --no-cache jq
     - go install github.com/securego/gosec/v2/cmd/gosec@latest
@@ -121,7 +122,7 @@ gosec:
   variables:
     RYUK_DISABLED: "true"
   cache:
-    key: "go-mod-integration-${SERVICE_PATH}-${CI_COMMIT_REF_SLUG}"
+    key: "go-mod-integration-${SERVICE_PATH}"
     paths:
       - .go/pkg/mod/
   rules:
@@ -186,30 +187,35 @@ integration-choreography:
 
 build-user:
   extends: .build_template
+  needs: [test-user]
   variables:
     SERVICE_NAME: user-service
     SERVICE_PATH: services/user
 
 build-ride:
   extends: .build_template
+  needs: [test-ride]
   variables:
     SERVICE_NAME: ride-service
     SERVICE_PATH: services/ride
 
 build-notification:
   extends: .build_template
+  needs: [test-notification]
   variables:
     SERVICE_NAME: notification-service
     SERVICE_PATH: services/notification
 
 build-dispatch:
   extends: .build_template
+  needs: [test-dispatch]
   variables:
     SERVICE_NAME: dispatch-service
     SERVICE_PATH: services/dispatch
 
 build-frontend:
   extends: .build_template
+  needs: []
   variables:
     SERVICE_NAME: frontend
     SERVICE_PATH: services/frontend
@@ -224,11 +230,6 @@ build-frontend:
     name: aquasec/trivy:latest
     entrypoint: [""]
   script:
-    - trivy image --input "${SERVICE_NAME}.tar"
-        --exit-code 0
-        --severity HIGH,CRITICAL
-        --ignore-unfixed
-        --format table
     - trivy image --input "${SERVICE_NAME}.tar"
         --exit-code 0
         --severity HIGH,CRITICAL
@@ -348,12 +349,14 @@ publish-frontend:
 
 build-runbook-retriever:
   extends: .build_template
+  needs: []
   variables:
     SERVICE_NAME: runbook-retriever
     SERVICE_PATH: ai-agent/runbook-retriever
 
 build-kubectl-executor:
   extends: .build_template
+  needs: []
   variables:
     SERVICE_NAME: kubectl-executor
     SERVICE_PATH: ai-agent/kubectl-executor
