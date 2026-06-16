@@ -29,13 +29,13 @@ SET status = $2, final_price = $3, completed_at = NOW()
 WHERE id = $1;
 
 -- name: CreateOutboxEvent :exec
-INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id, traceparent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: GetUnpublishedEvents :many
-SELECT * FROM outbox_events 
-WHERE (status = 'PENDING' OR status = 'FAILED') 
-ORDER BY created_at ASC 
+SELECT id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id, traceparent FROM outbox_events
+WHERE (status = 'PENDING' OR status = 'FAILED')
+ORDER BY created_at ASC
 LIMIT $1::int;
 
 

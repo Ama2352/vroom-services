@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 )
 
 type TripHandler struct {
@@ -20,14 +21,15 @@ func NewTripHandler(tripService *service.TripService) *TripHandler {
 }
 
 func (h *TripHandler) RequestRide(c *gin.Context) {
+	ctx, span := otel.Tracer("ride-service").Start(c.Request.Context(), "ride.create_trip")
+	defer span.End()
+
 	var req domain.CreateTripRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// In a real app, we would get this from JWT context
-	// For now, we allow passing it in headers or hardcode for MVP testing
 	passengerIDStr := c.GetHeader("X-User-ID")
 	passengerID, err := uuid.Parse(passengerIDStr)
 	if err != nil {
@@ -35,7 +37,7 @@ func (h *TripHandler) RequestRide(c *gin.Context) {
 		return
 	}
 
-	trip, err := h.tripService.RequestTrip(c.Request.Context(), passengerID, req)
+	trip, err := h.tripService.RequestTrip(ctx, passengerID, req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

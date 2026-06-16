@@ -26,6 +26,7 @@ type OutboxEvent struct {
 	Status        sql.NullString  `json:"status"`
 	CreatedAt     sql.NullTime    `json:"created_at"`
 	CorrelationID sql.NullString  `json:"correlation_id"`
+	Traceparent   sql.NullString  `json:"traceparent"`
 }
 
 type Trip struct {

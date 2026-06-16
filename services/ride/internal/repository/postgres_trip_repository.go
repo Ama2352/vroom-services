@@ -10,7 +10,15 @@ import (
 	"vroom-mvp/ride/internal/repository/db"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
+
+func extractTraceparent(ctx context.Context) string {
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	return carrier["traceparent"]
+}
 
 type PostgresTripRepository struct {
 	conn    *sql.DB
@@ -63,6 +71,7 @@ func (r *PostgresTripRepository) CreateWithOutbox(ctx context.Context, trip *dom
 		return err
 	}
 
+	tp := extractTraceparent(ctx)
 	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 		ID:            event.ID,
 		AggregateType: event.AggregateType,
@@ -72,6 +81,7 @@ func (r *PostgresTripRepository) CreateWithOutbox(ctx context.Context, trip *dom
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
 		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+		Traceparent:   sql.NullString{String: tp, Valid: tp != ""},
 	})
 	if err != nil {
 		return err
@@ -134,6 +144,7 @@ func (r *PostgresTripRepository) StartWithOutbox(ctx context.Context, tripID uui
 
 	// 2. Create Outbox Event
 	payload, _ := json.Marshal(event.Payload)
+	tp := extractTraceparent(ctx)
 	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 		ID:            event.ID,
 		AggregateType: event.AggregateType,
@@ -143,6 +154,7 @@ func (r *PostgresTripRepository) StartWithOutbox(ctx context.Context, tripID uui
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
 		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+		Traceparent:   sql.NullString{String: tp, Valid: tp != ""},
 	})
 	if err != nil {
 		return err
@@ -176,6 +188,7 @@ func (r *PostgresTripRepository) AcceptWithOutbox(ctx context.Context, tripID uu
 		return err
 	}
 
+	tp2 := extractTraceparent(ctx)
 	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 		ID:            event.ID,
 		AggregateType: event.AggregateType,
@@ -185,6 +198,7 @@ func (r *PostgresTripRepository) AcceptWithOutbox(ctx context.Context, tripID uu
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
 		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+		Traceparent:   sql.NullString{String: tp2, Valid: tp2 != ""},
 	})
 	if err != nil {
 
@@ -227,6 +241,7 @@ func (r *PostgresTripRepository) CompleteWithOutbox(ctx context.Context, tripID 
 		return err
 	}
 
+	tp3 := extractTraceparent(ctx)
 	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 		ID:            event.ID,
 		AggregateType: event.AggregateType,
@@ -236,6 +251,7 @@ func (r *PostgresTripRepository) CompleteWithOutbox(ctx context.Context, tripID 
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
 		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+		Traceparent:   sql.NullString{String: tp3, Valid: tp3 != ""},
 	})
 
 	if err != nil {
@@ -260,6 +276,7 @@ func (r *PostgresTripRepository) GetUnpublishedEvents(ctx context.Context, limit
 			EventType:     row.EventType,
 			Payload:       row.Payload,
 			CorrelationID: row.CorrelationID.String,
+			Traceparent:   row.Traceparent.String,
 		}
 	}
 	return events, nil
@@ -336,6 +353,7 @@ func (r *PostgresTripRepository) CancelWithOutbox(ctx context.Context, tripID uu
 
 	// 2. Create Outbox Event
 	payload, _ := json.Marshal(event.Payload)
+	tp4 := extractTraceparent(ctx)
 	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 		ID:            event.ID,
 		AggregateType: event.AggregateType,
@@ -345,6 +363,7 @@ func (r *PostgresTripRepository) CancelWithOutbox(ctx context.Context, tripID uu
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
 		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+		Traceparent:   sql.NullString{String: tp4, Valid: tp4 != ""},
 	})
 	if err != nil {
 
@@ -382,6 +401,7 @@ func (r *PostgresTripRepository) RejectOfferWithOutbox(ctx context.Context, trip
 
 	// 2. Create Outbox Event
 	payload, _ := json.Marshal(event.Payload)
+	tp5 := extractTraceparent(ctx)
 	err = qtx.CreateOutboxEvent(ctx, db.CreateOutboxEventParams{
 		ID:            event.ID,
 		AggregateType: event.AggregateType,
@@ -391,6 +411,7 @@ func (r *PostgresTripRepository) RejectOfferWithOutbox(ctx context.Context, trip
 		Status:        sql.NullString{String: "PENDING", Valid: true},
 		CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
 		CorrelationID: sql.NullString{String: event.CorrelationID, Valid: event.CorrelationID != ""},
+		Traceparent:   sql.NullString{String: tp5, Valid: tp5 != ""},
 	})
 	if err != nil {
 		return err

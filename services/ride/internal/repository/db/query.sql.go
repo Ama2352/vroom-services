@@ -48,8 +48,8 @@ func (q *Queries) CompleteTrip(ctx context.Context, arg CompleteTripParams) erro
 }
 
 const createOutboxEvent = `-- name: CreateOutboxEvent :exec
-INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id, traceparent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type CreateOutboxEventParams struct {
@@ -61,6 +61,7 @@ type CreateOutboxEventParams struct {
 	Status        sql.NullString  `json:"status"`
 	CreatedAt     sql.NullTime    `json:"created_at"`
 	CorrelationID sql.NullString  `json:"correlation_id"`
+	Traceparent   sql.NullString  `json:"traceparent"`
 }
 
 func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error {
@@ -73,6 +74,7 @@ func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventPa
 		arg.Status,
 		arg.CreatedAt,
 		arg.CorrelationID,
+		arg.Traceparent,
 	)
 	return err
 }
@@ -293,9 +295,9 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 }
 
 const getUnpublishedEvents = `-- name: GetUnpublishedEvents :many
-SELECT id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id FROM outbox_events 
-WHERE (status = 'PENDING' OR status = 'FAILED') 
-ORDER BY created_at ASC 
+SELECT id, aggregate_type, aggregate_id, event_type, payload, status, created_at, correlation_id, traceparent FROM outbox_events
+WHERE (status = 'PENDING' OR status = 'FAILED')
+ORDER BY created_at ASC
 LIMIT $1::int
 `
 
@@ -317,6 +319,7 @@ func (q *Queries) GetUnpublishedEvents(ctx context.Context, dollar_1 int32) ([]O
 			&i.Status,
 			&i.CreatedAt,
 			&i.CorrelationID,
+			&i.Traceparent,
 		); err != nil {
 			return nil, err
 		}

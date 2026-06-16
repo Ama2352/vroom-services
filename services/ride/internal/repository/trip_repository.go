@@ -16,6 +16,7 @@ type OutboxEvent struct {
 	EventType     string
 	Payload       interface{}
 	CorrelationID string
+	Traceparent   string
 }
 
 
