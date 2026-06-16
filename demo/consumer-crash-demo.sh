@@ -201,6 +201,10 @@ printf "  [%s] waiting for pod to terminate...\n" "$(ts)"
 kubectl wait pod -n "$NAMESPACE" -l app=dispatch-service \
   --for=delete --timeout=60s 2>/dev/null || true
 printf "  [%s] ✓ all dispatch pods terminated — PEL is now safe to write\n" "$(ts)"
+
+echo "  ── XPENDING before injection (baseline) ─────────────────────────────"
+PCOUNT_BASELINE=$(rxcli XPENDING ride_events dispatch_group | head -1 | tr -d '[:space:]')
+printf "  dispatch_group pending: %s  ← 0 before any injection\n" "${PCOUNT_BASELINE:-0}"
 echo ""
 
 echo "  ② Inject a synthetic Trip.Accepted event into the stream."
