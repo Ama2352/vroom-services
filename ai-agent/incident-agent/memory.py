@@ -1,7 +1,7 @@
 import json, time, uuid, os, random
 import numpy as np
 import redis as redis_lib
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 _MODEL = None
 INDEX_KEY  = "incidents:index"
@@ -12,10 +12,10 @@ DEFAULT_FLOOR     = float(os.environ.get("MEMORY_SCORE_FLOOR", "0.30"))
 DEFAULT_CLIFF_GAP = float(os.environ.get("MEMORY_CLIFF_GAP",   "0.12"))
 
 
-def _model() -> SentenceTransformer:
+def _model() -> TextEmbedding:
     global _MODEL
     if _MODEL is None:
-        _MODEL = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+        _MODEL = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
     return _MODEL
 
 
@@ -24,7 +24,7 @@ def connect(url: str) -> redis_lib.Redis:
 
 
 def _encode(text: str) -> list:
-    return _model().encode(text, convert_to_numpy=True).tolist()
+    return next(_model().embed([text])).tolist()
 
 
 def _recency_score(timestamp: int) -> float:
