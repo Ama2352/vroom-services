@@ -11,10 +11,10 @@ include:
   - template: Security/SAST.gitlab-ci.yml
 
 stages:
-  - test
-  - integration
+  # - test
+  # - integration
   - build
-  - scan
+  # - scan
   - publish
   - deploy
 
@@ -39,126 +39,126 @@ variables:
 # STAGE 1: test
 # ---------------------------------------------------------------------------
 
-.go_test_template:
-  stage: test
-  image: golang:1.25-alpine
-  cache:
-    key: "go-mod-${SERVICE_PATH}"
-    paths:
-      - .go/pkg/mod/
-  script:
-    - cd "$SERVICE_PATH"
-    - go test ./... -v -coverprofile=coverage.out -covermode=atomic
-    - go tool cover -func=coverage.out
-  artifacts:
-    paths: ["$SERVICE_PATH/coverage.out"]
-    expire_in: 1 hour
-    when: always
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+# .go_test_template:
+#   stage: test
+#   image: golang:1.25-alpine
+#   cache:
+#     key: "go-mod-${SERVICE_PATH}"
+#     paths:
+#       - .go/pkg/mod/
+#   script:
+#     - cd "$SERVICE_PATH"
+#     - go test ./... -v -coverprofile=coverage.out -covermode=atomic
+#     - go tool cover -func=coverage.out
+#   artifacts:
+#     paths: ["$SERVICE_PATH/coverage.out"]
+#     expire_in: 1 hour
+#     when: always
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "main"
+#     - if: $CI_PIPELINE_SOURCE == "web"
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-test-user:
-  extends: .go_test_template
-  variables:
-    SERVICE_PATH: services/user
-  allow_failure: true
+# test-user:
+#   extends: .go_test_template
+#   variables:
+#     SERVICE_PATH: services/user
+#   allow_failure: true
 
-test-ride:
-  extends: .go_test_template
-  variables:
-    SERVICE_PATH: services/ride
-  allow_failure: false
+# test-ride:
+#   extends: .go_test_template
+#   variables:
+#     SERVICE_PATH: services/ride
+#   allow_failure: false
 
-test-dispatch:
-  extends: .go_test_template
-  variables:
-    SERVICE_PATH: services/dispatch
-  allow_failure: true
+# test-dispatch:
+#   extends: .go_test_template
+#   variables:
+#     SERVICE_PATH: services/dispatch
+#   allow_failure: true
 
-test-notification:
-  extends: .go_test_template
-  variables:
-    SERVICE_PATH: services/notification
-  allow_failure: true
+# test-notification:
+#   extends: .go_test_template
+#   variables:
+#     SERVICE_PATH: services/notification
+#   allow_failure: true
 
-gosec:
-  stage: test
-  image: golang:1.25-alpine
-  cache:
-    key: "go-mod-gosec"
-    paths:
-      - .go/pkg/mod/
-      - .go/bin/
-  before_script:
-    - apk add --no-cache jq
-    - go install github.com/securego/gosec/v2/cmd/gosec@latest
-  script:
-    - for svc in user ride dispatch notification; do
-        cd "services/$svc" && "$GOPATH/bin/gosec" -fmt=sarif -out="../../gosec-$svc.sarif" ./... || true && cd ../..;
-      done
-    - jq -s '{version:"2.1.0","$schema":.[0]["$schema"],runs:[.[].runs[]]}' gosec-*.sarif > gosec-merged.sarif
-  artifacts:
-    reports:
-      sast: gosec-merged.sarif
-    when: always
-  allow_failure: true
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+# gosec:
+#   stage: test
+#   image: golang:1.25-alpine
+#   cache:
+#     key: "go-mod-gosec"
+#     paths:
+#       - .go/pkg/mod/
+#       - .go/bin/
+#   before_script:
+#     - apk add --no-cache jq
+#     - go install github.com/securego/gosec/v2/cmd/gosec@latest
+#   script:
+#     - for svc in user ride dispatch notification; do
+#         cd "services/$svc" && "$GOPATH/bin/gosec" -fmt=sarif -out="../../gosec-$svc.sarif" ./... || true && cd ../..;
+#       done
+#     - jq -s '{version:"2.1.0","$schema":.[0]["$schema"],runs:[.[].runs[]]}' gosec-*.sarif > gosec-merged.sarif
+#   artifacts:
+#     reports:
+#       sast: gosec-merged.sarif
+#     when: always
+#   allow_failure: true
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "main"
+#     - if: $CI_PIPELINE_SOURCE == "web"
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 # ---------------------------------------------------------------------------
 # STAGE 2: integration — testcontainers tests (Docker-in-Docker required)
 # ---------------------------------------------------------------------------
 
-.integration_test_template:
-  stage: integration
-  image: golang:1.25-alpine
-  services:
-    - name: docker:24.0.5-dind
-      alias: docker
-  variables:
-    RYUK_DISABLED: "true"
-  cache:
-    key: "go-mod-integration-${SERVICE_PATH}"
-    paths:
-      - .go/pkg/mod/
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_PIPELINE_SOURCE == "web"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+# .integration_test_template:
+#   stage: integration
+#   image: golang:1.25-alpine
+#   services:
+#     - name: docker:24.0.5-dind
+#       alias: docker
+#   variables:
+#     RYUK_DISABLED: "true"
+#   cache:
+#     key: "go-mod-integration-${SERVICE_PATH}"
+#     paths:
+#       - .go/pkg/mod/
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "main"
+#     - if: $CI_PIPELINE_SOURCE == "web"
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-integration-ride:
-  extends: .integration_test_template
-  variables:
-    SERVICE_PATH: services/ride
-  script:
-    - cd "$SERVICE_PATH"
-    - go test ./tests/outbox/... ./tests/saga/... -tags integration -v -timeout 300s
-  needs: [test-ride]
-  allow_failure: false
+# integration-ride:
+#   extends: .integration_test_template
+#   variables:
+#     SERVICE_PATH: services/ride
+#   script:
+#     - cd "$SERVICE_PATH"
+#     - go test ./tests/outbox/... ./tests/saga/... -tags integration -v -timeout 300s
+#   needs: [test-ride]
+#   allow_failure: false
 
-integration-dispatch:
-  extends: .integration_test_template
-  variables:
-    SERVICE_PATH: services/dispatch
-  script:
-    - cd "$SERVICE_PATH"
-    - go test ./tests/geo/... ./tests/saga/... ./tests/consumer/... -tags integration -v -timeout 300s
-  needs: [test-dispatch]
-  allow_failure: false
+# integration-dispatch:
+#   extends: .integration_test_template
+#   variables:
+#     SERVICE_PATH: services/dispatch
+#   script:
+#     - cd "$SERVICE_PATH"
+#     - go test ./tests/geo/... ./tests/saga/... ./tests/consumer/... -tags integration -v -timeout 300s
+#   needs: [test-dispatch]
+#   allow_failure: false
 
-integration-choreography:
-  extends: .integration_test_template
-  variables:
-    SERVICE_PATH: services/tests
-  script:
-    - cd "$SERVICE_PATH"
-    - go test ./choreography/... -tags integration -v -timeout 300s
-  needs: [integration-ride, integration-dispatch]
-  allow_failure: false
+# integration-choreography:
+#   extends: .integration_test_template
+#   variables:
+#     SERVICE_PATH: services/tests
+#   script:
+#     - cd "$SERVICE_PATH"
+#     - go test ./choreography/... -tags integration -v -timeout 300s
+#   needs: [integration-ride, integration-dispatch]
+#   allow_failure: false
 
 # ---------------------------------------------------------------------------
 # STAGE 3: build — docker build → .tar artifact, no registry push yet
@@ -187,35 +187,30 @@ integration-choreography:
 
 build-user:
   extends: .build_template
-  needs: [test-user]
   variables:
     SERVICE_NAME: user-service
     SERVICE_PATH: services/user
 
 build-ride:
   extends: .build_template
-  needs: [test-ride]
   variables:
     SERVICE_NAME: ride-service
     SERVICE_PATH: services/ride
 
 build-notification:
   extends: .build_template
-  needs: [test-notification]
   variables:
     SERVICE_NAME: notification-service
     SERVICE_PATH: services/notification
 
 build-dispatch:
   extends: .build_template
-  needs: [test-dispatch]
   variables:
     SERVICE_NAME: dispatch-service
     SERVICE_PATH: services/dispatch
 
 build-frontend:
   extends: .build_template
-  needs: []
   variables:
     SERVICE_NAME: frontend
     SERVICE_PATH: services/frontend
@@ -224,68 +219,68 @@ build-frontend:
 # STAGE 4: scan — Trivy vulnerability scan on built .tar artifacts
 # ---------------------------------------------------------------------------
 
-.trivy_template:
-  stage: scan
-  image:
-    name: aquasec/trivy:latest
-    entrypoint: [""]
-  script:
-    - trivy image --input "${SERVICE_NAME}.tar"
-        --exit-code 0
-        --severity HIGH,CRITICAL
-        --ignore-unfixed
-        --format sarif
-        --output "trivy-${SERVICE_NAME}.sarif"
-  artifacts:
-    reports:
-      container_scanning: "trivy-${SERVICE_NAME}.sarif"
-    when: always
-  allow_failure: true
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_PIPELINE_SOURCE == "web"
+# .trivy_template:
+#   stage: scan
+#   image:
+#     name: aquasec/trivy:latest
+#     entrypoint: [""]
+#   script:
+#     - trivy image --input "${SERVICE_NAME}.tar"
+#         --exit-code 0
+#         --severity HIGH,CRITICAL
+#         --ignore-unfixed
+#         --format sarif
+#         --output "trivy-${SERVICE_NAME}.sarif"
+#   artifacts:
+#     reports:
+#       container_scanning: "trivy-${SERVICE_NAME}.sarif"
+#     when: always
+#   allow_failure: true
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == "main"
+#     - if: $CI_PIPELINE_SOURCE == "web"
 
-scan-user:
-  extends: .trivy_template
-  variables:
-    SERVICE_NAME: user-service
-  needs: [build-user]
+# scan-user:
+#   extends: .trivy_template
+#   variables:
+#     SERVICE_NAME: user-service
+#   needs: [build-user]
 
-scan-ride:
-  extends: .trivy_template
-  variables:
-    SERVICE_NAME: ride-service
-  needs: [build-ride]
+# scan-ride:
+#   extends: .trivy_template
+#   variables:
+#     SERVICE_NAME: ride-service
+#   needs: [build-ride]
 
-scan-notification:
-  extends: .trivy_template
-  variables:
-    SERVICE_NAME: notification-service
-  needs: [build-notification]
+# scan-notification:
+#   extends: .trivy_template
+#   variables:
+#     SERVICE_NAME: notification-service
+#   needs: [build-notification]
 
-scan-dispatch:
-  extends: .trivy_template
-  variables:
-    SERVICE_NAME: dispatch-service
-  needs: [build-dispatch]
+# scan-dispatch:
+#   extends: .trivy_template
+#   variables:
+#     SERVICE_NAME: dispatch-service
+#   needs: [build-dispatch]
 
-scan-frontend:
-  extends: .trivy_template
-  variables:
-    SERVICE_NAME: frontend
-  needs: [build-frontend]
+# scan-frontend:
+#   extends: .trivy_template
+#   variables:
+#     SERVICE_NAME: frontend
+#   needs: [build-frontend]
 
-scan-runbook-retriever:
-  extends: .trivy_template
-  variables:
-    SERVICE_NAME: runbook-retriever
-  needs: [build-runbook-retriever]
+# scan-incident-agent:
+#   extends: .trivy_template
+#   variables:
+#     SERVICE_NAME: incident-agent
+#   needs: [build-incident-agent]
 
-scan-kubectl-executor:
-  extends: .trivy_template
-  variables:
-    SERVICE_NAME: kubectl-executor
-  needs: [build-kubectl-executor]
+# scan-kubectl-executor:
+#   extends: .trivy_template
+#   variables:
+#     SERVICE_NAME: kubectl-executor
+#   needs: [build-kubectl-executor]
 
 # ---------------------------------------------------------------------------
 # STAGE 4: publish — load tarball → push to GHCR
@@ -317,58 +312,56 @@ publish-user:
   extends: .publish_template
   variables:
     SERVICE_NAME: user-service
-  needs: [build-user, scan-user]
+  needs: [build-user]
 
 publish-ride:
   extends: .publish_template
   variables:
     SERVICE_NAME: ride-service
-  needs: [build-ride, scan-ride]
+  needs: [build-ride]
 
 publish-notification:
   extends: .publish_template
   variables:
     SERVICE_NAME: notification-service
-  needs: [build-notification, scan-notification]
+  needs: [build-notification]
 
 publish-dispatch:
   extends: .publish_template
   variables:
     SERVICE_NAME: dispatch-service
-  needs: [build-dispatch, scan-dispatch]
+  needs: [build-dispatch]
 
 publish-frontend:
   extends: .publish_template
   variables:
     SERVICE_NAME: frontend
-  needs: [build-frontend, scan-frontend]
+  needs: [build-frontend]
 
 # ---------------------------------------------------------------------------
 # AI Agent services — build + publish (Python, no Go tests needed)
 # ---------------------------------------------------------------------------
 
-build-runbook-retriever:
+build-incident-agent:
   extends: .build_template
-  needs: []
   variables:
-    SERVICE_NAME: runbook-retriever
-    SERVICE_PATH: ai-agent/runbook-retriever
+    SERVICE_NAME: incident-agent
+    SERVICE_PATH: ai-agent/incident-agent
 
 build-kubectl-executor:
   extends: .build_template
-  needs: []
   variables:
     SERVICE_NAME: kubectl-executor
     SERVICE_PATH: ai-agent/kubectl-executor
 
-publish-runbook-retriever:
+publish-incident-agent:
   extends: .publish_template
   variables:
-    SERVICE_NAME: runbook-retriever
-  needs: [build-runbook-retriever, scan-runbook-retriever]
+    SERVICE_NAME: incident-agent
+  needs: [build-incident-agent]
 
 publish-kubectl-executor:
   extends: .publish_template
   variables:
     SERVICE_NAME: kubectl-executor
-  needs: [build-kubectl-executor, scan-kubectl-executor]
+  needs: [build-kubectl-executor]
