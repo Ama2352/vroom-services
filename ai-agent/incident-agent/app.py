@@ -1,4 +1,4 @@
-import os, json, uuid
+import os, json, uuid, threading
 import redis as redis_lib
 import requests
 from flask import Flask, request, jsonify
@@ -18,10 +18,15 @@ EXECUTOR_TOKEN  = os.environ.get("EXECUTOR_API_KEY", "change-me")
 PENDING_TTL     = 3600  # seconds — matches n8n Wait node timeout
 
 rdb = redis_connect(REDIS_URL)
-try:
-    seed_if_empty(rdb)
-except Exception as _e:
-    print(f"[warn] cold-start seed failed (Redis may not be ready): {_e}")
+
+def _background_seed():
+    try:
+        n = seed_if_empty(rdb)
+        print(f"[seed] seeded {n} incidents from vroom-ops.md")
+    except Exception as e:
+        print(f"[seed] cold-start seed failed: {e}")
+
+threading.Thread(target=_background_seed, daemon=True).start()
 
 
 def _dispatch_tool(tool_name: str, args: dict) -> str:
