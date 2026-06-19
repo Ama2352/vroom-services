@@ -190,30 +190,50 @@ build-user:
   variables:
     SERVICE_NAME: user-service
     SERVICE_PATH: services/user
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/user/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 build-ride:
   extends: .build_template
   variables:
     SERVICE_NAME: ride-service
     SERVICE_PATH: services/ride
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/ride/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 build-notification:
   extends: .build_template
   variables:
     SERVICE_NAME: notification-service
     SERVICE_PATH: services/notification
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/notification/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 build-dispatch:
   extends: .build_template
   variables:
     SERVICE_NAME: dispatch-service
     SERVICE_PATH: services/dispatch
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/dispatch/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 build-frontend:
   extends: .build_template
   variables:
     SERVICE_NAME: frontend
     SERVICE_PATH: services/frontend
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/frontend/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 # ---------------------------------------------------------------------------
 # STAGE 4: scan — Trivy vulnerability scan on built .tar artifacts
@@ -313,30 +333,50 @@ publish-user:
   variables:
     SERVICE_NAME: user-service
   needs: [build-user]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/user/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 publish-ride:
   extends: .publish_template
   variables:
     SERVICE_NAME: ride-service
   needs: [build-ride]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/ride/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 publish-notification:
   extends: .publish_template
   variables:
     SERVICE_NAME: notification-service
   needs: [build-notification]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/notification/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 publish-dispatch:
   extends: .publish_template
   variables:
     SERVICE_NAME: dispatch-service
   needs: [build-dispatch]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/dispatch/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 publish-frontend:
   extends: .publish_template
   variables:
     SERVICE_NAME: frontend
   needs: [build-frontend]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/frontend/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 # ---------------------------------------------------------------------------
 # AI Agent services — build + push in one job (no artifact; Python images
@@ -370,9 +410,17 @@ build-push-incident-agent:
   variables:
     SERVICE_NAME: incident-agent
     SERVICE_PATH: ai-agent/incident-agent
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [ai-agent/incident-agent/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 build-push-kubectl-executor:
   extends: .build_push_template
   variables:
     SERVICE_NAME: kubectl-executor
     SERVICE_PATH: ai-agent/kubectl-executor
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [ai-agent/kubectl-executor/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
