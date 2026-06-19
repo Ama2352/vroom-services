@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install CPU-only PyTorch BEFORE requirements.txt so sentence-transformers does
 # not pull the CUDA variant (~2 GB). CPU torch is ~200 MB.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch==2.12.1+cpu --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
