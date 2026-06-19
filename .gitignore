@@ -43,3 +43,6 @@ Thumbs.db
 .notes/
 
 .venv
+
+__pycache__
+.pytest_cache
