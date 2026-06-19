@@ -339,29 +339,40 @@ publish-frontend:
   needs: [build-frontend]
 
 # ---------------------------------------------------------------------------
-# AI Agent services — build + publish (Python, no Go tests needed)
+# AI Agent services — build + push in one job (no artifact; Python images
+# exceed GitLab's artifact upload limit when saved as .tar)
 # ---------------------------------------------------------------------------
 
-build-incident-agent:
-  extends: .build_template
+.build_push_template:
+  stage: publish
+  image: docker:24.0.5
+  services:
+    - name: docker:24.0.5-dind
+      alias: docker
+  before_script:
+    - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
+  script:
+    - export IMG_BASE="${IMG_PREFIX}-${SERVICE_NAME}"
+    - export IMG_TAG="v${VERSION}-build.${CI_PIPELINE_IID}-${CI_COMMIT_SHORT_SHA}"
+    - cd "$SERVICE_PATH"
+    - docker build --build-arg BASE_IMAGE_PREFIX="public.ecr.aws/docker/library/" -t "$IMG_BASE:latest" .
+    - docker tag "$IMG_BASE:latest" "$IMG_BASE:$IMG_TAG"
+    - docker tag "$IMG_BASE:latest" "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMG_BASE:latest"
+    - docker push "$IMG_BASE:$IMG_TAG"
+    - docker push "$IMG_BASE:$CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+build-push-incident-agent:
+  extends: .build_push_template
   variables:
     SERVICE_NAME: incident-agent
     SERVICE_PATH: ai-agent/incident-agent
 
-build-kubectl-executor:
-  extends: .build_template
+build-push-kubectl-executor:
+  extends: .build_push_template
   variables:
     SERVICE_NAME: kubectl-executor
     SERVICE_PATH: ai-agent/kubectl-executor
-
-publish-incident-agent:
-  extends: .publish_template
-  variables:
-    SERVICE_NAME: incident-agent
-  needs: [build-incident-agent]
-
-publish-kubectl-executor:
-  extends: .publish_template
-  variables:
-    SERVICE_NAME: kubectl-executor
-  needs: [build-kubectl-executor]
