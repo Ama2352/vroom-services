@@ -18,7 +18,10 @@ EXECUTOR_TOKEN  = os.environ.get("EXECUTOR_API_KEY", "change-me")
 PENDING_TTL     = 3600  # seconds — matches n8n Wait node timeout
 
 rdb = redis_connect(REDIS_URL)
-seed_if_empty(rdb)
+try:
+    seed_if_empty(rdb)
+except Exception as _e:
+    print(f"[warn] cold-start seed failed (Redis may not be ready): {_e}")
 
 
 def _dispatch_tool(tool_name: str, args: dict) -> str:
