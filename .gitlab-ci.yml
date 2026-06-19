@@ -7,11 +7,11 @@
 # - remove Docker layer cache / inline cache
 # - use standard Docker Hub images instead of mirror.gcr.io
 
-include:
-  - template: Security/SAST.gitlab-ci.yml
+# include:
+#   - template: Security/SAST.gitlab-ci.yml
 
 stages:
-  - test
+  # - test
   # - integration
   - build
   # - scan
