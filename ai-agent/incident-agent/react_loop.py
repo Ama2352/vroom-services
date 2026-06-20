@@ -1,4 +1,4 @@
-import re, json, os
+import re, json, os, time
 import requests as http_requests
 
 DEFAULT_MODELS = [
@@ -37,14 +37,21 @@ _CORRECTION = {"role": "user", "content": (
 
 
 def _default_llm(messages: list, api_key: str, models: list = None) -> str:
-    resp = http_requests.post(
-        OPENROUTER_URL,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"models": models or DEFAULT_MODELS, "messages": messages, "temperature": 0.1, "max_tokens": 512},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return (resp.json()["choices"][0]["message"].get("content") or "").strip()
+    delays = [0, 5, 15]
+    for i, delay in enumerate(delays):
+        if delay:
+            print(f"[react] 429 rate-limited — retrying in {delay}s (attempt {i+1}/{len(delays)})", flush=True)
+            time.sleep(delay)
+        resp = http_requests.post(
+            OPENROUTER_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"models": models or DEFAULT_MODELS, "messages": messages, "temperature": 0.1, "max_tokens": 512},
+            timeout=30,
+        )
+        if resp.status_code == 429 and i < len(delays) - 1:
+            continue
+        resp.raise_for_status()
+        return (resp.json()["choices"][0]["message"].get("content") or "").strip()
 
 
 def _parse_action(text: str) -> tuple:
@@ -89,12 +96,14 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
     print(f"[react] starting investigation: {alert['alert_name']} / {alert['service']} models={_active}", flush=True)
 
     steps = []
+    completed_steps = 0
     for step_n in range(MAX_STEPS):
         try:
             response = llm(messages, api_key)
         except Exception as e:
             print(f"[react] step={step_n} LLM ERROR: {e}", flush=True)
             break
+        completed_steps += 1
 
         print(f"[react] step={step_n} LLM response:\n{response}\n---", flush=True)
 
@@ -129,7 +138,7 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
         messages.append({"role": "assistant", "content": response})
         messages.append({"role": "user",      "content": f"Observation: {obs}"})
 
-    print(f"[react] exhausted {MAX_STEPS} steps without Final Answer", flush=True)
+    print(f"[react] stopped after {completed_steps}/{MAX_STEPS} steps without Final Answer", flush=True)
     return {
         "root_cause": "Unable to determine — agent exhausted investigation steps",
         "confidence": "LOW",
