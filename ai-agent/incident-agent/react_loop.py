@@ -95,7 +95,7 @@ _TOOLS = [
             "remediation_tool": {"type": "string", "enum": ["restart_deployment", "scale_deployment", "none"]},
             "remediation_args": {
                 "type": "object",
-                "description": "{deployment, namespace} — add replicas (int) for scale_deployment",
+                "description": "{deployment, namespace} — for scale_deployment always use replicas=1 (HPA manages further scaling)",
             },
             "justification": {"type": "string"},
         }, "required": ["root_cause", "confidence", "remediation_tool", "justification"]},
@@ -106,13 +106,15 @@ _SYSTEM = """You are an SRE agent for the Vroom ride-hailing platform on Kuberne
 Investigate the alert by calling the provided tools, one at a time.
 
 Investigation routing — follow the matching branch, then call final_answer:
-- traces_errored > 0 AND pods running  → get_traces first (shows which span failed), then get_logs if needed
-- traces_errored = 0 AND no pods       → get_pods to confirm, then get_events to find why (scale/OOM/eviction)
-- pods exist but unhealthy             → get_logs or describe_pod for crash reason
-- Alert type looks familiar            → call search_memory early (before investigating with tools)
+- ALWAYS start with get_pods(namespace=<ns>, label_selector=app=<service>) — never call get_pods without label_selector
+- No pods returned AND traces_errored = 0 → get_events to find why (scale/OOM/eviction), then final_answer
+- Pods running AND traces_errored > 0   → get_traces first (shows which span failed), then get_logs if needed
+- Pods running but unhealthy            → get_logs or describe_pod for crash reason
+- Alert type looks familiar             → call search_memory early (before investigating with tools)
 
 Stop as soon as root cause is known — do not collect more evidence after that.
 Never call describe_pod for a pod name that did not appear in get_pods output.
+For scale_deployment remediation: always set replicas=1 (the HPA manages further scaling).
 
 [Text fallback — only if tools are unavailable]
 Thought: <reasoning>

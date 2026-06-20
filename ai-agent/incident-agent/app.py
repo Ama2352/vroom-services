@@ -176,8 +176,14 @@ def remediate():
         return jsonify({"outcome": "skipped", "stdout": "", "interpretation": "Operator declined or no remediation proposed."})
 
     headers = {"Authorization": f"Bearer {EXECUTOR_TOKEN}", "Content-Type": "application/json"}
-    endpoint = "/tools/scale" if rem.get("tool") == "scale_deployment" else "/tools/restart"
-    r = requests.post(f"{EXECUTOR_URL}{endpoint}", json=rem.get("args", {}), headers=headers, timeout=35)
+    tool = rem.get("tool")
+    args = dict(rem.get("args", {}))
+    if tool == "scale_deployment":
+        args["replicas"] = 1  # always restore to 1; HPA manages further scaling
+        endpoint = "/tools/scale"
+    else:
+        endpoint = "/tools/restart"
+    r = requests.post(f"{EXECUTOR_URL}{endpoint}", json=args, headers=headers, timeout=35)
     stdout = r.json().get("stdout", "") if r.status_code == 200 else f"[executor error: HTTP {r.status_code}]"
     outcome = "resolved" if r.status_code == 200 else "escalated"
 
