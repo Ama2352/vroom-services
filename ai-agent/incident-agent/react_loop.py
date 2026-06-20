@@ -10,7 +10,8 @@ MAX_STEPS = 5
 OBS_LIMIT = 800
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-_ACTION_RE = re.compile(r'Action:\s*(\w+)\((.+?)\)', re.DOTALL)
+_ACTION_RE = re.compile(r'Action:\s*(\w+)\((.*?)\)', re.DOTALL)
+_THINK_RE  = re.compile(r'<think>.*?</think>|</think>', re.DOTALL)
 _FINAL_RE  = re.compile(r'Final Answer:\s*(\{.+\})', re.DOTALL | re.IGNORECASE)
 
 _SYSTEM = """You are an SRE agent for the Vroom ride-hailing platform on Kubernetes.
@@ -54,6 +55,10 @@ def _default_llm(messages: list, api_key: str, models: list = None) -> str:
         return (resp.json()["choices"][0]["message"].get("content") or "").strip()
 
 
+def _clean(text: str) -> str:
+    return _THINK_RE.sub('', text).strip()
+
+
 def _parse_action(text: str) -> tuple:
     m = _ACTION_RE.search(text)
     if not m:
@@ -84,7 +89,7 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
     llm = _llm or (lambda msgs, key: _default_llm(msgs, key, _active))
 
     user_content = (
-        f"Alert: {alert['alert_name']} on {alert['service']} (namespace={alert['namespace']})\n"
+        f"Alert: {alert['alert_name'].strip()} on {alert['service'].strip()} (namespace={alert['namespace'].strip()})\n"
         f"Evidence: {alert['bundle']}\n"
         "Investigate."
     )
@@ -105,6 +110,7 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
             break
         completed_steps += 1
 
+        response = _clean(response)
         print(f"[react] step={step_n} LLM response:\n{response}\n---", flush=True)
 
         final = _parse_final(response)
@@ -117,7 +123,7 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
         if tool_name is None:
             print(f"[react] step={step_n} parse failed — sending correction", flush=True)
             try:
-                response = llm(messages + [_CORRECTION], api_key)
+                response = _clean(llm(messages + [_CORRECTION], api_key))
                 print(f"[react] step={step_n} correction response:\n{response}\n---", flush=True)
             except Exception as e:
                 print(f"[react] step={step_n} correction LLM ERROR: {e}", flush=True)
