@@ -86,38 +86,50 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
         {"role": "user",   "content": user_content},
     ]
 
+    print(f"[react] starting investigation: {alert['alert_name']} / {alert['service']} models={_active}", flush=True)
+
     steps = []
-    for _ in range(MAX_STEPS):
+    for step_n in range(MAX_STEPS):
         try:
             response = llm(messages, api_key)
-        except Exception:
+        except Exception as e:
+            print(f"[react] step={step_n} LLM ERROR: {e}", flush=True)
             break
+
+        print(f"[react] step={step_n} LLM response:\n{response}\n---", flush=True)
 
         final = _parse_final(response)
         if final is not None:
+            print(f"[react] step={step_n} Final Answer parsed OK", flush=True)
             final["investigation_steps"] = steps
             return final
 
         tool_name, tool_args = _parse_action(response)
         if tool_name is None:
+            print(f"[react] step={step_n} parse failed — sending correction", flush=True)
             try:
                 response = llm(messages + [_CORRECTION], api_key)
-            except Exception:
-                pass
+                print(f"[react] step={step_n} correction response:\n{response}\n---", flush=True)
+            except Exception as e:
+                print(f"[react] step={step_n} correction LLM ERROR: {e}", flush=True)
             tool_name, tool_args = _parse_action(response)
 
         if tool_name is None:
             obs = "[tool call failed to parse — continuing]"
+            print(f"[react] step={step_n} still no valid action after correction", flush=True)
         else:
             try:
                 obs = call_tool_fn(tool_name, tool_args or {})[:OBS_LIMIT]
+                print(f"[react] step={step_n} tool={tool_name} obs={obs[:120]}", flush=True)
             except Exception as e:
                 obs = f"[tool error: {e}]"
+                print(f"[react] step={step_n} tool={tool_name} ERROR: {e}", flush=True)
 
         steps.append({"action": f"{tool_name}({tool_args})", "observation": obs})
         messages.append({"role": "assistant", "content": response})
         messages.append({"role": "user",      "content": f"Observation: {obs}"})
 
+    print(f"[react] exhausted {MAX_STEPS} steps without Final Answer", flush=True)
     return {
         "root_cause": "Unable to determine — agent exhausted investigation steps",
         "confidence": "LOW",
