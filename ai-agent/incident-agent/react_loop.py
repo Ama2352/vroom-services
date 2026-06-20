@@ -60,7 +60,14 @@ _TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "get_traces",
-        "description": "Get recent error traces from Tempo for a service.",
+        "description": (
+            "Call when Prometheus shows high error rate with running pods AND traces_errored > 0 "
+            "in the evidence bundle. Returns which specific request operations failed and at which "
+            "layer (DB query, Redis call, upstream service) — e.g. "
+            "'POST /v1/trips → postgres-query span failed after 2100ms'. "
+            "More specific than logs: reveals WHERE in the call chain the failure originates. "
+            "Skip entirely when traces_errored=0 (no pods running = no spans generated)."
+        ),
         "parameters": {"type": "object", "properties": {
             "service":    {"type": "string"},
             "error_only": {"type": "boolean", "default": True},
@@ -98,13 +105,13 @@ _TOOLS = [
 _SYSTEM = """You are an SRE agent for the Vroom ride-hailing platform on Kubernetes.
 Investigate the alert by calling the provided tools, one at a time.
 
-Investigation order:
-1. get_pods with label_selector=app=<service> — check if pods exist
-2. If no pods → get_events — find why (scaled-down, OOM, eviction, crash)
-3. If pods exist but unhealthy → get_logs or describe_pod
-4. Call search_memory early when the alert type looks familiar
+Investigation routing — follow the matching branch, then call final_answer:
+- traces_errored > 0 AND pods running  → get_traces first (shows which span failed), then get_logs if needed
+- traces_errored = 0 AND no pods       → get_pods to confirm, then get_events to find why (scale/OOM/eviction)
+- pods exist but unhealthy             → get_logs or describe_pod for crash reason
+- Alert type looks familiar            → call search_memory early (before investigating with tools)
 
-Stop as soon as evidence is clear — call final_answer immediately.
+Stop as soon as root cause is known — do not collect more evidence after that.
 Never call describe_pod for a pod name that did not appear in get_pods output.
 
 [Text fallback — only if tools are unavailable]
@@ -119,7 +126,7 @@ _CORRECTION = {"role": "user", "content": (
 )}
 
 
-def _default_llm(messages: list, api_key: str, models: list = None, use_tools: bool = True) -> dict:
+def _default_llm(messages: list, api_key: str, models: list = None, use_tools: bool = True, tool_choice=None) -> dict:
     """Returns {"content": str, "tool_calls": list}. Retries on 429."""
     delays = [0, 5, 15]
     payload = {
@@ -130,7 +137,7 @@ def _default_llm(messages: list, api_key: str, models: list = None, use_tools: b
     }
     if use_tools:
         payload["tools"] = _TOOLS
-        payload["tool_choice"] = "auto"
+        payload["tool_choice"] = tool_choice or "auto"
 
     for i, delay in enumerate(delays):
         if delay:
@@ -184,11 +191,13 @@ def _parse_final(text: str) -> dict | None:
 def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = None, _llm=None) -> dict:
     _active = models or DEFAULT_MODELS
 
-    def _call_llm(msgs, use_tools=True):
+    def _call_llm(msgs, use_tools=True, tool_choice=None):
         if _llm:
             raw = _llm(msgs, api_key)
-            return {"content": _clean(raw) if isinstance(raw, str) else str(raw), "tool_calls": []}
-        return _default_llm(msgs, api_key, _active, use_tools)
+            if isinstance(raw, dict):
+                return raw  # new-style: already {"content": ..., "tool_calls": [...]}
+            return {"content": _clean(raw), "tool_calls": []}  # legacy string (old tests)
+        return _default_llm(msgs, api_key, _active, use_tools, tool_choice)
 
     user_content = (
         f"Alert: {alert['alert_name'].strip()} on {alert['service'].strip()} (namespace={alert['namespace'].strip()})\n"
@@ -204,10 +213,19 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
 
     steps = []
     completed_steps = 0
+    _service         = alert.get("service", "").strip()
+    has_no_target_pods = False
+    has_cause_signal   = False
 
     for step_n in range(MAX_STEPS):
+        # Evidence accumulator: force final_answer once we have conclusive signal
+        force_choice = None
+        if has_no_target_pods and has_cause_signal:
+            print(f"[react] step={step_n} evidence accumulator triggered — forcing final_answer", flush=True)
+            force_choice = {"type": "function", "function": {"name": "final_answer"}}
+
         try:
-            msg = _call_llm(messages)
+            msg = _call_llm(messages, tool_choice=force_choice)
         except Exception as e:
             print(f"[react] step={step_n} LLM ERROR: {e}", flush=True)
             break
@@ -246,10 +264,18 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
 
             try:
                 obs = call_tool_fn(tool_name, tool_args)[:OBS_LIMIT]
-                print(f"[react] step={step_n} obs={obs[:120]}", flush=True)
+                print(f"[react] step={step_n} obs={obs[:400]}", flush=True)
             except Exception as e:
                 obs = f"[tool error: {e}]"
                 print(f"[react] step={step_n} tool={tool_name} ERROR: {e}", flush=True)
+
+            # Evidence accumulator flag updates
+            if tool_name == "get_pods" and _service and _service not in obs:
+                has_no_target_pods = True
+            elif tool_name == "get_events" and len(obs) > 100:
+                has_cause_signal = True
+            elif tool_name == "search_memory" and "no relevant memory found" not in obs:
+                has_cause_signal = True
 
             steps.append({"action": f"{tool_name}({tool_args})", "observation": obs})
             tc_id = tc.get("id") or f"call_{step_n}"
@@ -292,10 +318,18 @@ def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = No
             else:
                 try:
                     obs = call_tool_fn(tool_name, tool_args or {})[:OBS_LIMIT]
-                    print(f"[react] step={step_n} tool={tool_name} obs={obs[:120]}", flush=True)
+                    print(f"[react] step={step_n} tool={tool_name} obs={obs[:400]}", flush=True)
                 except Exception as e:
                     obs = f"[tool error: {e}]"
                     print(f"[react] step={step_n} tool={tool_name} ERROR: {e}", flush=True)
+
+                # Evidence accumulator flag updates (text-fallback path)
+                if tool_name == "get_pods" and _service and _service not in obs:
+                    has_no_target_pods = True
+                elif tool_name == "get_events" and len(obs) > 100:
+                    has_cause_signal = True
+                elif tool_name == "search_memory" and "no relevant memory found" not in obs:
+                    has_cause_signal = True
 
             steps.append({"action": f"{tool_name}({tool_args})", "observation": obs})
             messages.append({"role": "assistant", "content": content})

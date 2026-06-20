@@ -43,6 +43,37 @@ def _background_seed():
 threading.Thread(target=_background_seed, daemon=True).start()
 
 
+def _extract_evidence(steps: list) -> str:
+    priority = ["get_traces", "get_events", "get_logs", "describe_pod", "get_pods"]
+    _skip = {"[no output]", "No errored traces found in last 15 minutes."}
+    by_tool = {}
+    for step in steps:
+        obs = step.get("observation", "")
+        if not obs or obs.startswith("[tool") or obs in _skip:
+            continue
+        for tool in priority:
+            if step["action"].startswith(tool) and tool not in by_tool:
+                by_tool[tool] = obs
+    for tool in priority:
+        if tool in by_tool:
+            lines = [l for l in by_tool[tool].splitlines() if l.strip()][:8]
+            return f"[{tool}]\n" + "\n".join(lines)
+    return ""
+
+
+def _suggested_command(rem: dict) -> str:
+    if not rem:
+        return ""
+    t = rem.get("tool", "")
+    a = rem.get("args", {})
+    dep, ns = a.get("deployment", ""), a.get("namespace", "")
+    if t == "scale_deployment":
+        return f"kubectl scale deployment/{dep} -n {ns} --replicas={a.get('replicas', 1)}"
+    if t == "restart_deployment":
+        return f"kubectl rollout restart deployment/{dep} -n {ns}"
+    return ""
+
+
 def _dispatch_tool(tool_name: str, args: dict) -> str:
     if tool_name == "search_memory":
         query = args.get("query", "")
@@ -63,6 +94,15 @@ def memory_search_endpoint():
         return jsonify({"result": "no relevant memory found"})
     result = memory_search(rdb, query, limit=limit)
     return jsonify({"result": result})
+
+
+@app.route("/admin/runbook")
+def admin_runbook():
+    path = os.path.join(os.environ.get("DOCS_DIR", "/docs"), "vroom-ops.md")
+    try:
+        return app.response_class(open(path).read(), mimetype="text/plain")
+    except FileNotFoundError:
+        return jsonify({"error": "runbook not found at " + path}), 404
 
 
 @app.route("/admin/models", methods=["GET"])
@@ -99,14 +139,21 @@ def investigate():
     eid = str(uuid.uuid4())
     rdb.setex(f"pending:{eid}", PENDING_TTL, json.dumps({"alert": alert, "diagnosis": diagnosis}))
 
+    rem      = diagnosis.get("remediation")
+    steps    = diagnosis.get("investigation_steps", [])
+    evidence = _extract_evidence(steps)
+    cmd      = _suggested_command(rem)
+
     return jsonify({
         "execution_id":        eid,
         "service":             service,
         "alert_name":          alert_name,
         "root_cause":          diagnosis["root_cause"],
         "confidence":          diagnosis["confidence"],
-        "investigation_steps": len(diagnosis.get("investigation_steps", [])),
-        "remediation":         diagnosis.get("remediation"),
+        "investigation_steps": len(steps),
+        "remediation":         rem,
+        "evidence_snippet":    evidence,
+        "suggested_command":   cmd,
     })
 
 
@@ -154,7 +201,7 @@ def remediate():
 def _interpret(remediation: dict, stdout: str) -> str:
     if not OPENROUTER_KEY:
         return stdout[:200]
-    deployment = remediation.get("args", {}).get("deployment", "unknown")
+    cmd = _suggested_command(remediation) or f"kubectl rollout restart deployment/{remediation.get('args', {}).get('deployment', 'unknown')}"
     try:
         resp = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -164,7 +211,7 @@ def _interpret(remediation: dict, stdout: str) -> str:
                 "max_tokens": 128,
                 "messages": [
                     {"role": "system", "content": "You are an SRE assistant. Respond in exactly 2 sentences. First: what is directly observable in the output. Second: one next diagnostic action."},
-                    {"role": "user",   "content": f"Command: kubectl rollout restart deployment/{deployment}\n\nOutput:\n{stdout}"},
+                    {"role": "user",   "content": f"Command: {cmd}\n\nOutput:\n{stdout}"},
                 ],
             },
             timeout=30,

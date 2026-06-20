@@ -9,6 +9,10 @@ LOKI_URL = os.environ.get(
     "LOKI_URL",
     "http://loki-stack.monitoring.svc.cluster.local:3100/loki/api/v1/query_range"
 )
+TEMPO_URL = os.environ.get(
+    "TEMPO_URL",
+    "http://tempo.monitoring.svc.cluster.local:3100"
+)
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "Ama2352/vroom-services")
 
 
@@ -45,6 +49,21 @@ def collect_bundle(service: str, namespace: str) -> str:
     except Exception:
         pass
 
+    traces_errored, trace_sample = 0, ""
+    try:
+        r = requests.get(f"{TEMPO_URL}/api/search", params={
+            "tags":  f"service.name={service}&error=true",
+            "start": f"{(now_ms - 900000) * 1_000_000}",
+            "end":   f"{now_ms * 1_000_000}",
+            "limit": "3",
+        }, timeout=2)
+        if r.ok:
+            traces         = r.json().get("traces", [])
+            traces_errored = len(traces)
+            trace_sample   = traces[0].get("rootTraceName", "") if traces else ""
+    except Exception:
+        pass
+
     last_commit = "none"
     try:
         since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 6 * 3600))
@@ -61,7 +80,10 @@ def collect_bundle(service: str, namespace: str) -> str:
         pass
 
     bundle = (f"service={service} namespace={namespace} "
-              f"rps={rps} err={err}% p99={p99}s loki_errors={loki_errors}")
+              f"rps={rps} err={err}% p99={p99}s loki_errors={loki_errors} "
+              f"traces_errored={traces_errored}")
+    if trace_sample:
+        bundle += f' (sample: "{trace_sample}")'
     if last_commit != "none":
         bundle += f' | last_commit: "{last_commit}"'
     return bundle
