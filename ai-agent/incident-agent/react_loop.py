@@ -95,7 +95,7 @@ _TOOLS = [
             "remediation_tool": {"type": "string", "enum": ["restart_deployment", "scale_deployment", "none"]},
             "remediation_args": {
                 "type": "object",
-                "description": "{deployment, namespace} — for scale_deployment always use replicas=1 (HPA manages further scaling)",
+                "description": "{deployment, namespace} only — do not include replicas, the server determines the restore count",
             },
             "justification": {"type": "string"},
         }, "required": ["root_cause", "confidence", "remediation_tool", "justification"]},
@@ -114,7 +114,6 @@ Investigation routing — follow the matching branch, then call final_answer:
 
 Stop as soon as root cause is known — do not collect more evidence after that.
 Never call describe_pod for a pod name that did not appear in get_pods output.
-For scale_deployment remediation: always set replicas=1 (the HPA manages further scaling).
 
 [Text fallback — only if tools are unavailable]
 Thought: <reasoning>
