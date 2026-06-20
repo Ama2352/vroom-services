@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 
 from memory import store_incident, search_memory as memory_search, connect as redis_connect
 from collector import collect_bundle
-from react_loop import run_react_loop
+from react_loop import run_react_loop, DEFAULT_MODELS
 from tools import call_tool
 from seed import seed_if_empty
 
@@ -18,6 +18,20 @@ EXECUTOR_TOKEN  = os.environ.get("EXECUTOR_API_KEY", "change-me")
 PENDING_TTL     = 3600  # seconds — matches n8n Wait node timeout
 
 rdb = redis_connect(REDIS_URL)
+
+_MODELS_KEY = "config:models"
+
+
+def _load_models(rdb) -> list:
+    raw = rdb.get(_MODELS_KEY)
+    if raw:
+        return json.loads(raw)
+    rdb.set(_MODELS_KEY, json.dumps(DEFAULT_MODELS))
+    return list(DEFAULT_MODELS)
+
+
+_current_models: list = _load_models(rdb)
+
 
 def _background_seed():
     try:
@@ -51,6 +65,22 @@ def memory_search_endpoint():
     return jsonify({"result": result})
 
 
+@app.route("/admin/models", methods=["GET"])
+def get_models():
+    return jsonify({"models": _current_models})
+
+
+@app.route("/admin/models", methods=["POST"])
+def set_models():
+    global _current_models
+    data = request.get_json(silent=True)
+    if not isinstance(data, list) or not data or not all(isinstance(m, str) for m in data):
+        return jsonify({"error": "body must be a non-empty JSON array of strings"}), 400
+    _current_models[:] = data
+    rdb.set(_MODELS_KEY, json.dumps(data))
+    return jsonify({"models": _current_models})
+
+
 @app.route("/investigate", methods=["POST"])
 def investigate():
     data = request.get_json(silent=True) or {}
@@ -64,7 +94,7 @@ def investigate():
     bundle = collect_bundle(service, namespace)
     alert  = {"alert_name": alert_name, "service": service, "namespace": namespace, "bundle": bundle}
 
-    diagnosis = run_react_loop(alert, _dispatch_tool, OPENROUTER_KEY)
+    diagnosis = run_react_loop(alert, _dispatch_tool, OPENROUTER_KEY, models=_current_models)
 
     eid = str(uuid.uuid4())
     rdb.setex(f"pending:{eid}", PENDING_TTL, json.dumps({"alert": alert, "diagnosis": diagnosis}))
@@ -129,7 +159,7 @@ def _interpret(remediation: dict, stdout: str) -> str:
             "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "meta-llama/llama-3.1-8b-instruct:free",
+                "model": _current_models[0],
                 "max_tokens": 128,
                 "messages": [
                     {"role": "system", "content": "You are an SRE assistant. Respond in exactly 2 sentences. First: what is directly observable in the output. Second: one next diagnostic action."},

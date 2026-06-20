@@ -1,10 +1,10 @@
 import re, json, os
 import requests as http_requests
 
-MODELS = [
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+DEFAULT_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-4-31b-it:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
 ]
 MAX_STEPS = 5
 OBS_LIMIT = 800
@@ -36,11 +36,11 @@ _CORRECTION = {"role": "user", "content": (
 )}
 
 
-def _default_llm(messages: list, api_key: str) -> str:
+def _default_llm(messages: list, api_key: str, models: list = None) -> str:
     resp = http_requests.post(
         OPENROUTER_URL,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"models": MODELS, "messages": messages, "temperature": 0.1, "max_tokens": 512},
+        json={"models": models or DEFAULT_MODELS, "messages": messages, "temperature": 0.1, "max_tokens": 512},
         timeout=30,
     )
     resp.raise_for_status()
@@ -72,8 +72,9 @@ def _parse_final(text: str) -> dict | None:
         return None
 
 
-def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, _llm=None) -> dict:
-    llm = _llm or _default_llm
+def run_react_loop(alert: dict, call_tool_fn, api_key: str, *, models: list = None, _llm=None) -> dict:
+    _active = models or DEFAULT_MODELS
+    llm = _llm or (lambda msgs, key: _default_llm(msgs, key, _active))
 
     user_content = (
         f"Alert: {alert['alert_name']} on {alert['service']} (namespace={alert['namespace']})\n"
