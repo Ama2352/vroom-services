@@ -6,7 +6,7 @@ DEFAULT_MODELS = [
     "google/gemma-4-31b-it:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
 ]
-MAX_STEPS = 5
+MAX_STEPS = 8
 OBS_LIMIT = 800
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -19,6 +19,13 @@ Investigate the alert by calling tools. Use this EXACT format every time:
 
 Thought: <your reasoning about what to check next>
 Action: <tool_name>(key=value, key=value)
+
+Rules:
+- ONE action per response, never two.
+- As soon as you have enough evidence to state the root cause, output Final Answer immediately — do not keep investigating.
+- If get_pods shows no pods for a service, that IS the finding. Check get_events for why, then conclude.
+- Never try to describe or get_logs for a pod that does not appear in get_pods output — it no longer exists.
+- Vroom service label selector: app=<service-name> (e.g. app=ride-service, app=dispatch-service)
 
 Available tools: get_pods, get_logs, get_events, describe_pod, get_metrics, get_traces, search_memory
 
