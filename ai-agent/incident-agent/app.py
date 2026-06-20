@@ -129,7 +129,8 @@ def remediate():
         return jsonify({"outcome": "skipped", "stdout": "", "interpretation": "Operator declined or no remediation proposed."})
 
     headers = {"Authorization": f"Bearer {EXECUTOR_TOKEN}", "Content-Type": "application/json"}
-    r = requests.post(f"{EXECUTOR_URL}/tools/restart", json=rem.get("args", {}), headers=headers, timeout=35)
+    endpoint = "/tools/scale" if rem.get("tool") == "scale_deployment" else "/tools/restart"
+    r = requests.post(f"{EXECUTOR_URL}{endpoint}", json=rem.get("args", {}), headers=headers, timeout=35)
     stdout = r.json().get("stdout", "") if r.status_code == 200 else f"[executor error: HTTP {r.status_code}]"
     outcome = "resolved" if r.status_code == 200 else "escalated"
 

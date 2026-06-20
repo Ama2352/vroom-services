@@ -20,9 +20,10 @@ ALLOWLIST_PATTERNS = [
 BEARER_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
 TEMPO_URL = os.environ.get("TEMPO_URL", "http://tempo.monitoring.svc.cluster.local:3100")
 
-_NS_RE = re.compile(r'^[\w][\w-]*$')
-_POD_RE = re.compile(r'^[\w][\w.\-]*$')
-_INT_RE = re.compile(r'^\d+$')
+_NS_RE    = re.compile(r'^[\w][\w-]*$')
+_POD_RE   = re.compile(r'^[\w][\w.\-]*$')
+_INT_RE   = re.compile(r'^\d+$')
+_LABEL_RE = re.compile(r'^[\w][\w./-]*=[\w][\w.-]*$')
 
 
 def _auth(req):
@@ -67,9 +68,15 @@ def tool_pods():
     if not _auth(request):
         return jsonify({"error": "Unauthorized"}), 401
     ns = request.args.get("namespace", "").strip()
+    label_selector = request.args.get("label_selector", "").strip()
     if not _NS_RE.match(ns):
         return jsonify({"error": "Invalid namespace"}), 400
-    body, status = _run(["kubectl", "get", "pods", "-n", ns])
+    cmd = ["kubectl", "get", "pods", "-n", ns]
+    if label_selector:
+        if not _LABEL_RE.match(label_selector):
+            return jsonify({"error": "Invalid label_selector"}), 400
+        cmd.extend(["-l", label_selector])
+    body, status = _run(cmd)
     return jsonify(body), status
 
 
@@ -103,7 +110,8 @@ def tool_events():
 def tool_describe():
     if not _auth(request):
         return jsonify({"error": "Unauthorized"}), 401
-    pod = request.args.get("pod", "").strip()
+    # Accept "name" (tool-calling schema) or legacy "pod" param
+    pod = (request.args.get("name") or request.args.get("pod", "")).strip()
     ns = request.args.get("namespace", "").strip()
     if not _POD_RE.match(pod) or not _NS_RE.match(ns):
         return jsonify({"error": "Invalid pod or namespace"}), 400
@@ -158,7 +166,23 @@ def tool_traces():
         return jsonify({"stdout": f"[traces unavailable: {e}]", "returncode": 1})
 
 
-# ── Write tool (requires human approval upstream in n8n) ─────────────────────
+# ── Write tools (require human approval upstream in n8n) ─────────────────────
+
+@app.route("/tools/scale", methods=["POST"])
+def tool_scale():
+    if not _auth(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    deployment = data.get("deployment", "").strip()
+    ns = data.get("namespace", "").strip()
+    replicas = str(data.get("replicas", 1))
+    if not _NS_RE.match(deployment) or not _NS_RE.match(ns):
+        return jsonify({"error": "Invalid deployment or namespace"}), 400
+    if not _INT_RE.match(replicas) or int(replicas) > 10:
+        return jsonify({"error": "Invalid replicas (must be 0-10)"}), 400
+    body, status = _run(["kubectl", "scale", f"deployment/{deployment}", "-n", ns, f"--replicas={replicas}"])
+    return jsonify(body), status
+
 
 @app.route("/tools/restart", methods=["POST"])
 def tool_restart():

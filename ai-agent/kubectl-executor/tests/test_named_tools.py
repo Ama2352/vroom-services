@@ -75,3 +75,42 @@ def test_traces_success(client):
         r = client.get("/tools/traces?service=ride-service&error_only=true", headers=AUTH)
     assert r.status_code == 200
     assert "abc123" in r.get_json()["stdout"]
+
+def test_pods_label_selector(client):
+    with patch("subprocess.run", return_value=mock_kubectl("NAME READY STATUS\nride-service-abc 1/1 Running")):
+        r = client.get("/tools/pods?namespace=vroom-dev&label_selector=app=ride-service", headers=AUTH)
+    assert r.status_code == 200
+    assert "ride-service" in r.get_json()["stdout"]
+
+def test_pods_invalid_label_selector(client):
+    r = client.get("/tools/pods?namespace=vroom-dev&label_selector=../../etc", headers=AUTH)
+    assert r.status_code == 400
+
+def test_describe_accepts_name_param(client):
+    with patch("subprocess.run", return_value=mock_kubectl("Name: ride-service-abc\nNamespace: vroom-dev")):
+        r = client.get("/tools/describe?name=ride-service-abc&namespace=vroom-dev", headers=AUTH)
+    assert r.status_code == 200
+
+def test_describe_rejects_missing_pod(client):
+    r = client.get("/tools/describe?namespace=vroom-dev", headers=AUTH)
+    assert r.status_code == 400
+
+def test_scale_success(client):
+    with patch("subprocess.run", return_value=mock_kubectl("deployment.apps/ride-service scaled")):
+        r = client.post("/tools/scale",
+            data=json.dumps({"deployment": "ride-service", "namespace": "vroom-dev", "replicas": 1}),
+            content_type="application/json", headers=AUTH)
+    assert r.status_code == 200
+    assert "scaled" in r.get_json()["stdout"]
+
+def test_scale_rejects_invalid_replicas(client):
+    r = client.post("/tools/scale",
+        data=json.dumps({"deployment": "ride-service", "namespace": "vroom-dev", "replicas": 99}),
+        content_type="application/json", headers=AUTH)
+    assert r.status_code == 400
+
+def test_scale_rejects_invalid_deployment(client):
+    r = client.post("/tools/scale",
+        data=json.dumps({"deployment": "../etc", "namespace": "vroom-dev", "replicas": 1}),
+        content_type="application/json", headers=AUTH)
+    assert r.status_code == 400
