@@ -15,7 +15,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -202,15 +201,12 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		carrier["tracestate"] = ts.(string)
 	}
 	remoteCtx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
-	remoteSpan := trace.SpanContextFromContext(remoteCtx)
 
 	eventType := ""
 	if v, ok := msg.Values["type"]; ok {
 		eventType = v.(string)
 	}
-	ctx, span := tracer.Start(ctx, "dispatch.consume."+eventType,
-		trace.WithLinks(trace.Link{SpanContext: remoteSpan}),
-	)
+	ctx, span := tracer.Start(remoteCtx, "dispatch.consume."+eventType)
 	defer span.End()
 
 	// Robust field extraction

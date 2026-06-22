@@ -16,7 +16,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -156,15 +155,12 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 		carrier["tracestate"] = ts.(string)
 	}
 	remoteCtx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
-	remoteSpan := trace.SpanContextFromContext(remoteCtx)
 
 	eventType := ""
 	if v, ok := msg.Values["type"]; ok && v != nil {
 		eventType = v.(string)
 	}
-	ctx, span := tracer.Start(ctx, "notification.consume."+eventType,
-		trace.WithLinks(trace.Link{SpanContext: remoteSpan}),
-	)
+	ctx, span := tracer.Start(remoteCtx, "notification.consume."+eventType)
 	defer span.End()
 
 	// Existing getVal helper follows:
