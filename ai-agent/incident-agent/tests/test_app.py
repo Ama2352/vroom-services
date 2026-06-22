@@ -39,7 +39,7 @@ def _fake_loop(alert, call_tool_fn, api_key, **kw):
             "args": {"deployment": "dispatch-service", "namespace": "vroom-dev"},
             "justification": "safe restart",
         },
-        "investigation_steps": [{"action": "get_pods(namespace=vroom-dev)", "observation": "running"}],
+        "rewoo_steps": [{"action": "get_pods({'namespace': 'vroom-dev'})", "observation": "running"}],
     }
 
 
@@ -64,7 +64,7 @@ def test_memory_search_missing_query(client):
 
 def test_investigate_returns_diagnosis(client):
     with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_react_loop", side_effect=_fake_loop):
+         patch("app.run_rewoo_loop", side_effect=_fake_loop):
         r = client.post("/investigate",
             data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
                              "severity": "warning", "namespace": "vroom-dev"}),
@@ -78,7 +78,7 @@ def test_investigate_returns_diagnosis(client):
 
 def test_investigate_stores_pending_in_redis(client):
     with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_react_loop", side_effect=_fake_loop):
+         patch("app.run_rewoo_loop", side_effect=_fake_loop):
         r = client.post("/investigate",
             data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
                              "severity": "warning", "namespace": "vroom-dev"}),
@@ -97,7 +97,7 @@ def test_remediate_unknown_execution_id(client):
 def test_remediate_skipped_when_not_approved(client):
     # First: create a pending execution
     with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_react_loop", side_effect=_fake_loop):
+         patch("app.run_rewoo_loop", side_effect=_fake_loop):
         inv = client.post("/investigate",
             data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
                              "severity": "warning", "namespace": "vroom-dev"}),
@@ -114,7 +114,7 @@ def test_remediate_approved_stores_incident_memory(client):
     _FAKE_REDIS.flushall()
 
     with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_react_loop", side_effect=_fake_loop):
+         patch("app.run_rewoo_loop", side_effect=_fake_loop):
         inv = client.post("/investigate",
             data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
                              "severity": "warning", "namespace": "vroom-dev"}),
@@ -124,8 +124,7 @@ def test_remediate_approved_stores_incident_memory(client):
     mock_exec_resp.status_code = 200
     mock_exec_resp.json.return_value = {"stdout": "deployment.apps/dispatch-service restarted", "returncode": 0}
 
-    with patch("requests.post", return_value=mock_exec_resp), \
-         patch("app._interpret", return_value="Pod restarted. Monitor error rate."):
+    with patch("requests.post", return_value=mock_exec_resp):
         r = client.post("/remediate",
             data=json.dumps({"execution_id": inv["execution_id"], "approved": True}),
             content_type="application/json")

@@ -1,21 +1,24 @@
-import os, json, uuid, threading
+import os, json, uuid, threading, time
 import redis as redis_lib
 import requests
 from flask import Flask, request, jsonify
 
-from memory import store_incident, search_memory as memory_search, connect as redis_connect
+from memory import (store_incident, search_memory as memory_search,
+                    connect as redis_connect,
+                    store_runbook_entry, get_runbook_entries, search_runbook)
 from collector import collect_bundle
-from react_loop import run_react_loop, DEFAULT_MODELS
+from rewoo_loop import run_rewoo_loop, DEFAULT_MODELS
 from tools import call_tool
 from seed import seed_if_empty
 
 app = Flask(__name__)
 
-REDIS_URL       = os.environ.get("REDIS_URL", "redis://redis.platform.svc.cluster.local:6379")
-OPENROUTER_KEY  = os.environ.get("OPENROUTER_API_KEY", "")
-EXECUTOR_URL    = os.environ.get("KUBECTL_EXECUTOR_URL", "http://kubectl-executor.monitoring.svc.cluster.local:5001")
-EXECUTOR_TOKEN  = os.environ.get("EXECUTOR_API_KEY", "change-me")
-PENDING_TTL     = 3600  # seconds — matches n8n Wait node timeout
+REDIS_URL      = os.environ.get("REDIS_URL", "redis://redis.platform.svc.cluster.local:6379")
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+EXECUTOR_URL   = os.environ.get("KUBECTL_EXECUTOR_URL",
+                                "http://kubectl-executor.monitoring.svc.cluster.local:5001")
+EXECUTOR_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
+PENDING_TTL    = 3600
 
 rdb = redis_connect(REDIS_URL)
 
@@ -36,17 +39,30 @@ _current_models: list = _load_models(rdb)
 def _background_seed():
     try:
         n = seed_if_empty(rdb)
-        print(f"[seed] seeded {n} incidents from vroom-ops.md")
+        print(f"[seed] seeded {n} runbook entries", flush=True)
     except Exception as e:
-        print(f"[seed] cold-start seed failed: {e}")
+        print(f"[seed] cold-start seed failed: {e}", flush=True)
 
 threading.Thread(target=_background_seed, daemon=True).start()
 
 
+def _format_memory_context(mem_text: str, runbook_hits: list) -> str:
+    parts = []
+    if mem_text and mem_text != "no relevant memory found":
+        parts.append(f"Past incidents:\n{mem_text}")
+    if runbook_hits:
+        lines = [
+            f"- {h['title']} ({h['service']}): {h['symptom']} → Fix: {h['fix_command']}"
+            for h in runbook_hits
+        ]
+        parts.append("Runbook:\n" + "\n".join(lines))
+    return "\n\n".join(parts) if parts else ""
+
+
 def _extract_evidence(steps: list) -> str:
     priority = ["get_traces", "get_events", "get_logs", "describe_pod", "get_pods"]
-    _skip = {"[no output]", "No errored traces found in last 15 minutes."}
-    by_tool = {}
+    _skip    = {"[no output]", "No errored traces found in last 15 minutes."}
+    by_tool  = {}
     for step in steps:
         obs = step.get("observation", "")
         if not obs or obs.startswith("[tool") or obs in _skip:
@@ -64,11 +80,12 @@ def _extract_evidence(steps: list) -> str:
 def _suggested_command(rem: dict) -> str:
     if not rem:
         return ""
-    t = rem.get("tool", "")
-    a = rem.get("args", {})
-    dep, ns = a.get("deployment", ""), a.get("namespace", "")
+    t   = rem.get("tool", "")
+    a   = rem.get("args", {})
+    dep = a.get("deployment", "")
+    ns  = a.get("namespace", "")
     if t == "scale_deployment":
-        return f"kubectl scale deployment/{dep} -n {ns} --replicas={a.get('replicas', 1)}"
+        return f"kubectl scale deployment/{dep} -n {ns} --replicas=1"
     if t == "restart_deployment":
         return f"kubectl rollout restart deployment/{dep} -n {ns}"
     return ""
@@ -76,10 +93,50 @@ def _suggested_command(rem: dict) -> str:
 
 def _dispatch_tool(tool_name: str, args: dict) -> str:
     if tool_name == "search_memory":
-        query = args.get("query", "")
-        return memory_search(rdb, query)
+        return memory_search(rdb, args.get("query", ""))
     return call_tool(tool_name, args)
 
+
+def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
+    if not OPENROUTER_KEY:
+        return
+    try:
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENROUTER_KEY}",
+                     "Content-Type": "application/json"},
+            json={
+                "model":       _current_models[0],
+                "max_tokens":  200,
+                "temperature": 0.1,
+                "messages": [
+                    {"role": "system", "content": (
+                        "You are a technical writer for an SRE runbook. "
+                        "Based on this resolved incident, write ONE concise runbook entry. "
+                        "Output ONLY a valid JSON object, no markdown: "
+                        '{"title":"...","service":"...","symptom":"one sentence",'
+                        '"root_cause":"one sentence","fix_command":"exact kubectl command"}'
+                    )},
+                    {"role": "user", "content": (
+                        f"Alert: {incident['alert_name']} on {incident['service']}\n"
+                        f"Root cause: {incident['root_cause']}\n"
+                        f"Command: {fix_command}\nOutcome: resolved"
+                    )},
+                ],
+            },
+            timeout=30,
+        )
+        content = resp.json()["choices"][0]["message"].get("content", "").strip()
+        content = content.replace("```json", "").replace("```", "").strip()
+        entry = json.loads(content)
+        entry["source"] = "learned"
+        store_runbook_entry(rdb, entry)
+        print(f"[reflect] stored: {entry.get('title', '')}", flush=True)
+    except Exception as e:
+        print(f"[reflect] failed (non-fatal): {e}", flush=True)
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.route("/health")
 def health():
@@ -92,17 +149,47 @@ def memory_search_endpoint():
     limit = int(request.args.get("limit", "3"))
     if not query:
         return jsonify({"result": "no relevant memory found"})
-    result = memory_search(rdb, query, limit=limit)
-    return jsonify({"result": result})
+    return jsonify({"result": memory_search(rdb, query, limit=limit)})
 
 
 @app.route("/admin/runbook")
 def admin_runbook():
-    path = os.path.join(os.environ.get("DOCS_DIR", "/docs"), "vroom-ops.md")
-    try:
-        return app.response_class(open(path).read(), mimetype="text/plain")
-    except FileNotFoundError:
-        return jsonify({"error": "runbook not found at " + path}), 404
+    entries   = get_runbook_entries(rdb)
+    bootstrap = [e for e in entries if e.get("source") == "bootstrap"]
+    learned   = [e for e in entries if e.get("source") == "learned"]
+
+    if not entries:
+        return app.response_class(
+            "# Vroom Operations Runbook\n\n*No entries. POST /admin/reseed to bootstrap.*\n",
+            mimetype="text/plain",
+        )
+
+    lines = [
+        "# Vroom Operations Runbook\n",
+        f"*{len(entries)} entries — {len(bootstrap)} bootstrap, {len(learned)} learned.*\n",
+    ]
+    for e in entries:
+        ts       = int(e.get("timestamp", 0))
+        date_str = time.strftime("%Y-%m-%d", time.gmtime(ts)) if ts else "unknown"
+        lines.append(f"\n## {e.get('title', 'Untitled')}")
+        lines.append(f"**Service:** {e.get('service', '')}")
+        lines.append(f"**Symptom:** {e.get('symptom', '')}")
+        lines.append(f"**Root cause:** {e.get('root_cause', '')}")
+        if e.get("fix_command"):
+            lines.append(f"**Fix:** `{e['fix_command']}`")
+        lines.append(f"*Source: {e.get('source', 'unknown')} | {date_str}*")
+    return app.response_class("\n".join(lines), mimetype="text/plain")
+
+
+@app.route("/admin/reseed", methods=["POST"])
+def admin_reseed():
+    keys = rdb.smembers("runbook:index")
+    for key in keys:
+        key_str = key.decode() if isinstance(key, bytes) else key
+        rdb.delete(f"runbook:entry:{key_str}")
+    rdb.delete("runbook:index")
+    n = seed_if_empty(rdb)
+    return jsonify({"seeded": n})
 
 
 @app.route("/admin/models", methods=["GET"])
@@ -123,44 +210,57 @@ def set_models():
 
 @app.route("/investigate", methods=["POST"])
 def investigate():
-    data = request.get_json(silent=True) or {}
+    data       = request.get_json(silent=True) or {}
     alert_name = data.get("alert_name", "UnknownAlert")
     service    = data.get("service", "unknown")
     namespace  = data.get("namespace", "vroom-dev")
-    severity   = data.get("severity", "warning")
 
-    seed_if_empty(rdb)  # self-heal if Redis restarted between incident-agent startups
+    seed_if_empty(rdb)
+
+    # Pre-fetch memory before Planner call (deterministic, no LLM)
+    query        = f"{alert_name} {service}"
+    mem_text     = memory_search(rdb, query, limit=3)
+    runbook_hits = search_runbook(rdb, query, top_k=3)
+    memory_ctx   = _format_memory_context(mem_text, runbook_hits)
 
     bundle = collect_bundle(service, namespace)
-    alert  = {"alert_name": alert_name, "service": service, "namespace": namespace, "bundle": bundle}
+    alert  = {
+        "alert_name":     alert_name,
+        "service":        service,
+        "namespace":      namespace,
+        "bundle":         bundle,
+        "memory_context": memory_ctx,
+    }
 
-    diagnosis = run_react_loop(alert, _dispatch_tool, OPENROUTER_KEY, models=_current_models)
+    diagnosis = run_rewoo_loop(alert, _dispatch_tool, OPENROUTER_KEY,
+                               models=_current_models)
 
     eid = str(uuid.uuid4())
-    rdb.setex(f"pending:{eid}", PENDING_TTL, json.dumps({"alert": alert, "diagnosis": diagnosis}))
+    rdb.set(f"pending:{eid}", json.dumps({"alert": alert, "diagnosis": diagnosis}),
+            ex=PENDING_TTL)
 
     rem      = diagnosis.get("remediation")
-    steps    = diagnosis.get("investigation_steps", [])
+    steps    = diagnosis.get("rewoo_steps", [])
     evidence = _extract_evidence(steps)
     cmd      = _suggested_command(rem)
 
     return jsonify({
-        "execution_id":        eid,
-        "service":             service,
-        "alert_name":          alert_name,
-        "root_cause":          diagnosis["root_cause"],
-        "confidence":          diagnosis["confidence"],
-        "investigation_steps": len(steps),
-        "remediation":         rem,
-        "evidence_snippet":    evidence,
-        "suggested_command":   cmd,
+        "execution_id":      eid,
+        "service":           service,
+        "alert_name":        alert_name,
+        "root_cause":        diagnosis["root_cause"],
+        "confidence":        diagnosis["confidence"],
+        "rewoo_steps":       len(steps),
+        "remediation":       rem,
+        "evidence_snippet":  evidence,
+        "suggested_command": cmd,
     })
 
 
 @app.route("/remediate", methods=["POST"])
 def remediate():
-    data    = request.get_json(silent=True) or {}
-    eid     = data.get("execution_id", "")
+    data     = request.get_json(silent=True) or {}
+    eid      = data.get("execution_id", "")
     approved = data.get("approved", False)
 
     raw = rdb.getdel(f"pending:{eid}")
@@ -173,58 +273,52 @@ def remediate():
     rem       = diagnosis.get("remediation")
 
     if not approved or not rem:
-        return jsonify({"outcome": "skipped", "stdout": "", "interpretation": "Operator declined or no remediation proposed."})
+        return jsonify({"outcome": "skipped", "stdout": "",
+                        "interpretation": "Operator declined or no remediation proposed."})
 
-    headers = {"Authorization": f"Bearer {EXECUTOR_TOKEN}", "Content-Type": "application/json"}
-    tool = rem.get("tool")
-    args = dict(rem.get("args", {}))
+    headers  = {"Authorization": f"Bearer {EXECUTOR_TOKEN}",
+                "Content-Type": "application/json"}
+    tool     = rem.get("tool")
+    args     = dict(rem.get("args", {}))
     if tool == "scale_deployment":
-        args["replicas"] = 1  # always restore to 1; HPA manages further scaling
+        args["replicas"] = 1
         endpoint = "/tools/scale"
     else:
         endpoint = "/tools/restart"
-    r = requests.post(f"{EXECUTOR_URL}{endpoint}", json=args, headers=headers, timeout=35)
-    stdout = r.json().get("stdout", "") if r.status_code == 200 else f"[executor error: HTTP {r.status_code}]"
-    outcome = "resolved" if r.status_code == 200 else "escalated"
 
-    interpretation = _interpret(rem, stdout)
+    r       = requests.post(f"{EXECUTOR_URL}{endpoint}", json=args,
+                            headers=headers, timeout=35)
+    stdout  = r.json().get("stdout", "") if r.status_code == 200 \
+              else f"[executor error: HTTP {r.status_code}]"
+    outcome = "resolved" if r.status_code == 200 else "escalated"
 
     store_incident(rdb, {
         "alert_name":          alert["alert_name"],
         "service":             alert["service"],
         "namespace":           alert["namespace"],
         "symptoms":            alert["bundle"],
-        "investigation_steps": diagnosis.get("investigation_steps", []),
+        "investigation_steps": diagnosis.get("rewoo_steps", []),
         "root_cause":          diagnosis["root_cause"],
         "remediation_tool":    rem["tool"],
         "remediation_args":    rem.get("args", {}),
         "outcome":             outcome,
     })
 
-    return jsonify({"outcome": outcome, "stdout": stdout, "interpretation": interpretation})
+    if outcome == "resolved":
+        cmd = _suggested_command(rem)
+        threading.Thread(
+            target=_reflect_and_store,
+            args=(rdb, {
+                "alert_name":       alert["alert_name"],
+                "service":          alert["service"],
+                "root_cause":       diagnosis["root_cause"],
+                "remediation_tool": rem["tool"],
+            }, cmd),
+            daemon=True,
+        ).start()
 
-
-def _interpret(remediation: dict, stdout: str) -> str:
-    if not OPENROUTER_KEY:
-        return stdout[:200]
-    cmd = _suggested_command(remediation) or f"kubectl rollout restart deployment/{remediation.get('args', {}).get('deployment', 'unknown')}"
-    try:
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": _current_models[0],
-                "max_tokens": 128,
-                "messages": [
-                    {"role": "system", "content": "You are an SRE assistant. Respond in exactly 2 sentences. First: what is directly observable in the output. Second: one next diagnostic action."},
-                    {"role": "user",   "content": f"Command: {cmd}\n\nOutput:\n{stdout}"},
-                ],
-            },
-            timeout=30,
-        )
-        return resp.json()["choices"][0]["message"].get("content", "").strip()
-    except Exception:
-        return stdout[:200]
+    return jsonify({"outcome": outcome, "stdout": stdout,
+                    "interpretation": stdout[:200]})
 
 
 if __name__ == "__main__":

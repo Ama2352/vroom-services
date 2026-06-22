@@ -116,3 +116,68 @@ def test_recalibrate_thresholds_sets_redis_keys(rdb):
     assert rdb.exists("memory:config:cliff_gap")
     floor = float(rdb.get("memory:config:score_floor"))
     assert 0.10 <= floor <= 0.70
+
+
+# ── Semantic memory (runbook tier) ────────────────────────────────────────────
+
+def _make_runbook_entry(**kwargs):
+    base = {
+        "title":       "Deployment scaled to zero",
+        "service":     "ride-service",
+        "symptom":     "No pods running, replicas=0",
+        "root_cause":  "deployment manually scaled to 0",
+        "fix_command": "kubectl scale deployment/ride-service -n vroom-dev --replicas=1",
+        "source":      "bootstrap",
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_store_runbook_entry_creates_hash(rdb):
+    eid = memory.store_runbook_entry(rdb, _make_runbook_entry())
+    assert rdb.hexists(f"runbook:entry:{eid}", "title")
+    assert rdb.sismember(memory.RUNBOOK_INDEX, eid)
+
+
+def test_store_runbook_entry_saves_embedding(rdb):
+    eid = memory.store_runbook_entry(rdb, _make_runbook_entry())
+    raw = rdb.hget(f"runbook:entry:{eid}", "embedding")
+    emb = json.loads(raw)
+    assert isinstance(emb, list)
+    assert len(emb) == 384
+
+
+def test_get_runbook_entries_returns_all(rdb):
+    memory.store_runbook_entry(rdb, _make_runbook_entry(title="Entry A"))
+    memory.store_runbook_entry(rdb, _make_runbook_entry(title="Entry B"))
+    entries = memory.get_runbook_entries(rdb)
+    assert len(entries) == 2
+    assert all("title" in e for e in entries)
+
+
+def test_get_runbook_entries_empty(rdb):
+    assert memory.get_runbook_entries(rdb) == []
+
+
+def test_search_runbook_empty_returns_empty_list(rdb):
+    assert memory.search_runbook(rdb, "anything") == []
+
+
+def test_search_runbook_finds_similar_entry(rdb):
+    memory.store_runbook_entry(rdb, _make_runbook_entry(
+        title="Deployment scaled to zero",
+        service="ride-service",
+        symptom="No pods running for ride-service, replicas=0",
+        root_cause="deployment manually scaled to 0",
+    ))
+    results = memory.search_runbook(rdb, "ride-service replicas 0 pods missing")
+    assert len(results) == 1
+    assert results[0]["service"] == "ride-service"
+    assert results[0]["title"] == "Deployment scaled to zero"
+
+
+def test_search_runbook_respects_top_k(rdb):
+    for i in range(5):
+        memory.store_runbook_entry(rdb, _make_runbook_entry(title=f"Entry {i}", service="svc"))
+    results = memory.search_runbook(rdb, "svc", top_k=2)
+    assert len(results) == 2

@@ -1,6 +1,6 @@
 import os, re
 import redis as redis_lib
-from memory import store_incident, INDEX_KEY
+from memory import store_runbook_entry, RUNBOOK_INDEX
 
 DOCS_DIR = os.environ.get("DOCS_DIR", "/docs")
 
@@ -11,43 +11,51 @@ def _parse_vroom_ops(md_path: str) -> list:
     except FileNotFoundError:
         return []
 
-    incidents = []
+    entries = []
     sections = re.split(r'\n## ', text)
     for section in sections[1:]:
         lines = section.strip().split('\n')
         title = lines[0].strip()
-        body = '\n'.join(lines[1:]).strip()
+        body  = '\n'.join(lines[1:]).strip()
 
         symptom_m = re.search(r'Symptom:\s*(.+)', body)
-        symptom = symptom_m.group(1).strip() if symptom_m else title
+        symptom   = symptom_m.group(1).strip() if symptom_m else title
 
-        # Extract root cause from body text (first substantive sentence)
-        root_cause_m = re.search(r'\n([A-Z][^.\n]{20,80}\.)', body)
-        root_cause = root_cause_m.group(1).strip() if root_cause_m else symptom
+        # Extract service name from section title
+        # "High error rate on ride-service" → "ride-service"
+        service_m = re.search(r'\bon ([\w.-]+)\s*$', title, re.IGNORECASE)
+        service   = service_m.group(1) if service_m else "vroom"
 
-        restart_m = re.search(r'kubectl rollout restart deployment/(\S+)', body)
-        remediation_tool = "restart_deployment" if restart_m else ""
-        remediation_args = {"deployment": restart_m.group(1), "namespace": "<namespace>"} if restart_m else {}
+        # Extract root cause — first substantive sentence in body
+        rc_m       = re.search(r'\n([A-Z][^.\n]{20,80}\.)', body)
+        root_cause = rc_m.group(1).strip() if rc_m else symptom
 
-        incidents.append({
-            "alert_name":          title,
-            "service":             "vroom",
-            "namespace":           "vroom-dev",
-            "symptoms":            symptom,
-            "investigation_steps": [],
-            "root_cause":          root_cause,
-            "remediation_tool":    remediation_tool,
-            "remediation_args":    remediation_args,
-            "outcome":             "resolved",
+        # Prefer rollout restart, fall back to scale, else empty
+        restart_m = re.search(r'kubectl rollout restart deployment/([\S]+)', body)
+        scale_m   = re.search(r'kubectl scale deployment/([\S]+)', body)
+        if restart_m:
+            fix_command = f"kubectl rollout restart deployment/{restart_m.group(1)} -n <namespace>"
+        elif scale_m:
+            fix_command = f"kubectl scale deployment/{scale_m.group(1)} -n <namespace> --replicas=1"
+        else:
+            fix_command = ""
+
+        entries.append({
+            "title":       title,
+            "service":     service,
+            "symptom":     symptom,
+            "root_cause":  root_cause,
+            "fix_command": fix_command,
+            "source":      "bootstrap",
         })
-    return incidents
+    return entries
 
 
 def seed_if_empty(rdb: redis_lib.Redis, docs_dir: str = DOCS_DIR) -> int:
-    if rdb.scard(INDEX_KEY) > 0:
+    if rdb.scard(RUNBOOK_INDEX) > 0:
         return 0
     md_path = os.path.join(docs_dir, "vroom-ops.md")
-    incidents = _parse_vroom_ops(md_path)
-    for inc in incidents:
-        store_incident(rdb, inc)
-    return len(incidents)
+    entries = _parse_vroom_ops(md_path)
+    for entry in entries:
+        store_runbook_entry(rdb, entry)
+    return len(entries)

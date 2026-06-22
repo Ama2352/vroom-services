@@ -132,6 +132,73 @@ def retrieve_similar(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
     return [item for _, item in scored[:top_k]]
 
 
+RUNBOOK_INDEX = "runbook:index"
+
+
+def store_runbook_entry(rdb: redis_lib.Redis, entry: dict) -> str:
+    eid = str(uuid.uuid4())
+    query_text = f"{entry.get('title', '')} {entry.get('service', '')} {entry.get('symptom', '')}"
+    embedding  = _encode(query_text)
+    rdb.hset(f"runbook:entry:{eid}", mapping={
+        "title":       entry.get("title", ""),
+        "service":     entry.get("service", ""),
+        "symptom":     entry.get("symptom", ""),
+        "root_cause":  entry.get("root_cause", ""),
+        "fix_command": entry.get("fix_command", ""),
+        "source":      entry.get("source", "learned"),
+        "timestamp":   str(int(time.time())),
+        "embedding":   json.dumps(embedding),
+    })
+    rdb.sadd(RUNBOOK_INDEX, eid)
+    return eid
+
+
+def get_runbook_entries(rdb: redis_lib.Redis, limit: int = 100) -> list:
+    keys = list(rdb.smembers(RUNBOOK_INDEX))
+    entries = []
+    for key in keys:
+        key_str = key.decode() if isinstance(key, bytes) else key
+        raw = rdb.hgetall(f"runbook:entry:{key_str}")
+        if not raw:
+            continue
+        entries.append({
+            (k.decode() if isinstance(k, bytes) else k):
+            (v.decode() if isinstance(v, bytes) else v)
+            for k, v in raw.items()
+        })
+    entries.sort(key=lambda x: int(x.get("timestamp", 0)))
+    return entries[:limit]
+
+
+def search_runbook(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
+    keys = rdb.smembers(RUNBOOK_INDEX)
+    if not keys:
+        return []
+    q_emb  = np.array(_encode(query))
+    scored = []
+    for key in keys:
+        key_str = key.decode() if isinstance(key, bytes) else key
+        raw     = rdb.hgetall(f"runbook:entry:{key_str}")
+        if not raw:
+            continue
+        emb_raw = _get_field(raw, "embedding")
+        if not emb_raw:
+            continue
+        emb  = np.array(json.loads(emb_raw))
+        norm = np.linalg.norm(q_emb) * np.linalg.norm(emb)
+        cos  = float(np.dot(q_emb, emb) / (norm + 1e-9))
+        scored.append((cos, {
+            "title":       _get_field(raw, "title"),
+            "service":     _get_field(raw, "service"),
+            "symptom":     _get_field(raw, "symptom"),
+            "root_cause":  _get_field(raw, "root_cause"),
+            "fix_command": _get_field(raw, "fix_command"),
+            "source":      _get_field(raw, "source"),
+        }))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for _, item in scored[:top_k]]
+
+
 def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
     scored = _score_all(rdb, query)
     if not scored:

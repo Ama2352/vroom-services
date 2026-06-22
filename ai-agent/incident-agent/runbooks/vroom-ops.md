@@ -86,3 +86,14 @@ Check the AnalysisRun: kubectl describe analysisrun -n vroom
 If error-rate metric fails: check Prometheus is scraping the target namespace. kubectl get servicemonitor -n <namespace>
 
 If p99-latency metric fails under load: this may be a legitimate signal. Check if a bad deploy caused latency regression before forcing promotion.
+
+## Deployment scaled to zero
+
+Symptom: No pods running for service. Metrics show 0 rps and 0 errors (no traffic at all). Alert fires because the service is completely unreachable.
+
+The deployment spec has replicas=0. This happens after a manual kubectl scale --replicas=0 or a failed HPA configuration. The HPA min=1 setting will eventually restore it but may not trigger immediately.
+
+Check pod count: kubectl get pods -n <namespace> -l app=<service>
+Check scale events: kubectl get events -n <namespace> | grep ScalingReplicaSet
+
+Restore: kubectl scale deployment/<service> -n <namespace> --replicas=1
