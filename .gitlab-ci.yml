@@ -30,8 +30,7 @@ variables:
   VERSION: "1.0.0"
   GOPATH: "$CI_PROJECT_DIR/.go"
   DOCKER_BUILDKIT: "1"
-  DOCKER_HOST: tcp://docker:2375
-  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: unix:///var/run/docker.sock
   GIT_STRATEGY: clone
   GIT_DEPTH: 1
 
@@ -167,9 +166,6 @@ variables:
 .build_template:
   stage: build
   image: docker:24.0.5
-  services:
-    - name: docker:24.0.5-dind
-      alias: docker
   before_script:
     - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
   script:
@@ -309,9 +305,6 @@ build-frontend:
 .publish_template:
   stage: publish
   image: docker:24.0.5
-  services:
-    - name: docker:24.0.5-dind
-      alias: docker
   before_script:
     - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
   script:
@@ -386,9 +379,6 @@ publish-frontend:
 .build_push_template:
   stage: publish
   image: docker:24.0.5
-  services:
-    - name: docker:24.0.5-dind
-      alias: docker
   before_script:
     - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
   script:
