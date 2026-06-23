@@ -33,7 +33,11 @@ def _auth(req):
 def _run(cmd: list[str]) -> tuple[dict, int]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return {"stdout": result.stdout[:2000], "stderr": result.stderr[:500], "returncode": result.returncode}, 200
+        stdout = result.stdout
+        if len(stdout) > 2000:
+            cut = stdout[:2000].rfind('\n')
+            stdout = stdout[:cut] if cut > 0 else stdout[:2000]
+        return {"stdout": stdout, "stderr": result.stderr[:500], "returncode": result.returncode}, 200
     except subprocess.TimeoutExpired:
         return {"error": "kubectl timed out after 30s", "stdout": "", "returncode": -1}, 500
     except FileNotFoundError as e:
@@ -99,10 +103,16 @@ def tool_logs():
 def tool_events():
     if not _auth(request):
         return jsonify({"error": "Unauthorized"}), 401
-    ns = request.args.get("namespace", "").strip()
+    ns      = request.args.get("namespace", "").strip()
+    service = request.args.get("service",   "").strip()
     if not _NS_RE.match(ns):
         return jsonify({"error": "Invalid namespace"}), 400
     body, status = _run(["kubectl", "get", "events", "-n", ns])
+    if service and body.get("stdout"):
+        lines    = body["stdout"].splitlines()
+        header   = lines[0] if lines else ""
+        filtered = [l for l in lines[1:] if service in l]
+        body["stdout"] = "\n".join([header] + filtered) if filtered else f"{header}\n(no events for {service})"
     return jsonify(body), status
 
 

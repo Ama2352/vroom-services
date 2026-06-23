@@ -22,7 +22,7 @@ def _parse_plan(text: str, alert: dict) -> list:
         svc = alert.get("service", "unknown")
         return [
             ("get_pods",   {"namespace": ns, "label_selector": f"app={svc}"}),
-            ("get_events", {"namespace": ns}),
+            ("get_events", {"namespace": ns, "service": svc}),
         ]
     steps = {}
     for num, tool_name, args_str in matches:
@@ -71,8 +71,8 @@ Available tools with exact parameter signatures:
   get_pods(namespace="{namespace}", label_selector="app={service}")
     Returns: NAME, READY, STATUS, RESTARTS, AGE for each pod
 
-  get_events(namespace="{namespace}")
-    Returns: recent Kubernetes events (ScalingReplicaSet, OOMKilled, probe failures)
+  get_events(namespace="{namespace}", service="{service}")
+    Returns: recent Kubernetes events for {service} only (ScalingReplicaSet, OOMKilled, probe failures)
 
   get_logs(service="{service}", namespace="{namespace}", tail=50)
     Returns: last N log lines from pods matching app={service}
@@ -193,7 +193,12 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
     rewoo_steps = []
     for i, (tool_name, args) in enumerate(plan, 1):
         try:
-            obs = call_tool_fn(tool_name, args)[:OBS_LIMIT]
+            raw = call_tool_fn(tool_name, args)
+            if len(raw) > OBS_LIMIT:
+                cut = raw[:OBS_LIMIT].rfind('\n')
+                obs = raw[:cut] if cut > 0 else raw[:OBS_LIMIT]
+            else:
+                obs = raw
         except Exception as e:
             obs = f"[tool error: {e}]"
         rewoo_steps.append({"action": f"{tool_name}({args})", "observation": obs})

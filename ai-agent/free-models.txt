@@ -1,10 +1,12 @@
 =========================================
 Command to query free models: curl -s https://openrouter.ai/api/v1/models | grep -o '"id":"[^"]*:free"' | cut -d'"' -f4
 =========================================
+cohere/north-mini-code:free
+nvidia/nemotron-3.5-content-safety:free
+nvidia/nemotron-3-ultra-550b-a55b:free
 nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
 poolside/laguna-xs.2:free
 poolside/laguna-m.1:free
-moonshotai/kimi-k2.6:free
 google/gemma-4-26b-a4b-it:free
 google/gemma-4-31b-it:free
 nvidia/nemotron-3-super-120b-a12b:free
@@ -16,7 +18,6 @@ qwen/qwen3-next-80b-a3b-instruct:free
 nvidia/nemotron-nano-9b-v2:free
 openai/gpt-oss-120b:free
 openai/gpt-oss-20b:free
-z-ai/glm-4.5-air:free
 qwen/qwen3-coder:free
 cognitivecomputations/dolphin-mistral-24b-venice-edition:free
 meta-llama/llama-3.3-70b-instruct:free
@@ -27,6 +28,6 @@ nousresearch/hermes-3-llama-3.1-405b:free
 =========================================
 Command to hot swap free models
 =========================================
-curl -X POST http://localhost:5002/admin/models \
+curl -X POST http://10.43.230.5:5002/admin/models \
   -H "Content-Type: application/json" \
-  -d '["moonshotai/kimi-k2.6:free","z-ai/glm-4.5-air:free","poolside/laguna-xs.2:free"]'
+  -d '["nousresearch/hermes-3-llama-3.1-405b:free","openai/gpt-oss-120b:free","cognitivecomputations/dolphin-mistral-24b-venice-edition:free"]'
