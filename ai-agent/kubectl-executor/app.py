@@ -153,7 +153,7 @@ def tool_traces():
     now = int(time.time())
     tags = f"service.name={service}"
     if error_only:
-        tags += "&error=true"
+        tags += " error=true"   # space-separated logfmt, not & (which corrupts the tags value)
     params = {
         "tags": tags,
         "start": f"{now - 900}000000000",
@@ -161,7 +161,7 @@ def tool_traces():
         "limit": "5",
     }
     try:
-        r = http_requests.get(f"{TEMPO_URL}/api/search", params=params, timeout=2)
+        r = http_requests.get(f"{TEMPO_URL}/api/search", params=params, timeout=8)
         if r.status_code == 200:
             traces = r.json().get("traces", [])
             if not traces:

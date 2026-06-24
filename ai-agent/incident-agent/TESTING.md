@@ -100,7 +100,7 @@ kubectl get pods -n vroom-dev -l app=ride-service
 ### Step 3: Trigger the agent directly (bypass n8n)
 
 ```bash
-curl -s -X POST http://localhost:5002/investigate \
+curl -s -X POST http://localhost:5002/investigate?debug=true \
   -H "Content-Type: application/json" \
   -d '{
     "alert_name": "HighErrorRate",

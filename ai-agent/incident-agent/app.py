@@ -68,21 +68,25 @@ def _format_memory_context(mem_text: str, runbook_hits: list) -> str:
 def _extract_evidence(steps: list) -> str:
     priority = ["get_traces", "get_events", "get_logs", "describe_pod", "get_pods"]
     _skip    = {"[no output]", "No errored traces found in last 15 minutes.",
-                "[no output after filtering health checks]"}
+                "[no output after filtering health checks]", "[traces unavailable]"}
     by_tool  = {}
     for step in steps:
         obs = step.get("observation", "")
-        if not obs or obs.startswith("[tool") or obs in _skip:
+        if not obs or obs.startswith(("[tool", "[traces unavailable")) or obs in _skip:
             continue
         for tool in priority:
             if step["action"].startswith(tool) and tool not in by_tool:
                 by_tool[tool] = obs
     sections = []
     for tool in priority:
-        if tool in by_tool:
-            lines = [l for l in by_tool[tool].splitlines() if l.strip()][:4]
-            if lines:
-                sections.append(f"[{tool}]\n" + "\n".join(lines))
+        if tool not in by_tool:
+            continue
+        lines = [l for l in by_tool[tool].splitlines() if l.strip()]
+        # Skip metrics observations that only contain the header row (kubectl top returned no pods)
+        if tool == "get_metrics" and len(lines) <= 1:
+            continue
+        if lines[:4]:
+            sections.append(f"[{tool}]\n" + "\n".join(lines[:4]))
     return "\n\n".join(sections)
 
 
@@ -343,11 +347,27 @@ def remediate():
     else:
         endpoint = "/tools/restart"
 
-    r       = requests.post(f"{EXECUTOR_URL}{endpoint}", json=args,
-                            headers=headers, timeout=35)
-    stdout  = r.json().get("stdout", "") if r.status_code == 200 \
-              else f"[executor error: HTTP {r.status_code}]"
-    outcome = "resolved" if r.status_code == 200 else "escalated"
+    r      = requests.post(f"{EXECUTOR_URL}{endpoint}", json=args,
+                           headers=headers, timeout=35)
+    stdout = r.json().get("stdout", "") if r.status_code == 200 \
+             else f"[executor error: HTTP {r.status_code}]"
+
+    if r.status_code != 200:
+        outcome = "escalated"
+    elif tool == "restart_deployment":
+        # restart cmd ran but pod may still crashloop (e.g. config error) — verify after 35s
+        time.sleep(35)
+        pod_obs = call_tool("get_pods", {
+            "namespace":      args.get("namespace", ""),
+            "label_selector": f"app={args.get('deployment', '')}",
+        })
+        if pod_obs.startswith("[tool") or "CrashLoopBackOff" in pod_obs:
+            outcome = "attempted"
+        else:
+            outcome = "resolved"
+        print(f"[remediate] post-restart check outcome={outcome}", flush=True)
+    else:
+        outcome = "resolved"
 
     store_incident(rdb, {
         "alert_name":          alert["alert_name"],

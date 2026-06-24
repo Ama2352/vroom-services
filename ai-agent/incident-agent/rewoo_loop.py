@@ -177,8 +177,9 @@ def _call_provider(messages: list, model_entry: dict, groq_key: str,
     delays = [0, 10]
     for i, delay in enumerate(delays):
         if delay:
-            print(f"[rewoo] 429 on {model_entry['id']} — retrying in {delay}s", flush=True)
+            print(f"[rewoo:api] 429 on {model_entry['id']} — retrying in {delay}s", flush=True)
             time.sleep(delay)
+        t0 = time.time()
         resp = http_requests.post(
             url,
             headers={"Authorization": f"Bearer {key}",
@@ -191,9 +192,12 @@ def _call_provider(messages: list, model_entry: dict, groq_key: str,
             },
             timeout=30,
         )
+        elapsed = time.time() - t0
         if resp.status_code == 429 and i < len(delays) - 1:
             continue
         resp.raise_for_status()
+        print(f"[rewoo:api] provider={model_entry['provider']} model={model_entry['id']} "
+              f"status={resp.status_code} duration={elapsed:.1f}s", flush=True)
         content = resp.json()["choices"][0]["message"].get("content") or ""
         return _THINK_RE.sub("", content).strip()
     return ""
@@ -206,8 +210,8 @@ def _default_llm_with_providers(messages: list, groq_key: str, openrouter_key: s
         try:
             return _call_provider(messages, model_entry, groq_key, openrouter_key, max_tokens)
         except Exception as e:
-            print(f"[rewoo] {model_entry['id']} failed: {e} — trying next", flush=True)
-    print("[rewoo] all models failed", flush=True)
+            print(f"[rewoo:api] {model_entry['id']} failed: {e} — trying next", flush=True)
+    print("[rewoo:api] all models failed", flush=True)
     return ""
 
 
@@ -240,6 +244,12 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
     print(f"[rewoo] alert={alert_name} service={service} mock={_mock_mode}", flush=True)
 
     # ── Phase 1: Planner ──────────────────────────────────────────────────────
+    if _mock_mode:
+        print(f"[rewoo:planner] mock=True scenario={_mock_scenario}", flush=True)
+    else:
+        first = _active[0] if _active else {}
+        print(f"[rewoo:planner] calling model={first.get('id','?')} provider={first.get('provider','?')}", flush=True)
+
     try:
         plan_text = _call(
             [{"role": "user",
@@ -248,15 +258,17 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
             max_tokens=256,
         )
     except Exception as e:
-        print(f"[rewoo] planner error: {e}", flush=True)
+        print(f"[rewoo:planner] error: {e}", flush=True)
         plan_text = ""
 
+    print(f"[rewoo:planner] raw={plan_text[:300]!r}", flush=True)
     plan = _parse_plan(plan_text, alert)
     print(f"[rewoo] plan={[(t, a) for t, a in plan]}", flush=True)
 
     # ── Phase 2: Worker ───────────────────────────────────────────────────────
     rewoo_steps = []
     for i, (tool_name, args) in enumerate(plan, 1):
+        print(f"[rewoo:worker] E{i} action={tool_name} args={args}", flush=True)
         try:
             raw = call_tool_fn(tool_name, args)
             if len(raw) > OBS_LIMIT:
@@ -267,7 +279,7 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
         except Exception as e:
             obs = f"[tool error: {e}]"
         rewoo_steps.append({"action": f"{tool_name}({args})", "observation": obs})
-        print(f"[rewoo] E{i} {tool_name} obs={obs[:200]}", flush=True)
+        print(f"[rewoo:worker] E{i} obs={obs[:200]}", flush=True)
 
     # ── Phase 3: Solver ───────────────────────────────────────────────────────
     if not _mock_mode:
@@ -281,6 +293,12 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
         evidence_lines.append(f"memory: {memory_ctx}")
     evidence_block = "\n".join(evidence_lines)
 
+    if _mock_mode:
+        print(f"[rewoo:solver] mock=True scenario={_mock_scenario}", flush=True)
+    else:
+        first = _active[0] if _active else {}
+        print(f"[rewoo:solver] calling model={first.get('id','?')} provider={first.get('provider','?')}", flush=True)
+
     try:
         solver_text = _call(
             [{"role": "user",
@@ -289,9 +307,10 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
             max_tokens=512,
         )
     except Exception as e:
-        print(f"[rewoo] solver error: {e}", flush=True)
+        print(f"[rewoo:solver] error: {e}", flush=True)
         solver_text = ""
 
+    print(f"[rewoo:solver] raw={solver_text[:300]!r}", flush=True)
     diagnosis = _parse_solver(solver_text)
     if diagnosis is None:
         print("[rewoo] solver parse failed — LOW confidence fallback", flush=True)
