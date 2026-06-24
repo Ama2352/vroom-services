@@ -90,6 +90,26 @@ def _extract_evidence(steps: list) -> str:
     return "\n\n".join(sections)
 
 
+def _pod_health(pod_obs: str) -> tuple[bool, str]:
+    """Parse READY column as M/N. Returns (all_healthy, summary). No status-string enumeration."""
+    if pod_obs.startswith("[tool"):
+        return False, "pod check failed"
+    rows = [l for l in pod_obs.splitlines()[1:] if l.strip()]
+    if not rows:
+        return False, "no pods found"
+    unhealthy = []
+    for row in rows:
+        parts = row.split()
+        if len(parts) >= 3:
+            ready = parts[1]
+            m, sep, n = ready.partition("/")
+            if sep and m != n:
+                unhealthy.append(f"{parts[0]} {ready} {parts[2]}")
+    if unhealthy:
+        return False, "unhealthy: " + "; ".join(unhealthy)
+    return True, f"all {len(rows)} pod(s) healthy"
+
+
 def _suggested_command(rem: dict) -> str:
     if not rem:
         return ""
@@ -333,9 +353,23 @@ def remediate():
     alert     = pending["alert"]
     rem       = diagnosis.get("remediation")
 
+    # Extract context once — used in both the response and reflection
+    root_cause = diagnosis.get("root_cause", "")
+    confidence = diagnosis.get("confidence", "LOW")
+    steps      = diagnosis.get("rewoo_steps", [])
+    evidence   = _extract_evidence(steps)
+    cmd        = _suggested_command(rem) if rem else ""
+
     if not approved or not rem:
-        return jsonify({"outcome": "skipped", "stdout": "",
-                        "interpretation": "Operator declined or no remediation proposed."})
+        return jsonify({
+            "outcome":             "skipped",
+            "stdout":              "",
+            "root_cause":          root_cause,
+            "confidence":          confidence,
+            "evidence_snippet":    evidence,
+            "suggested_command":   cmd,
+            "post_health_summary": "n/a",
+        })
 
     headers  = {"Authorization": f"Bearer {EXECUTOR_TOKEN}",
                 "Content-Type": "application/json"}
@@ -353,55 +387,54 @@ def remediate():
              else f"[executor error: HTTP {r.status_code}]"
 
     if r.status_code != 200:
-        outcome = "escalated"
+        outcome             = "escalated"
+        post_health_summary = "n/a"
     elif tool == "restart_deployment":
-        # restart cmd ran but pod may still crashloop (e.g. config error) — verify after 35s
         time.sleep(35)
         pod_obs = call_tool("get_pods", {
             "namespace":      args.get("namespace", ""),
             "label_selector": f"app={args.get('deployment', '')}",
         })
-        data_lines = [l for l in pod_obs.splitlines()[1:] if l.strip()]
-        _bad = ("CrashLoopBackOff", "Error", "OOMKilled", "ImagePullBackOff",
-                "Pending", "Init:", "Terminating")
-        unhealthy = (
-            pod_obs.startswith("[tool")
-            or not data_lines
-            or any(s in line for line in data_lines for s in _bad)
-            or any("Running" in line and "0/" in line for line in data_lines)
-        )
-        outcome = "attempted" if unhealthy else "resolved"
-        print(f"[remediate] post-restart check outcome={outcome}", flush=True)
+        all_healthy, post_health_summary = _pod_health(pod_obs)
+        outcome = "resolved" if all_healthy else "attempted"
+        print(f"[remediate] post-restart: {post_health_summary} → {outcome}", flush=True)
     else:
-        outcome = "resolved"
+        outcome             = "resolved"
+        post_health_summary = "n/a"
 
     store_incident(rdb, {
         "alert_name":          alert["alert_name"],
         "service":             alert["service"],
         "namespace":           alert["namespace"],
         "symptoms":            alert["bundle"],
-        "investigation_steps": diagnosis.get("rewoo_steps", []),
-        "root_cause":          diagnosis["root_cause"],
+        "investigation_steps": steps,
+        "root_cause":          root_cause,
         "remediation_tool":    rem["tool"],
         "remediation_args":    rem.get("args", {}),
         "outcome":             outcome,
     })
 
     if outcome == "resolved":
-        cmd = _suggested_command(rem)
         threading.Thread(
             target=_reflect_and_store,
             args=(rdb, {
                 "alert_name":       alert["alert_name"],
                 "service":          alert["service"],
-                "root_cause":       diagnosis["root_cause"],
+                "root_cause":       root_cause,
                 "remediation_tool": rem["tool"],
             }, cmd),
             daemon=True,
         ).start()
 
-    return jsonify({"outcome": outcome, "stdout": stdout,
-                    "interpretation": stdout[:200]})
+    return jsonify({
+        "outcome":             outcome,
+        "stdout":              stdout,
+        "root_cause":          root_cause,
+        "confidence":          confidence,
+        "evidence_snippet":    evidence,
+        "suggested_command":   cmd,
+        "post_health_summary": post_health_summary,
+    })
 
 
 if __name__ == "__main__":
