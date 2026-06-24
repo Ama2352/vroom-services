@@ -153,3 +153,26 @@ def test_loop_tool_error_does_not_crash_loop():
     result = rewoo_loop.run_rewoo_loop(ALERT, failing_tool, "key", _llm=llm)
     assert result["rewoo_steps"][0]["observation"].startswith("[tool error:")
     assert result["confidence"] == "LOW"
+
+
+# ── _build_solver_prompt ───────────────────────────────────────────────────────
+
+def test_solver_prompt_contains_three_steps():
+    prompt = rewoo_loop._build_solver_prompt(
+        "HighErrorRate", "ride-service", "vroom-dev",
+        "rps=0", "#E1 (get_pods): NAME READY STATUS\nride-service 0/1 CrashLoopBackOff"
+    )
+    assert "STEP 1" in prompt
+    assert "STEP 2" in prompt
+    assert "STEP 3" in prompt
+    assert "OBSERVE" in prompt
+    assert "ROOT CAUSE" in prompt
+
+
+def test_solver_prompt_criteria_cover_config_error():
+    prompt = rewoo_loop._build_solver_prompt(
+        "HighErrorRate", "ride-service", "vroom-dev", "rps=0", ""
+    )
+    assert "config error" in prompt.lower()
+    assert "none" in prompt
+    assert "zero pods" in prompt.lower()

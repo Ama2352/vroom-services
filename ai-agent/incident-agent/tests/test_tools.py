@@ -47,4 +47,4 @@ def test_executor_http_error_returns_error_string():
 def test_get_traces_uses_short_timeout():
     with patch("requests.get", return_value=_ok("trace abc")) as mock_get:
         tools.call_tool("get_traces", {"service": "ride-service", "error_only": "true"})
-    assert mock_get.call_args[1]["timeout"] == 5
+    assert mock_get.call_args[1]["timeout"] == 15

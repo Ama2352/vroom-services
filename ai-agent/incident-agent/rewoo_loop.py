@@ -151,19 +151,23 @@ Evidence bundle: {bundle}
 Investigation findings:
 {evidence_block}
 
-Based on ALL evidence above, output ONLY a valid JSON object — no markdown, no explanation:
+Work through the evidence in three steps:
 
-If pods are missing (scaled to 0):
-{{"root_cause":"...","confidence":"HIGH","remediation_tool":"scale_deployment","remediation_args":{{"deployment":"{service}","namespace":"{namespace}"}},"justification":"..."}}
+STEP 1 — OBSERVE: For each tool result in "Investigation findings" above, state what you found:
+- get_pods: how many pods exist? What is the READY ratio (M/N)? What is the STATUS column value?
+- get_logs: what error messages appear? (DNS lookup failure? connection refused? OOM? panic? missing env var?)
+- get_events: what Kubernetes events occurred?
+- get_traces / get_metrics: anything notable?
 
-If pods exist but are crash-looping or OOMKilled:
-{{"root_cause":"...","confidence":"HIGH","remediation_tool":"restart_deployment","remediation_args":{{"deployment":"{service}","namespace":"{namespace}"}},"justification":"..."}}
+STEP 2 — ROOT CAUSE: Based only on your Step 1 observations, state the root cause in one sentence.
 
-If the failure requires manual intervention (dependency down, data corruption, config error):
-{{"root_cause":"...","confidence":"MEDIUM","remediation_tool":"none","remediation_args":{{}},"justification":"..."}}
+STEP 3 — REMEDIATION: Choose based on your Step 2 root cause:
+- scale_deployment: ONLY if get_pods returned zero pods (empty result or all Terminated/Evicted)
+- restart_deployment: ONLY if pods exist AND logs/events show a transient error (OOM, random crash/panic) — NOT a config error, NOT a dependency unreachable error
+- none: if logs show a config error (bad hostname, wrong env var, missing credentials), a dependency is unreachable, data corruption, or you are not confident
 
-If evidence is insufficient to conclude:
-{{"root_cause":"unable to determine from available evidence","confidence":"LOW","remediation_tool":"none","remediation_args":{{}},"justification":"..."}}"""
+Output ONLY a valid JSON object — no markdown, no Step 1/2/3 text, no explanation:
+{{"root_cause":"...","confidence":"HIGH|MEDIUM|LOW","remediation_tool":"scale_deployment|restart_deployment|none","remediation_args":{{"deployment":"{service}","namespace":"{namespace}"}},"justification":"..."}}"""
 
 
 def _call_provider(messages: list, model_entry: dict, groq_key: str,

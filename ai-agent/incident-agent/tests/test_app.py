@@ -124,7 +124,12 @@ def test_remediate_approved_stores_incident_memory(client):
     mock_exec_resp.status_code = 200
     mock_exec_resp.json.return_value = {"stdout": "deployment.apps/dispatch-service restarted", "returncode": 0}
 
-    with patch("requests.post", return_value=mock_exec_resp):
+    # Mock the post-restart health check: return a healthy pod (1/1 Running)
+    _healthy_pods = "NAME                  READY   STATUS    RESTARTS   AGE\ndispatch-service-abc  1/1     Running   0          5s"
+
+    with patch("requests.post", return_value=mock_exec_resp), \
+         patch("app.time.sleep"), \
+         patch("app.call_tool", return_value=_healthy_pods):
         r = client.post("/remediate",
             data=json.dumps({"execution_id": inv["execution_id"], "approved": True}),
             content_type="application/json")
