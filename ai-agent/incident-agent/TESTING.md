@@ -23,6 +23,36 @@ kubectl port-forward -n monitoring svc/incident-agent 5002:5002 &
 
 ---
 
+## Reset Before Each Test Run
+
+Run these before starting any scenario to ensure a clean slate:
+
+```bash
+# 1. Clear episodic memory (incidents stored from previous runs)
+curl -s -X POST http://localhost:5002/admin/reset-incidents | python3 -m json.tool
+# Expected: {"cleared": N}
+
+# 2. Re-seed runbook from vroom-ops.md (restores bootstrap entries, removes learned)
+curl -s -X POST http://localhost:5002/admin/reseed | python3 -m json.tool
+# Expected: {"seeded": 5}
+
+# 3. Re-enable mock mode (resets after every pod restart / image deploy)
+kubectl set env deployment/incident-agent -n monitoring \
+  LLM_MOCK=true \
+  LLM_MOCK_SCENARIO=scale_to_zero
+
+# 4. Restart port-forward if the pod restarted
+pkill -f "port-forward.*5002" 2>/dev/null; sleep 2
+kubectl port-forward -n monitoring svc/incident-agent 5002:5002 &
+sleep 2
+
+# 5. Restore cluster state (in case a previous scenario left failures injected)
+kubectl scale deployment/ride-service -n vroom-dev --replicas=1
+kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR-
+```
+
+---
+
 ## Flow 1 — Mock Mode (recommended for dev iteration)
 
 No API key required. Full pipeline runs: n8n → agent → kubectl tools → memory → Slack.
