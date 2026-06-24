@@ -40,10 +40,18 @@ def call_tool(tool_name: str, args: dict) -> str:
     stdout = data.get("stdout") or data.get("error") or "[no output]"
 
     if tool_name == "get_logs":
+        HEALTH_PATTERNS = ("/healthz", "/readyz", "/metrics", "/health")
+        ERROR_KEYWORDS  = ("error", "fail", "panic", "fatal", "exception", "crash", "exit code")
         filtered = [
             line for line in stdout.splitlines()
-            if not any(p in line for p in ("/healthz", "/readyz", "/metrics", "/health"))
+            if not any(p in line for p in HEALTH_PATTERNS)
         ]
+        if not filtered:
+            # Crash logs always contain an error keyword — fall back before giving up
+            filtered = [
+                line for line in stdout.splitlines()
+                if any(k in line.lower() for k in ERROR_KEYWORDS)
+            ]
         stdout = "\n".join(filtered) or "[no output after filtering health checks]"
 
     return stdout

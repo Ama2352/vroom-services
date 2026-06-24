@@ -67,7 +67,8 @@ def _format_memory_context(mem_text: str, runbook_hits: list) -> str:
 
 def _extract_evidence(steps: list) -> str:
     priority = ["get_traces", "get_events", "get_logs", "describe_pod", "get_pods"]
-    _skip    = {"[no output]", "No errored traces found in last 15 minutes."}
+    _skip    = {"[no output]", "No errored traces found in last 15 minutes.",
+                "[no output after filtering health checks]"}
     by_tool  = {}
     for step in steps:
         obs = step.get("observation", "")
@@ -76,11 +77,13 @@ def _extract_evidence(steps: list) -> str:
         for tool in priority:
             if step["action"].startswith(tool) and tool not in by_tool:
                 by_tool[tool] = obs
+    sections = []
     for tool in priority:
         if tool in by_tool:
-            lines = [l for l in by_tool[tool].splitlines() if l.strip()][:8]
-            return f"[{tool}]\n" + "\n".join(lines)
-    return ""
+            lines = [l for l in by_tool[tool].splitlines() if l.strip()][:4]
+            if lines:
+                sections.append(f"[{tool}]\n" + "\n".join(lines))
+    return "\n\n".join(sections)
 
 
 def _suggested_command(rem: dict) -> str:
