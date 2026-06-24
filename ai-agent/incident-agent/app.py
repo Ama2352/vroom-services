@@ -210,6 +210,16 @@ def admin_runbook():
     return app.response_class("\n".join(lines), mimetype="text/plain")
 
 
+@app.route("/admin/reset-incidents", methods=["POST"])
+def admin_reset_incidents():
+    keys = rdb.smembers("incidents:index")
+    for key in keys:
+        key_str = key.decode() if isinstance(key, bytes) else key
+        rdb.delete(f"incident:{key_str}")
+    rdb.delete("incidents:index")
+    return jsonify({"cleared": len(keys)})
+
+
 @app.route("/admin/reseed", methods=["POST"])
 def admin_reseed():
     keys = rdb.smembers("runbook:index")
@@ -246,6 +256,7 @@ def investigate():
     alert_name = data.get("alert_name", "UnknownAlert")
     service    = data.get("service", "unknown")
     namespace  = data.get("namespace", "vroom-dev")
+    debug      = request.args.get("debug", "").lower() == "true"
 
     seed_if_empty(rdb)
 
@@ -292,6 +303,11 @@ def investigate():
         "evidence_snippet":  evidence,
         "suggested_command": cmd,
         "memory_hits":       {"incidents": incident_hits, "runbook": len(runbook_hits)},
+        **({"debug": {
+            "bundle":         bundle,
+            "memory_context": memory_ctx or "(none)",
+            "rewoo_steps_detail": steps,
+        }} if debug else {}),
     })
 
 
