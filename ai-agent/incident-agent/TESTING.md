@@ -37,9 +37,14 @@ curl -s -X POST http://localhost:5002/admin/reseed | python3 -m json.tool
 # Expected: {"seeded": 5}
 
 # 3. Re-enable mock mode (resets after every pod restart / image deploy)
+#    For Scenario A (scale to zero):
 kubectl set env deployment/incident-agent -n monitoring \
   LLM_MOCK=true \
   LLM_MOCK_SCENARIO=scale_to_zero
+#    For Scenario B (crashloop) — change scenario BEFORE injecting failure:
+# kubectl set env deployment/incident-agent -n monitoring \
+#   LLM_MOCK=true \
+#   LLM_MOCK_SCENARIO=crashloop
 
 # 4. Restart port-forward if the pod restarted
 pkill -f "port-forward.*5002" 2>/dev/null; sleep 2
@@ -48,6 +53,7 @@ sleep 2
 
 # 5. Restore cluster state (in case a previous scenario left failures injected)
 kubectl scale deployment/ride-service -n vroom-dev --replicas=1
+# Note: trailing '-' is kubectl syntax to REMOVE the env var (unset REDIS_ADDR)
 kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR-
 ```
 
