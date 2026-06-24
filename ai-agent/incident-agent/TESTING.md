@@ -51,8 +51,13 @@ kubectl get pods -n vroom-dev -l app=ride-service
 
 **Scenario B — Crashloop:**
 ```bash
-kubectl set env deployment/ride-service -n vroom-dev REDIS_URL=redis://bad-host:6379
-# Wait ~30s for container to CrashLoopBackOff
+# Switch agent scenario FIRST
+kubectl set env deployment/incident-agent -n monitoring LLM_MOCK_SCENARIO=crashloop
+
+# Inject failure
+kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR=bad-host:6379
+# ride service pings Redis at startup (main.go:72) — exits immediately on failure
+# Wait ~30s for CrashLoopBackOff
 kubectl get pods -n vroom-dev -l app=ride-service
 ```
 
@@ -138,7 +143,7 @@ curl -s -X POST http://localhost:5002/investigate \
 kubectl scale deployment/ride-service -n vroom-dev --replicas=1
 
 # Restore crashloop scenario:
-kubectl set env deployment/ride-service -n vroom-dev REDIS_URL-
+kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR-
 ```
 
 ---
