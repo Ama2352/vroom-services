@@ -133,3 +133,62 @@ def test_remediate_approved_stores_incident_memory(client):
     assert r.get_json()["outcome"] == "resolved"
     # Incident should now be in memory
     assert _FAKE_REDIS.scard("incidents:index") > 0
+
+
+def test_admin_runbook_renders_markdown(client):
+    import memory as mem_mod
+    _FAKE_REDIS.flushall()
+    mem_mod.store_runbook_entry(_FAKE_REDIS, {
+        "title":       "Deployment scaled to zero",
+        "service":     "ride-service",
+        "symptom":     "No pods running",
+        "root_cause":  "replicas=0",
+        "fix_command": "kubectl scale deployment/ride-service -n vroom-dev --replicas=1",
+        "source":      "bootstrap",
+    })
+    r = client.get("/admin/runbook")
+    assert r.status_code == 200
+    assert r.content_type.startswith("text/plain")
+    body = r.data.decode()
+    assert "Deployment scaled to zero" in body
+    assert "bootstrap" in body
+
+
+def test_admin_reseed_clears_and_reloads(client):
+    import memory as mem_mod
+    _FAKE_REDIS.flushall()
+    mem_mod.store_runbook_entry(_FAKE_REDIS, {
+        "title": "Learned entry", "service": "ride-service",
+        "symptom": "test", "root_cause": "test",
+        "fix_command": "kubectl test", "source": "learned",
+    })
+    assert _FAKE_REDIS.scard(mem_mod.RUNBOOK_INDEX) == 1
+
+    with patch("app.seed_if_empty", return_value=3) as mock_seed:
+        r = client.post("/admin/reseed")
+    assert r.status_code == 200
+    assert r.get_json()["seeded"] == 3
+    mock_seed.assert_called_once()
+
+
+def test_admin_models_hot_swap(client):
+    new_models = [
+        {"id": "llama-3.3-70b-versatile", "provider": "groq"},
+        {"id": "llama-3.1-8b-instant",    "provider": "groq"},
+    ]
+    r = client.post("/admin/models",
+        data=json.dumps(new_models),
+        content_type="application/json")
+    assert r.status_code == 200
+    assert r.get_json()["models"] == new_models
+
+    r2 = client.get("/admin/models")
+    assert r2.get_json()["models"] == new_models
+
+
+def test_admin_models_rejects_string_format(client):
+    r = client.post("/admin/models",
+        data=json.dumps(["meta-llama/llama-3.3-70b-instruct:free"]),
+        content_type="application/json")
+    assert r.status_code == 400
+    assert "provider" in r.get_json()["error"]

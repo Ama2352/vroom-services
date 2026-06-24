@@ -1,16 +1,58 @@
 import re, json, os, time
 import requests as http_requests
 
+GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
 DEFAULT_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-4-31b-it:free",
-    "nousresearch/hermes-3-llama-3.1-405b:free",
+    {"id": "llama-3.3-70b-versatile",                   "provider": "groq"},
+    {"id": "llama-3.1-8b-instant",                      "provider": "groq"},
+    {"id": "meta-llama/llama-3.3-70b-instruct:free",    "provider": "openrouter"},
 ]
 
-OBS_LIMIT      = 800
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-_THINK_RE      = re.compile(r'<think>.*?</think>|</think>', re.DOTALL)
-_PLAN_RE       = re.compile(r'#E(\d+)\s*=\s*(\w+)\(([^)]*)\)', re.MULTILINE)
+OBS_LIMIT = 800
+_THINK_RE = re.compile(r'<think>.*?</think>|</think>', re.DOTALL)
+_PLAN_RE  = re.compile(r'#E(\d+)\s*=\s*(\w+)\(([^)]*)\)', re.MULTILINE)
+
+_MOCK_PLANS = {
+    "scale_to_zero": (
+        '#E1 = get_pods(namespace="{ns}", label_selector="app={svc}")\n'
+        '#E2 = get_events(namespace="{ns}", service="{svc}")'
+    ),
+    "crashloop": (
+        '#E1 = get_pods(namespace="{ns}", label_selector="app={svc}")\n'
+        '#E2 = get_logs(service="{svc}", namespace="{ns}", tail=50)'
+    ),
+}
+_MOCK_SOLVERS = {
+    "scale_to_zero": {
+        "root_cause":       "mock: deployment scaled to 0",
+        "confidence":       "HIGH",
+        "remediation_tool": "scale_deployment",
+        "remediation_args": {},   # filled in at call time
+        "justification":    "mock mode — scale_to_zero scenario",
+    },
+    "crashloop": {
+        "root_cause":       "mock: container crash loop",
+        "confidence":       "HIGH",
+        "remediation_tool": "restart_deployment",
+        "remediation_args": {},
+        "justification":    "mock mode — crashloop scenario",
+    },
+}
+
+
+def _mock_llm(messages: list, alert_name: str, service: str,
+              namespace: str, scenario: str) -> str:
+    """Returns canned Planner or Solver response. Detects call type from prompt content."""
+    content = messages[0]["content"] if messages else ""
+    if "investigation planner" in content:
+        template = _MOCK_PLANS.get(scenario, _MOCK_PLANS["scale_to_zero"])
+        return template.format(ns=namespace, svc=service)
+    else:
+        base = dict(_MOCK_SOLVERS.get(scenario, _MOCK_SOLVERS["scale_to_zero"]))
+        base["remediation_args"] = {"deployment": service, "namespace": namespace}
+        return json.dumps(base)
 
 
 def _parse_plan(text: str, alert: dict) -> list:
@@ -124,25 +166,29 @@ If evidence is insufficient to conclude:
 {{"root_cause":"unable to determine from available evidence","confidence":"LOW","remediation_tool":"none","remediation_args":{{}},"justification":"..."}}"""
 
 
-def _default_llm(messages: list, api_key: str, models: list,
-                 max_tokens: int = 512) -> str:
-    """Single LLM call returning text. Retries once on 429."""
-    delays  = [0, 10]
-    payload = {
-        "models":      models,
-        "messages":    messages,
-        "temperature": 0.1,
-        "max_tokens":  max_tokens,
-    }
+def _call_provider(messages: list, model_entry: dict, groq_key: str,
+                   openrouter_key: str, max_tokens: int = 512) -> str:
+    """Single LLM call to one provider+model. Retries once on 429."""
+    if model_entry["provider"] == "groq":
+        url, key = GROQ_URL, groq_key
+    else:
+        url, key = OPENROUTER_URL, openrouter_key
+
+    delays = [0, 10]
     for i, delay in enumerate(delays):
         if delay:
-            print(f"[rewoo] 429 — retrying in {delay}s", flush=True)
+            print(f"[rewoo] 429 on {model_entry['id']} — retrying in {delay}s", flush=True)
             time.sleep(delay)
         resp = http_requests.post(
-            OPENROUTER_URL,
-            headers={"Authorization": f"Bearer {api_key}",
+            url,
+            headers={"Authorization": f"Bearer {key}",
                      "Content-Type": "application/json"},
-            json=payload,
+            json={
+                "model":       model_entry["id"],
+                "messages":    messages,
+                "temperature": 0.1,
+                "max_tokens":  max_tokens,
+            },
             timeout=30,
         )
         if resp.status_code == 429 and i < len(delays) - 1:
@@ -153,14 +199,31 @@ def _default_llm(messages: list, api_key: str, models: list,
     return ""
 
 
+def _default_llm_with_providers(messages: list, groq_key: str, openrouter_key: str,
+                                  models: list, max_tokens: int = 512) -> str:
+    """Try each model in order until one succeeds."""
+    for model_entry in models:
+        try:
+            return _call_provider(messages, model_entry, groq_key, openrouter_key, max_tokens)
+        except Exception as e:
+            print(f"[rewoo] {model_entry['id']} failed: {e} — trying next", flush=True)
+    print("[rewoo] all models failed", flush=True)
+    return ""
+
+
 def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
-                   *, models: list = None, _llm=None) -> dict:
+                   *, models: list = None, _llm=None, groq_key: str = "") -> dict:
     """ReWOO loop: Planner → Worker → Solver.
 
     alert keys: alert_name, service, namespace, bundle, memory_context
+    api_key:    OpenRouter API key (positional, kept for backward compat)
+    groq_key:   Groq API key (keyword-only, defaults to empty string)
     Returns:    root_cause, confidence, remediation (dict|None), rewoo_steps (list)
     """
-    _active    = models or DEFAULT_MODELS
+    _mock_mode     = os.environ.get("LLM_MOCK", "").lower() == "true"
+    _mock_scenario = os.environ.get("LLM_MOCK_SCENARIO", "scale_to_zero")
+    _active        = models or DEFAULT_MODELS
+
     alert_name = alert.get("alert_name", "").strip()
     service    = alert.get("service",    "").strip()
     namespace  = alert.get("namespace",  "").strip()
@@ -170,9 +233,11 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
     def _call(messages, max_tokens=512):
         if _llm:
             return _llm(messages, api_key)
-        return _default_llm(messages, api_key, _active, max_tokens)
+        if _mock_mode:
+            return _mock_llm(messages, alert_name, service, namespace, _mock_scenario)
+        return _default_llm_with_providers(messages, groq_key, api_key, _active, max_tokens)
 
-    print(f"[rewoo] alert={alert_name} service={service} models={_active}", flush=True)
+    print(f"[rewoo] alert={alert_name} service={service} mock={_mock_mode}", flush=True)
 
     # ── Phase 1: Planner ──────────────────────────────────────────────────────
     try:
@@ -205,6 +270,9 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
         print(f"[rewoo] E{i} {tool_name} obs={obs[:200]}", flush=True)
 
     # ── Phase 3: Solver ───────────────────────────────────────────────────────
+    if not _mock_mode:
+        time.sleep(2)  # throttle: spread 3 calls over ~6s, stays under 30 RPM
+
     evidence_lines = [
         f"#E{i} ({step['action'].split('(')[0]}): {step['observation']}"
         for i, step in enumerate(rewoo_steps, 1)

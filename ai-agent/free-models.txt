@@ -31,3 +31,5 @@ Command to hot swap free models
 curl -X POST http://10.43.230.5:5002/admin/models \
   -H "Content-Type: application/json" \
   -d '["nousresearch/hermes-3-llama-3.1-405b:free","openai/gpt-oss-120b:free","cognitivecomputations/dolphin-mistral-24b-venice-edition:free"]'
+
+curl -X GET http://10.43.230.5:5002/admin/runbook

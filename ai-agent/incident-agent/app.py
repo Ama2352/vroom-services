@@ -7,7 +7,7 @@ from memory import (store_incident, search_memory as memory_search,
                     connect as redis_connect,
                     store_runbook_entry, get_runbook_entries, search_runbook)
 from collector import collect_bundle
-from rewoo_loop import run_rewoo_loop, DEFAULT_MODELS
+from rewoo_loop import run_rewoo_loop, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from tools import call_tool
 from seed import seed_if_empty
 
@@ -15,6 +15,7 @@ app = Flask(__name__)
 
 REDIS_URL      = os.environ.get("REDIS_URL", "redis://redis.platform.svc.cluster.local:6379")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+GROQ_KEY       = os.environ.get("GROQ_API_KEY", "")
 EXECUTOR_URL   = os.environ.get("KUBECTL_EXECUTOR_URL",
                                 "http://kubectl-executor.monitoring.svc.cluster.local:5001")
 EXECUTOR_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
@@ -28,7 +29,12 @@ _MODELS_KEY = "config:models"
 def _load_models(rdb) -> list:
     raw = rdb.get(_MODELS_KEY)
     if raw:
-        return json.loads(raw)
+        data = json.loads(raw)
+        # Migrate: old string-format entries are invalid; clear and reinitialize.
+        if data and isinstance(data[0], str):
+            rdb.delete(_MODELS_KEY)
+        else:
+            return data
     rdb.set(_MODELS_KEY, json.dumps(DEFAULT_MODELS))
     return list(DEFAULT_MODELS)
 
@@ -98,15 +104,38 @@ def _dispatch_tool(tool_name: str, args: dict) -> str:
 
 
 def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
-    if not OPENROUTER_KEY:
+    _mock_mode = os.environ.get("LLM_MOCK", "").lower() == "true"
+    if _mock_mode:
+        scenario = os.environ.get("LLM_MOCK_SCENARIO", "scale_to_zero")
+        entry = {
+            "title":       f"Mock: {incident['alert_name']} on {incident['service']}",
+            "service":     incident["service"],
+            "symptom":     f"Mock scenario: {scenario}",
+            "root_cause":  incident["root_cause"],
+            "fix_command": fix_command or "",
+            "source":      "learned",
+        }
+        store_runbook_entry(rdb, entry)
+        print(f"[reflect] mock stored: {entry['title']}", flush=True)
         return
+
+    if GROQ_KEY:
+        url, key, model_id = GROQ_URL, GROQ_KEY, "llama-3.3-70b-versatile"
+    elif OPENROUTER_KEY:
+        first    = _current_models[0] if _current_models else {}
+        model_id = first.get("id", "meta-llama/llama-3.3-70b-instruct:free") \
+                   if isinstance(first, dict) else str(first)
+        url, key = OPENROUTER_URL, OPENROUTER_KEY
+    else:
+        return
+
     try:
         resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_KEY}",
+            url,
+            headers={"Authorization": f"Bearer {key}",
                      "Content-Type": "application/json"},
             json={
-                "model":       _current_models[0],
+                "model":       model_id,
                 "max_tokens":  200,
                 "temperature": 0.1,
                 "messages": [
@@ -201,8 +230,11 @@ def get_models():
 def set_models():
     global _current_models
     data = request.get_json(silent=True)
-    if not isinstance(data, list) or not data or not all(isinstance(m, str) for m in data):
-        return jsonify({"error": "body must be a non-empty JSON array of strings"}), 400
+    if not isinstance(data, list) or not data:
+        return jsonify({"error": "body must be a non-empty JSON array"}), 400
+    for m in data:
+        if not isinstance(m, dict) or "id" not in m or "provider" not in m:
+            return jsonify({"error": 'each model must be {"id": "...", "provider": "groq"|"openrouter"}'}), 400
     _current_models[:] = data
     rdb.set(_MODELS_KEY, json.dumps(data))
     return jsonify({"models": _current_models})
@@ -233,7 +265,7 @@ def investigate():
     }
 
     diagnosis = run_rewoo_loop(alert, _dispatch_tool, OPENROUTER_KEY,
-                               models=_current_models)
+                               models=_current_models, groq_key=GROQ_KEY)
 
     eid = str(uuid.uuid4())
     rdb.set(f"pending:{eid}", json.dumps({"alert": alert, "diagnosis": diagnosis}),
