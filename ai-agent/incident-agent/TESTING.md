@@ -9,8 +9,7 @@ Use Mock for iterating on workflow/logic. Use Real Groq only to validate LLM rea
 
 | What | Value |
 |---|---|
-| Agent in-cluster URL | `http://10.43.230.5:5002` (ClusterIP — use port-forward below) |
-| Agent NodePort | `http://192.168.242.10:30052` |
+| Agent URL (port-forward) | `http://localhost:5002` |
 | n8n URL | `http://192.168.25.139:30078/` |
 | Toggle mock mode | `kubectl set env deployment/incident-agent -n monitoring LLM_MOCK=true` |
 | Toggle real mode | `kubectl set env deployment/incident-agent -n monitoring LLM_MOCK=false` |
@@ -60,13 +59,13 @@ kubectl get pods -n vroom-dev -l app=ride-service
 ### Step 3: Trigger the agent directly (bypass n8n)
 
 ```bash
-curl -s -X POST http://192.168.242.10:30052/investigate \
+curl -s -X POST http://localhost:5002/investigate \
   -H "Content-Type: application/json" \
   -d '{
     "alert_name": "HighErrorRate",
     "service":    "ride-service",
     "namespace":  "vroom-dev"
-  }' | python -m json.tool
+  }' | python3 -m json.tool
 ```
 
 Expected response:
@@ -90,9 +89,9 @@ EXEC_ID="<paste execution_id here>"
 ### Step 4: Approve remediation
 
 ```bash
-curl -s -X POST http://192.168.242.10:30052/remediate \
+curl -s -X POST http://localhost:5002/remediate \
   -H "Content-Type: application/json" \
-  -d "{\"execution_id\": \"$EXEC_ID\", \"approved\": true}" | python -m json.tool
+  -d "{\"execution_id\": \"$EXEC_ID\", \"approved\": true}" | python3 -m json.tool
 ```
 
 Expected: `"outcome": "resolved"`
@@ -102,23 +101,34 @@ Expected: `"outcome": "resolved"`
 After remediation, the mock reflection thread stores a learned runbook entry:
 
 ```bash
-curl -s http://192.168.242.10:30052/admin/runbook
+curl -s http://localhost:5002/admin/runbook
 ```
 
 Expected: markdown with a new `(learned)` entry for the incident.
 
-### Step 6: Run a second trigger — verify memory pre-fetch
+### Step 6: Verify memory was stored
+
+After Step 4 remediation, the reflect thread writes a learned runbook entry. Verify:
 
 ```bash
-curl -s -X POST http://192.168.242.10:30052/investigate \
-  -H "Content-Type: application/json" \
-  -d '{"alert_name":"HighErrorRate","service":"ride-service","namespace":"vroom-dev"}' \
-  | python -m json.tool
+# 1. Confirm learned entry exists in runbook
+curl -s http://localhost:5002/admin/runbook | grep -A5 "learned"
+
+# 2. Confirm memory search returns the stored incident
+curl -s "http://localhost:5002/memory/search?q=HighErrorRate+ride-service"
+
+# 3. Check logs for reflect confirmation line
+kubectl logs -n monitoring -l app=incident-agent --tail=30 | grep "reflect"
+# Expected: [reflect] mock stored: Mock: HighErrorRate on ride-service
 ```
 
-Check the logs to confirm memory context was injected into the Planner:
+Run a second trigger — the Planner now has memory context:
 ```bash
-kubectl logs -n monitoring -l app=incident-agent --tail=30 | grep -E "rewoo|memory|mock"
+curl -s -X POST http://localhost:5002/investigate \
+  -H "Content-Type: application/json" \
+  -d '{"alert_name":"HighErrorRate","service":"ride-service","namespace":"vroom-dev"}' \
+  | python3 -m json.tool
+# confidence should remain HIGH; memory_context was injected but mock LLM ignores it
 ```
 
 ### Step 7: Restore the cluster
@@ -148,7 +158,7 @@ Go to `http://192.168.25.139:30078/` → Workflows → find "Vroom Incident Resp
 kubectl scale deployment/ride-service -n vroom-dev --replicas=0
 
 # Then send alert to n8n webhook
-curl -s -X POST http://192.168.25.139:30078/webhook-test/vroom-alert \
+curl -s -X POST http://192.168.242.10:30078/webhook-test/vroom-alert \
   -H "Content-Type: application/json" \
   -d '{
     "alerts": [{
@@ -219,7 +229,7 @@ Expected log pattern:
 
 ```bash
 # Switch to faster Groq model
-curl -s -X POST http://192.168.242.10:30052/admin/models \
+curl -s -X POST http://localhost:5002/admin/models \
   -H "Content-Type: application/json" \
   -d '[
     {"id": "llama-3.1-8b-instant", "provider": "groq"},
@@ -227,7 +237,7 @@ curl -s -X POST http://192.168.242.10:30052/admin/models \
   ]'
 
 # Verify
-curl -s http://192.168.242.10:30052/admin/models
+curl -s http://localhost:5002/admin/models
 ```
 
 ---
@@ -246,16 +256,16 @@ kubectl exec -n platform deploy/redis -- redis-cli SCARD incidents:index
 kubectl exec -n platform deploy/redis -- redis-cli SCARD runbook:index
 
 # View runbook entries
-curl -s http://192.168.242.10:30052/admin/runbook
+curl -s http://localhost:5002/admin/runbook
 
 # Search memory
-curl -s "http://192.168.242.10:30052/memory/search?q=HighErrorRate+ride-service"
+curl -s "http://localhost:5002/memory/search?q=HighErrorRate+ride-service"
 
 # Reset runbook (clears learned + reseeds from vroom-ops.md)
-curl -s -X POST http://192.168.242.10:30052/admin/reseed
+curl -s -X POST http://localhost:5002/admin/reseed
 
 # Check current model config
-curl -s http://192.168.242.10:30052/admin/models | python -m json.tool
+curl -s http://localhost:5002/admin/models | python3 -m json.tool
 ```
 
 ---

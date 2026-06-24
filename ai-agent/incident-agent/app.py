@@ -255,6 +255,11 @@ def investigate():
     runbook_hits = search_runbook(rdb, query, top_k=3)
     memory_ctx   = _format_memory_context(mem_text, runbook_hits)
 
+    incident_hits = 0 if (not mem_text or mem_text == "no relevant memory found") \
+                    else len([l for l in mem_text.splitlines() if l.strip()])
+    print(f"[memory] pre-fetch: incidents={incident_hits} runbook={len(runbook_hits)} "
+          f"ctx_len={len(memory_ctx)}", flush=True)
+
     bundle = collect_bundle(service, namespace)
     alert  = {
         "alert_name":     alert_name,
@@ -286,6 +291,7 @@ def investigate():
         "remediation":       rem,
         "evidence_snippet":  evidence,
         "suggested_command": cmd,
+        "memory_hits":       {"incidents": incident_hits, "runbook": len(runbook_hits)},
     })
 
 
