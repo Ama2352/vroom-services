@@ -361,10 +361,16 @@ def remediate():
             "namespace":      args.get("namespace", ""),
             "label_selector": f"app={args.get('deployment', '')}",
         })
-        if pod_obs.startswith("[tool") or "CrashLoopBackOff" in pod_obs:
-            outcome = "attempted"
-        else:
-            outcome = "resolved"
+        data_lines = [l for l in pod_obs.splitlines()[1:] if l.strip()]
+        _bad = ("CrashLoopBackOff", "Error", "OOMKilled", "ImagePullBackOff",
+                "Pending", "Init:", "Terminating")
+        unhealthy = (
+            pod_obs.startswith("[tool")
+            or not data_lines
+            or any(s in line for line in data_lines for s in _bad)
+            or any("Running" in line and "0/" in line for line in data_lines)
+        )
+        outcome = "attempted" if unhealthy else "resolved"
         print(f"[remediate] post-restart check outcome={outcome}", flush=True)
     else:
         outcome = "resolved"

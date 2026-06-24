@@ -95,6 +95,20 @@ def tool_logs():
         return jsonify({"error": "Invalid service or namespace"}), 400
     if not _INT_RE.match(tail) or int(tail) > 500:
         return jsonify({"error": "Invalid tail (must be 1-500)"}), 400
+
+    # Prefer --previous logs from a crashlooping pod — those contain the actual crash reason
+    pods_body, _ = _run(["kubectl", "get", "pods", "-n", ns, "-l", f"app={service}", "--no-headers"])
+    for line in pods_body.get("stdout", "").splitlines():
+        if "CrashLoopBackOff" in line:
+            parts = line.split()
+            if parts and _POD_RE.match(parts[0]):
+                prev, prev_status = _run(
+                    ["kubectl", "logs", parts[0], "-n", ns, f"--tail={tail}", "--previous"]
+                )
+                if prev.get("stdout", "").strip():
+                    return jsonify(prev), prev_status
+                break
+
     body, status = _run(["kubectl", "logs", "-n", ns, "-l", f"app={service}", f"--tail={tail}"])
     return jsonify(body), status
 
@@ -147,17 +161,15 @@ def tool_traces():
     if not _auth(request):
         return jsonify({"error": "Unauthorized"}), 401
     service = request.args.get("service", "").strip()
-    error_only = request.args.get("error_only", "true").lower() == "true"
     if not _NS_RE.match(service):
         return jsonify({"error": "Invalid service"}), 400
     now = int(time.time())
-    tags = f"service.name={service}"
-    if error_only:
-        tags += " error=true"   # space-separated logfmt, not & (which corrupts the tags value)
+    # Tempo 1.7.x /api/search: only resource tag filtering is reliable;
+    # "error=true" span attribute is not indexed and causes non-200 responses.
     params = {
-        "tags": tags,
+        "tags":  f"service.name={service}",
         "start": f"{now - 900}000000000",
-        "end": f"{now}000000000",
+        "end":   f"{now}000000000",
         "limit": "5",
     }
     try:
