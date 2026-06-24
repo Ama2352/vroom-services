@@ -360,7 +360,14 @@ def remediate():
     evidence   = _extract_evidence(steps)
     cmd        = _suggested_command(rem) if rem else ""
 
+    alert_name_log = alert.get("alert_name", "?")
+    service_log    = alert.get("service", "?")
+    tool_log       = rem["tool"] if rem else "none"
+    print(f"[remediate] alert={alert_name_log} service={service_log} "
+          f"approved={approved} tool={tool_log}", flush=True)
+
     if not approved or not rem:
+        print(f"[remediate] no approved remediation → outcome=skipped", flush=True)
         return jsonify({
             "outcome":             "skipped",
             "stdout":              "",
@@ -381,15 +388,18 @@ def remediate():
     else:
         endpoint = "/tools/restart"
 
+    print(f"[remediate] dispatching: {cmd or tool + ' ' + str(args)}", flush=True)
     r      = requests.post(f"{EXECUTOR_URL}{endpoint}", json=args,
                            headers=headers, timeout=35)
     stdout = r.json().get("stdout", "") if r.status_code == 200 \
              else f"[executor error: HTTP {r.status_code}]"
 
     if r.status_code != 200:
+        print(f"[remediate] executor HTTP {r.status_code} → outcome=escalated", flush=True)
         outcome             = "escalated"
         post_health_summary = "n/a"
     elif tool == "restart_deployment":
+        print(f"[remediate] waiting 35s for pod restart...", flush=True)
         time.sleep(35)
         pod_obs = call_tool("get_pods", {
             "namespace":      args.get("namespace", ""),
@@ -399,6 +409,7 @@ def remediate():
         outcome = "resolved" if all_healthy else "attempted"
         print(f"[remediate] post-restart: {post_health_summary} → {outcome}", flush=True)
     else:
+        print(f"[remediate] scale complete → outcome=resolved", flush=True)
         outcome             = "resolved"
         post_health_summary = "n/a"
 
