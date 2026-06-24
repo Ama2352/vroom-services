@@ -164,12 +164,12 @@ def tool_traces():
     if not _NS_RE.match(service):
         return jsonify({"error": "Invalid service"}), 400
     now = int(time.time())
-    # Tempo 1.7.x /api/search: only resource tag filtering is reliable;
-    # "error=true" span attribute is not indexed and causes non-200 responses.
+    # Tempo 1.7.x /api/search: start/end are Unix epoch seconds (not nanoseconds).
+    # Only resource-attribute tags (service.name) are reliably indexed in 1.7.x.
     params = {
         "tags":  f"service.name={service}",
-        "start": f"{now - 900}000000000",
-        "end":   f"{now}000000000",
+        "start": str(now - 900),
+        "end":   str(now),
         "limit": "5",
     }
     try:
@@ -183,8 +183,10 @@ def tool_traces():
                 for t in traces[:5]
             ]
             return jsonify({"stdout": "\n".join(lines), "returncode": 0})
+        print(f"[traces] Tempo returned HTTP {r.status_code}: {r.text[:300]}", flush=True)
         return jsonify({"stdout": "[traces unavailable]", "returncode": 1})
     except Exception as e:
+        print(f"[traces] exception: {e}", flush=True)
         return jsonify({"stdout": f"[traces unavailable: {e}]", "returncode": 1})
 
 

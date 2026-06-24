@@ -26,7 +26,7 @@ def call_tool(tool_name: str, args: dict) -> str:
         return f"[unknown tool: {tool_name}]"
 
     endpoint = _READ_ENDPOINTS[tool_name]
-    timeout = 5 if tool_name == "get_traces" else 35
+    timeout = 15 if tool_name == "get_traces" else 35
 
     try:
         r = requests.get(f"{EXECUTOR_URL}{endpoint}", params=args, headers=_headers(), timeout=timeout)
