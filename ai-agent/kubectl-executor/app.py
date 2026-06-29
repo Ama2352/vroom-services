@@ -96,7 +96,9 @@ def tool_logs():
     if not _INT_RE.match(tail) or int(tail) > 500:
         return jsonify({"error": "Invalid tail (must be 1-500)"}), 400
 
-    # RESTARTS > 0 means a previous container exists — its logs contain the crash reason
+    # RESTARTS > 0 means a previous container terminated — its logs may contain the crash reason.
+    # Note: triggers for any ever-restarted pod, not only currently-crashing ones; if previous
+    # logs were already GC'd by the kubelet the empty-stdout check below falls through to current logs.
     pods_body, _ = _run(["kubectl", "get", "pods", "-n", ns, "-l", f"app={service}", "--no-headers"])
     for line in pods_body.get("stdout", "").splitlines():
         parts = line.split()
@@ -133,7 +135,8 @@ def tool_events():
     if body.get("stdout"):
         lines  = body["stdout"].splitlines()
         header = lines[0] if lines else ""
-        # Reverse: --sort-by ascending (oldest first); newest must survive 2000-char truncation
+        # Reverse: _run() truncates at 2000 chars before we get here, so oldest events were already
+        # dropped. Reversing puts the surviving (oldest) events in newest-first order for the LLM.
         data = list(reversed(lines[1:]))
 
         def _is_diagnostic(line: str) -> bool:
