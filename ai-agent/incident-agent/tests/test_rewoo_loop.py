@@ -192,3 +192,43 @@ def test_solver_prompt_states_config_error_can_be_high_confidence():
         "HighErrorRate", "ride-service", "vroom-dev", "rps=0", ""
     )
     assert "DNS lookup failure" in prompt or "config error" in prompt.lower()
+
+
+# ── _build_hint_prompt / _parse_hint ──────────────────────────────────────
+
+def test_hint_prompt_has_output_constraint():
+    prompt = rewoo_loop._build_hint_prompt(
+        "ride-service", "vroom-dev",
+        "redis connection pool failed", "DNS lookup failed for bad-host",
+        "lookup bad-host: no such host"
+    )
+    assert "EXACTLY two lines" in prompt
+    assert "Dev action:" in prompt
+    assert "kubectl:" in prompt
+
+
+def test_hint_prompt_has_two_few_shot_examples():
+    prompt = rewoo_loop._build_hint_prompt(
+        "ride-service", "vroom-dev",
+        "redis connection pool failed", "j",
+        "lookup bad-host: no such host"
+    )
+    assert "Example 1:" in prompt
+    assert "Example 2:" in prompt
+
+
+def test_parse_hint_returns_two_lines_when_valid():
+    raw = "Dev action: Fix the REDIS_ADDR env var.\nkubectl: kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR=redis:6379"
+    result = rewoo_loop._parse_hint(raw, "ride-service", "vroom-dev", "redis failure")
+    assert result.startswith("Dev action:")
+    assert "\nkubectl:" in result
+
+
+def test_parse_hint_fallback_when_prefixes_missing():
+    result = rewoo_loop._parse_hint(
+        "some random output", "ride-service", "vroom-dev", "redis failure"
+    )
+    assert result.startswith("Dev action: redis failure")
+    assert "kubectl: kubectl describe pod" in result
+    assert "ride-service" in result
+    assert "vroom-dev" in result

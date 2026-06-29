@@ -197,3 +197,25 @@ def test_admin_models_rejects_string_format(client):
         content_type="application/json")
     assert r.status_code == 400
     assert "provider" in r.get_json()["error"]
+
+
+def test_investigate_response_includes_dev_hint(client):
+    def _none_loop(alert, call_tool_fn, api_key, **kw):
+        return {
+            "root_cause":  "redis connection failed",
+            "confidence":  "HIGH",
+            "remediation": None,
+            "rewoo_steps": [],
+            "dev_hint":    "Dev action: Fix REDIS_ADDR.\nkubectl: kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR=redis:6379",
+        }
+
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.run_rewoo_loop", side_effect=_none_loop):
+        r = client.post("/investigate",
+            data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
+                             "severity": "warning", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "dev_hint" in body
+    assert body["dev_hint"].startswith("Dev action:")

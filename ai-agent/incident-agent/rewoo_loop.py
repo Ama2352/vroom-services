@@ -175,6 +175,42 @@ Output ONLY a valid JSON object — no markdown, no Step 1/2/3 text, no explanat
 {{"root_cause":"...","confidence":"HIGH|MEDIUM|LOW","remediation_tool":"scale_deployment|restart_deployment|none","remediation_args":{{"deployment":"{service}","namespace":"{namespace}"}},"justification":"..."}}"""
 
 
+def _build_hint_prompt(service: str, namespace: str, root_cause: str,
+                        justification: str, evidence_block: str) -> str:
+    return f"""Given a root cause and evidence, output EXACTLY two lines:
+Dev action: <one sentence what to fix>
+kubectl: <best-guess command, or "kubectl describe pod -n {namespace} -l app={service}" if unsure>
+
+Example 1:
+root_cause: redis connection pool failed to dial bad-host
+evidence: lookup bad-host: no such host
+Dev action: REDIS_ADDR env var points to a non-existent host. Update it to the real Redis address.
+kubectl: kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR=redis.platform.svc.cluster.local:6379
+
+Example 2:
+root_cause: database connection refused on startup
+evidence: dial tcp: connection refused
+Dev action: PostgreSQL is unreachable. Check if the DB pod is running and the DSN is correct.
+kubectl: kubectl get pods -n platform -l app=postgresql
+
+Now:
+root_cause: {root_cause}
+justification: {justification}
+evidence: {evidence_block[:300]}"""
+
+
+def _parse_hint(text: str, service: str, namespace: str, root_cause: str) -> str:
+    """Validate hint output has both required prefixes. Falls back to safe template."""
+    if text and "Dev action:" in text and "kubectl:" in text:
+        lines = [l for l in text.splitlines() if l.strip()]
+        dev_line  = next((l for l in lines if l.startswith("Dev action:")), "")
+        kube_line = next((l for l in lines if l.startswith("kubectl:")), "")
+        if dev_line and kube_line:
+            return f"{dev_line}\n{kube_line}"
+    return (f"Dev action: {root_cause}. Investigate manually.\n"
+            f"kubectl: kubectl describe pod -n {namespace} -l app={service}")
+
+
 def _call_provider(messages: list, model_entry: dict, groq_key: str,
                    openrouter_key: str, max_tokens: int = 512) -> str:
     """Single LLM call to one provider+model. Retries once on 429."""
@@ -333,6 +369,25 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
 
     rem_tool = diagnosis.get("remediation_tool", "none")
     rem_args = diagnosis.get("remediation_args") or {}
+
+    # ── Phase 4: Dev hint (fires only when no automated fix available) ───────
+    dev_hint = ""
+    if rem_tool == "none":
+        root_cause_str = diagnosis.get("root_cause", "")
+        justification  = diagnosis.get("justification", "")
+        hint_raw = ""
+        try:
+            hint_raw = _call(
+                [{"role": "user",
+                  "content": _build_hint_prompt(service, namespace, root_cause_str,
+                                                justification, evidence_block)}],
+                max_tokens=80,
+            )
+        except Exception as e:
+            print(f"[rewoo:hint] error: {e}", flush=True)
+        dev_hint = _parse_hint(hint_raw, service, namespace, root_cause_str)
+        print(f"[rewoo:hint] {dev_hint[:120]}", flush=True)
+
     return {
         "root_cause":  diagnosis.get("root_cause", ""),
         "confidence":  diagnosis.get("confidence", "LOW"),
@@ -342,4 +397,5 @@ def run_rewoo_loop(alert: dict, call_tool_fn, api_key: str,
             "justification": diagnosis.get("justification", ""),
         },
         "rewoo_steps": rewoo_steps,
+        "dev_hint":    dev_hint,
     }

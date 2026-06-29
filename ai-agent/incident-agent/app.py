@@ -329,6 +329,7 @@ def investigate():
         "remediation":       rem,
         "evidence_snippet":  evidence,
         "suggested_command": cmd,
+        "dev_hint":          diagnosis.get("dev_hint", ""),
         "memory_hits":       {"incidents": incident_hits, "runbook": len(runbook_hits)},
         **({"debug": {
             "bundle":         bundle,
