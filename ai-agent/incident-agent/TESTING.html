@@ -374,8 +374,8 @@ curl -s "http://localhost:5002/memory/search?q=HighErrorRate+ride-service"</code
         <div class="step-body">
           <span class="step-label">Inject — set memory limit cực thấp</span>
           <pre><code>kubectl set resources deployment/ride-service -n vroom-dev \
-  --limits=memory=16Mi --requests=memory=16Mi
-<span class="cm"># Pod sẽ bị OOMKilled ngay khi start (Go runtime cần ~20-30MB) — đợi ~20s</span>
+  --limits=memory=6Mi --requests=memory=6Mi
+<span class="cm"># ride-service idle dùng ~9Mi → 6Mi limit đảm bảo OOMKilled ngay khi start — đợi ~20s</span>
 kubectl get pods -n vroom-dev -l app=ride-service
 <span class="cm"># Expected: STATUS=OOMKilled hoặc CrashLoopBackOff, RESTARTS≥1</span>
 
@@ -684,7 +684,7 @@ curl -s http://localhost:5002/admin/models | python3 -m json.tool</code></pre>
       </tr>
       <tr>
         <td><span class="badge" style="background:rgba(239,68,68,.15);color:#ef4444">A'</span> OOMKilled</td>
-        <td><code>--limits=memory=16Mi</code></td>
+        <td><code>--limits=memory=6Mi</code></td>
         <td>get_pods, get_logs, get_events</td>
         <td>No</td>
         <td><span class="badge badge-green">resolved</span></td>

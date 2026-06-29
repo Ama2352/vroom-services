@@ -125,11 +125,15 @@ def tool_events():
         "kubectl", "get", "events", "-n", ns,
         "--sort-by=.lastTimestamp",
     ])
+    _LIFECYCLE_NOISE = {"Scheduled", "Pulling", "Pulled", "Created", "Started"}
     if service and body.get("stdout"):
-        lines    = body["stdout"].splitlines()
-        header   = lines[0] if lines else ""
-        filtered = [l for l in lines[1:] if service in l]
-        body["stdout"] = "\n".join([header] + filtered) if filtered else f"{header}\n(no events for {service})"
+        lines  = body["stdout"].splitlines()
+        header = lines[0] if lines else ""
+        filtered = [
+            l for l in lines[1:]
+            if service in l and not any(reason in l for reason in _LIFECYCLE_NOISE)
+        ]
+        body["stdout"] = "\n".join([header] + filtered) if filtered else f"{header}\n(no notable events for {service})"
     return jsonify(body), status
 
 
