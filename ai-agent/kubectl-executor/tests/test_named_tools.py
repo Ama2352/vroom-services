@@ -114,3 +114,55 @@ def test_scale_rejects_invalid_deployment(client):
         data=json.dumps({"deployment": "../etc", "namespace": "vroom-dev", "replicas": 1}),
         content_type="application/json", headers=AUTH)
     assert r.status_code == 400
+
+
+# ── /tools/traces enrichment ──────────────────────────────────────────────
+
+def _make_search_resp():
+    m = MagicMock()
+    m.status_code = 200
+    m.json.return_value = {"traces": [
+        {"traceID": "abc123", "rootTraceName": "POST /v1/trips", "durationMs": 1250}
+    ]}
+    return m
+
+
+def _make_span_resp():
+    m = MagicMock()
+    m.status_code = 200
+    m.json.return_value = {"data": [{"spans": [
+        {
+            "spanID": "s1", "parentSpanID": "",
+            "operationName": "CreateRide",
+            "tags": [],
+            "process": {"serviceName": "ride-service"},
+        },
+        {
+            "spanID": "s2", "parentSpanID": "s1",
+            "operationName": "DialContext",
+            "tags": [{"key": "error", "value": True},
+                     {"key": "error.message", "value": "connection refused to postgresql"}],
+            "process": {"serviceName": "ride-service"},
+        },
+    ]}]}
+    return m
+
+
+def test_traces_enriched_with_error_span_detail(client):
+    with patch("requests.get", side_effect=[_make_search_resp(), _make_span_resp()]):
+        r = client.get("/tools/traces?service=ride-service", headers=AUTH)
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "error span:" in body["stdout"]
+    assert "connection refused to postgresql" in body["stdout"]
+
+
+def test_traces_fallback_to_summary_when_span_fetch_fails(client):
+    err_resp = MagicMock()
+    err_resp.status_code = 500
+    with patch("requests.get", side_effect=[_make_search_resp(), err_resp]):
+        r = client.get("/tools/traces?service=ride-service", headers=AUTH)
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "trace_id=abc123" in body["stdout"]
+    assert "error span:" not in body["stdout"]

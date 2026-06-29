@@ -156,6 +156,51 @@ def tool_metrics():
 
 # ── Tempo traces (best-effort read) ─────────────────────────────────────────
 
+def _fetch_error_span(trace_id: str) -> str:
+    """Fetch full Jaeger span tree for a trace; return leaf error span detail or ''."""
+    try:
+        r = http_requests.get(f"{TEMPO_URL}/api/traces/{trace_id}", timeout=7)
+        if r.status_code != 200:
+            return ""
+        data = r.json().get("data", [])
+        if not data:
+            return ""
+        spans = data[0].get("spans", [])
+
+        span_by_id = {s["spanID"]: s for s in spans}
+
+        def is_error(span):
+            tags = {t["key"]: t.get("value") for t in span.get("tags", [])}
+            return tags.get("error") is True or tags.get("otel.status_code") == "ERROR"
+
+        error_spans = [s for s in spans if is_error(s)]
+        if not error_spans:
+            return ""
+
+        # Leaf = error span whose children are not also errors
+        child_ids   = {s.get("parentSpanID") for s in error_spans}
+        leaf_errors = [s for s in error_spans if s["spanID"] not in child_ids]
+        target      = leaf_errors[0] if leaf_errors else error_spans[0]
+
+        tags    = {t["key"]: t.get("value") for t in target.get("tags", [])}
+        err_msg = tags.get("error.message") or tags.get("exception.message") or "error"
+        svc     = target.get("process", {}).get("serviceName", "?")
+        op      = target.get("operationName", "?")
+
+        parent_id  = target.get("parentSpanID", "")
+        parent_svc = ""
+        if parent_id and parent_id in span_by_id:
+            parent_svc = span_by_id[parent_id].get("process", {}).get("serviceName", "")
+
+        detail = f"  error span: {svc} → {op}\n  error: \"{err_msg}\""
+        if parent_svc and parent_svc != svc:
+            detail += f"\n  parent: {parent_svc} (OK)"
+        return detail
+    except Exception as e:
+        print(f"[traces] span fetch failed (non-fatal): {e}", flush=True)
+        return ""
+
+
 @app.route("/tools/traces")
 def tool_traces():
     if not _auth(request):
@@ -174,17 +219,26 @@ def tool_traces():
     }
     try:
         r = http_requests.get(f"{TEMPO_URL}/api/search", params=params, timeout=8)
-        if r.status_code == 200:
-            traces = r.json().get("traces", [])
-            if not traces:
-                return jsonify({"stdout": "No errored traces found in last 15 minutes.", "returncode": 0})
-            lines = [
-                f"trace_id={t.get('traceID','')} root={t.get('rootTraceName','')} duration={t.get('durationMs','')}ms"
-                for t in traces[:5]
-            ]
-            return jsonify({"stdout": "\n".join(lines), "returncode": 0})
-        print(f"[traces] Tempo returned HTTP {r.status_code}: {r.text[:300]}", flush=True)
-        return jsonify({"stdout": "[traces unavailable]", "returncode": 1})
+        if r.status_code != 200:
+            print(f"[traces] Tempo returned HTTP {r.status_code}: {r.text[:300]}", flush=True)
+            return jsonify({"stdout": "[traces unavailable]", "returncode": 1})
+
+        traces = r.json().get("traces", [])
+        if not traces:
+            return jsonify({"stdout": "No errored traces found in last 15 minutes.", "returncode": 0})
+
+        lines = [
+            f"trace_id={t.get('traceID','')} root={t.get('rootTraceName','')} duration={t.get('durationMs','')}ms"
+            for t in traces[:5]
+        ]
+
+        first_id = traces[0].get("traceID", "")
+        if first_id:
+            detail = _fetch_error_span(first_id)
+            if detail:
+                lines[0] += f"\n{detail}"
+
+        return jsonify({"stdout": "\n".join(lines), "returncode": 0})
     except Exception as e:
         print(f"[traces] exception: {e}", flush=True)
         return jsonify({"stdout": f"[traces unavailable: {e}]", "returncode": 1})
