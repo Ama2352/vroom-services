@@ -166,6 +166,11 @@ STEP 3 — REMEDIATION: Choose based on your Step 2 root cause:
 - restart_deployment: ONLY if pods exist AND logs/events show a transient error (OOM, random crash/panic) — NOT a config error, NOT a dependency unreachable error
 - none: if logs show a config error (bad hostname, wrong env var, missing credentials), a dependency is unreachable, data corruption, or you are not confident
 
+Confidence reflects how certain you are about the root cause, NOT whether you can automate a fix.
+A config error with clear log evidence (e.g. DNS lookup failure for a named host) is HIGH confidence
+even though the remediation tool is "none".
+LOW confidence means the evidence is ambiguous or tools returned no useful data.
+
 Output ONLY a valid JSON object — no markdown, no Step 1/2/3 text, no explanation:
 {{"root_cause":"...","confidence":"HIGH|MEDIUM|LOW","remediation_tool":"scale_deployment|restart_deployment|none","remediation_args":{{"deployment":"{service}","namespace":"{namespace}"}},"justification":"..."}}"""
 

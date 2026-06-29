@@ -176,3 +176,19 @@ def test_solver_prompt_criteria_cover_config_error():
     assert "config error" in prompt.lower()
     assert "none" in prompt
     assert "zero pods" in prompt.lower()
+
+
+# ── _build_solver_prompt confidence decoupling ─────────────────────────────
+
+def test_solver_prompt_decouples_confidence_from_remediation():
+    prompt = rewoo_loop._build_solver_prompt(
+        "HighErrorRate", "ride-service", "vroom-dev", "rps=0", ""
+    )
+    assert "NOT whether you can automate" in prompt
+
+
+def test_solver_prompt_states_config_error_can_be_high_confidence():
+    prompt = rewoo_loop._build_solver_prompt(
+        "HighErrorRate", "ride-service", "vroom-dev", "rps=0", ""
+    )
+    assert "DNS lookup failure" in prompt or "config error" in prompt.lower()
