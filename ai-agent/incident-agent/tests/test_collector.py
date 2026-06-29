@@ -39,12 +39,11 @@ def _tempo_empty():
     return resp
 
 
-# call order: prom×3, loki, tempo, github
-def _default_effects(prom_rps=12.4, prom_err=8.3, prom_p99=1.2, loki_n=47,
-                     tempo_n=0, github_ok=False):
+# call order: prom×3, loki, tempo
+def _default_effects(prom_rps=12.4, prom_err=8.3, prom_p99=1.2, loki_n=47, tempo_n=0):
     tempo = _tempo_ok(tempo_n) if tempo_n > 0 else _tempo_empty()
     return [_prom_ok(prom_rps), _prom_ok(prom_err), _prom_ok(prom_p99),
-            _loki_ok(loki_n), tempo, MagicMock(ok=github_ok)]
+            _loki_ok(loki_n), tempo]
 
 
 def test_bundle_contains_service_name():
@@ -52,6 +51,7 @@ def test_bundle_contains_service_name():
         bundle = collector.collect_bundle("ride-service", "vroom-dev")
     assert "service=ride-service" in bundle
     assert "namespace=vroom-dev" in bundle
+    assert "last_commit" not in bundle
 
 
 def test_bundle_includes_metrics():
@@ -80,7 +80,7 @@ def test_bundle_traces_errored_zero_when_none():
 def test_bundle_tempo_unavailable_returns_zero():
     # Tempo times out — should not raise, should include traces_errored=0
     side_effects = [_prom_ok(12.4), _prom_ok(8.3), _prom_ok(1.2),
-                    _loki_ok(10), Exception("tempo timeout"), MagicMock(ok=False)]
+                    _loki_ok(10), Exception("tempo timeout")]
     with patch("requests.get", side_effect=side_effects):
         bundle = collector.collect_bundle("ride-service", "vroom-dev")
     assert "traces_errored=0" in bundle

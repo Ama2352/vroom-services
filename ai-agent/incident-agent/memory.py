@@ -39,20 +39,21 @@ def _get_field(raw: dict, k: str) -> str:
 
 def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
     iid = str(uuid.uuid4())
-    query_text = f"{incident['alert_name']} {incident['service']} {incident.get('symptoms', '')}"
+    query_text = (f"{incident['alert_name']} {incident['service']} "
+                  f"{incident.get('waiting_reason', '')} {incident.get('log_error', '')}")
     embedding = _encode(query_text)
     rdb.hset(f"incident:{iid}", mapping={
-        "alert_name":          incident["alert_name"],
-        "service":             incident["service"],
-        "namespace":           incident.get("namespace", ""),
-        "symptoms":            incident.get("symptoms", ""),
-        "investigation_steps": json.dumps(incident.get("investigation_steps", [])),
-        "root_cause":          incident.get("root_cause", ""),
-        "remediation_tool":    incident.get("remediation_tool", ""),
-        "remediation_args":    json.dumps(incident.get("remediation_args", {})),
-        "outcome":             incident.get("outcome", "resolved"),
-        "timestamp":           str(int(time.time())),
-        "embedding":           json.dumps(embedding),
+        "alert_name":     incident["alert_name"],
+        "service":        incident["service"],
+        "namespace":      incident.get("namespace", ""),
+        "symptoms":       incident.get("symptoms", ""),
+        "waiting_reason": incident.get("waiting_reason", ""),
+        "log_error":      incident.get("log_error", ""),
+        "root_cause":     incident.get("root_cause", ""),
+        "kubectl_hint":   incident.get("kubectl_hint", ""),
+        "outcome":        incident.get("outcome", "acknowledged"),
+        "timestamp":      str(int(time.time())),
+        "embedding":      json.dumps(embedding),
     })
     rdb.sadd(INDEX_KEY, iid)
     recalibrate_thresholds(rdb)

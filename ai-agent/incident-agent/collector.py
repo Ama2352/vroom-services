@@ -13,8 +13,6 @@ TEMPO_URL = os.environ.get(
     "TEMPO_URL",
     "http://tempo.monitoring.svc.cluster.local:3100"
 )
-GITHUB_REPO = os.environ.get("GITHUB_REPO", "Ama2352/vroom-services")
-
 
 def _prom(query: str) -> float:
     try:
@@ -64,26 +62,9 @@ def collect_bundle(service: str, namespace: str) -> str:
     except Exception:
         pass
 
-    last_commit = "none"
-    try:
-        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 6 * 3600))
-        r = requests.get(
-            f"https://api.github.com/repos/{GITHUB_REPO}/commits",
-            params={"since": since},
-            headers={"Accept": "application/vnd.github.v3+json"},
-            timeout=5,
-        )
-        commits = r.json() if r.ok and isinstance(r.json(), list) else []
-        if commits:
-            last_commit = commits[0]["commit"]["message"].split('\n')[0]
-    except Exception:
-        pass
-
     bundle = (f"service={service} namespace={namespace} "
               f"rps={rps} err={err}% p99={p99}s loki_errors={loki_errors} "
               f"traces_errored={traces_errored}")
     if trace_sample:
         bundle += f' (sample: "{trace_sample}")'
-    if last_commit != "none":
-        bundle += f' | last_commit: "{last_commit}"'
     return bundle
