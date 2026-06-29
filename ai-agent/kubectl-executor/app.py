@@ -96,12 +96,17 @@ def tool_logs():
     if not _INT_RE.match(tail) or int(tail) > 500:
         return jsonify({"error": "Invalid tail (must be 1-500)"}), 400
 
-    # Prefer --previous logs from a crashlooping pod — those contain the actual crash reason
+    # RESTARTS > 0 means a previous container exists — its logs contain the crash reason
     pods_body, _ = _run(["kubectl", "get", "pods", "-n", ns, "-l", f"app={service}", "--no-headers"])
     for line in pods_body.get("stdout", "").splitlines():
-        if "CrashLoopBackOff" in line:
-            parts = line.split()
-            if parts and _POD_RE.match(parts[0]):
+        parts = line.split()
+        # --no-headers columns: NAME(0) READY(1) STATUS(2) RESTARTS(3) AGE(4)
+        if len(parts) >= 4 and _POD_RE.match(parts[0]):
+            try:
+                restarts = int(parts[3])
+            except ValueError:
+                continue
+            if restarts > 0:
                 prev, prev_status = _run(
                     ["kubectl", "logs", parts[0], "-n", ns, f"--tail={tail}", "--previous"]
                 )

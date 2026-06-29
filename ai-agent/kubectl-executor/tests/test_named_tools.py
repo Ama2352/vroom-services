@@ -241,3 +241,39 @@ def test_events_empty_result_when_no_warnings(client):
         r = client.get("/tools/events?namespace=vroom-dev&service=ride-service", headers=AUTH)
     assert r.status_code == 200
     assert "no Warning events" in r.get_json()["stdout"]
+
+
+# ── /tools/logs RESTARTS-based --previous ─────────────────────────────────────
+
+def test_logs_previous_triggered_by_restarts_gt_0(client):
+    pods_out  = "ride-service-abc-xyz   0/1   CrashLoopBackOff   3   10m"
+    prev_logs = "panic: runtime error: index out of range"
+
+    def _side(cmd, **kw):
+        if "get" in cmd and "pods" in cmd:
+            return mock_kubectl(pods_out)
+        if "--previous" in cmd:
+            return mock_kubectl(prev_logs)
+        return mock_kubectl("")
+
+    with patch("subprocess.run", side_effect=_side):
+        r = client.get("/tools/logs?service=ride-service&namespace=vroom-dev", headers=AUTH)
+    assert r.status_code == 200
+    assert "panic" in r.get_json()["stdout"]
+
+
+def test_logs_previous_not_triggered_for_restarts_0(client):
+    pods_out  = "ride-service-abc-xyz   1/1   Running   0   5m"
+    curr_logs = 'level=info msg="listening on :8082"'
+
+    def _side(cmd, **kw):
+        if "get" in cmd and "pods" in cmd:
+            return mock_kubectl(pods_out)
+        if "--previous" in cmd:
+            return mock_kubectl("should not appear")
+        return mock_kubectl(curr_logs)
+
+    with patch("subprocess.run", side_effect=_side):
+        r = client.get("/tools/logs?service=ride-service&namespace=vroom-dev", headers=AUTH)
+    assert r.status_code == 200
+    assert "should not appear" not in r.get_json()["stdout"]
