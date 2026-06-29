@@ -176,6 +176,10 @@ def tool_metrics():
     if not _NS_RE.match(ns):
         return jsonify({"error": "Invalid namespace"}), 400
     body, status = _run(["kubectl", "top", "pods", "-n", ns])
+    if body.get("stdout"):
+        pod_rows = [l for l in body["stdout"].splitlines()[1:] if l.strip()]
+        if not pod_rows:
+            body["stdout"] = "No running pods — live metrics unavailable"
     return jsonify(body), status
 
 

@@ -277,3 +277,21 @@ def test_logs_previous_not_triggered_for_restarts_0(client):
         r = client.get("/tools/logs?service=ride-service&namespace=vroom-dev", headers=AUTH)
     assert r.status_code == 200
     assert "should not appear" not in r.get_json()["stdout"]
+
+
+# ── /tools/metrics no-data message ────────────────────────────────────────────
+
+def test_metrics_no_pods_returns_unavailable_message(client):
+    header_only = "NAME                      CPU(cores)   MEMORY(bytes)\n"
+    with patch("subprocess.run", return_value=mock_kubectl(header_only)):
+        r = client.get("/tools/metrics?namespace=vroom-dev", headers=AUTH)
+    assert r.status_code == 200
+    assert "No running pods" in r.get_json()["stdout"]
+
+
+def test_metrics_with_pods_returns_output(client):
+    output = "NAME                CPU(cores)   MEMORY(bytes)\nride-service-abc    3m           9Mi\n"
+    with patch("subprocess.run", return_value=mock_kubectl(output)):
+        r = client.get("/tools/metrics?namespace=vroom-dev", headers=AUTH)
+    assert r.status_code == 200
+    assert "9Mi" in r.get_json()["stdout"]
