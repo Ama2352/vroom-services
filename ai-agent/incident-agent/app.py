@@ -231,6 +231,9 @@ def investigate():
 
     bundle = collect_bundle(service, namespace)
     facts  = collect_diagnostics(service, namespace)
+    print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
+          f"reason={facts['waiting_reason']!r} restarts={facts['restarts']} "
+          f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
     diagnosis = interpret(
         alert_name, service, namespace,
@@ -267,6 +270,7 @@ def investigate():
     return jsonify({
         "service":          service,
         "alert_name":       alert_name,
+        "namespace":        namespace,
         "root_cause":       diagnosis["root_cause"],
         "dev_action":       diagnosis["dev_action"],
         "kubectl_hint":     diagnosis["kubectl_hint"],
