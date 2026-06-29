@@ -121,7 +121,10 @@ def tool_events():
     service = request.args.get("service",   "").strip()
     if not _NS_RE.match(ns):
         return jsonify({"error": "Invalid namespace"}), 400
-    body, status = _run(["kubectl", "get", "events", "-n", ns])
+    body, status = _run([
+        "kubectl", "get", "events", "-n", ns,
+        "--sort-by=.lastTimestamp",
+    ])
     if service and body.get("stdout"):
         lines    = body["stdout"].splitlines()
         header   = lines[0] if lines else ""
