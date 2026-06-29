@@ -166,3 +166,78 @@ def test_traces_fallback_to_summary_when_span_fetch_fails(client):
     body = r.get_json()
     assert "trace_id=abc123" in body["stdout"]
     assert "error span:" not in body["stdout"]
+
+
+# ── /tools/events Warning-type filter ────────────────────────────────────────
+
+_EVENTS_HDR = "LAST SEEN   TYPE      REASON              OBJECT                          MESSAGE"
+
+
+def test_events_keeps_warning_type(client):
+    output = (
+        f"{_EVENTS_HDR}\n"
+        "5m          Warning   OOMKilling          pod/ride-service-abc-xyz    Memory limit exceeded\n"
+        "10m         Normal    Scheduled           pod/ride-service-def-xyz    Successfully assigned\n"
+    )
+    with patch("subprocess.run", return_value=mock_kubectl(output)):
+        r = client.get("/tools/events?namespace=vroom-dev&service=ride-service", headers=AUTH)
+    assert r.status_code == 200
+    body = r.get_json()["stdout"]
+    assert "OOMKilling" in body
+    assert "Scheduled" not in body
+
+
+def test_events_keeps_scaling_normal(client):
+    output = (
+        f"{_EVENTS_HDR}\n"
+        "2m          Normal    ScalingReplicaSet   replicaset/ride-service-7d5   Scaled down to 0\n"
+        "15m         Normal    Pulled              pod/ride-service-abc-xyz       Successfully pulled\n"
+    )
+    with patch("subprocess.run", return_value=mock_kubectl(output)):
+        r = client.get("/tools/events?namespace=vroom-dev&service=ride-service", headers=AUTH)
+    assert r.status_code == 200
+    body = r.get_json()["stdout"]
+    assert "ScalingReplicaSet" in body
+    assert "Pulled" not in body
+
+
+def test_events_drops_lifecycle_normal(client):
+    output = (
+        f"{_EVENTS_HDR}\n"
+        "10m         Normal    Scheduled           pod/ride-service-abc    Successfully assigned\n"
+        "10m         Normal    Pulling             pod/ride-service-abc    Pulling image\n"
+        "10m         Normal    Pulled              pod/ride-service-abc    Successfully pulled\n"
+        "10m         Normal    Created             pod/ride-service-abc    Created container\n"
+        "10m         Normal    Started             pod/ride-service-abc    Started container\n"
+    )
+    with patch("subprocess.run", return_value=mock_kubectl(output)):
+        r = client.get("/tools/events?namespace=vroom-dev&service=ride-service", headers=AUTH)
+    assert r.status_code == 200
+    assert "no Warning events" in r.get_json()["stdout"]
+
+
+def test_events_no_service_filter_returns_all_warning(client):
+    output = (
+        f"{_EVENTS_HDR}\n"
+        "5m          Warning   OOMKilling          pod/ride-service-abc    Memory limit exceeded\n"
+        "3m          Warning   BackOff             pod/dispatch-abc        Back-off restarting\n"
+        "10m         Normal    Scheduled           pod/user-service-abc    Successfully assigned\n"
+    )
+    with patch("subprocess.run", return_value=mock_kubectl(output)):
+        r = client.get("/tools/events?namespace=vroom-dev", headers=AUTH)
+    assert r.status_code == 200
+    body = r.get_json()["stdout"]
+    assert "OOMKilling" in body
+    assert "BackOff" in body
+    assert "Scheduled" not in body
+
+
+def test_events_empty_result_when_no_warnings(client):
+    output = (
+        f"{_EVENTS_HDR}\n"
+        "10m         Normal    Scheduled           pod/ride-service-abc    Successfully assigned\n"
+    )
+    with patch("subprocess.run", return_value=mock_kubectl(output)):
+        r = client.get("/tools/events?namespace=vroom-dev&service=ride-service", headers=AUTH)
+    assert r.status_code == 200
+    assert "no Warning events" in r.get_json()["stdout"]
