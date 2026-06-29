@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import subprocess, os, re, time
+import subprocess, os, re, time, json
 import requests as http_requests
 
 app = Flask(__name__)
@@ -114,6 +114,20 @@ def tool_logs():
                 )
                 if prev.get("stdout", "").strip():
                     return jsonify(prev), prev_status
+                # --previous empty: main container may not have started (Init:Error).
+                # Try each init container's current logs before falling through.
+                if parts[2].startswith("Init:"):
+                    names_body, _ = _run([
+                        "kubectl", "get", "pod", parts[0], "-n", ns,
+                        "-o", "jsonpath={.spec.initContainers[*].name}"
+                    ])
+                    for cname in names_body.get("stdout", "").strip().split():
+                        init_log, init_status = _run([
+                            "kubectl", "logs", parts[0], "-n", ns,
+                            "-c", cname, f"--tail={tail}"
+                        ])
+                        if init_log.get("stdout", "").strip():
+                            return jsonify(init_log), init_status
                 break
 
     body, status = _run(["kubectl", "logs", "-n", ns, "-l", f"app={service}", f"--tail={tail}"])
@@ -156,6 +170,43 @@ def tool_events():
             else f"{header}\n(no Warning events for {service or ns})"
         )
     return jsonify(body), status
+
+
+@app.route("/tools/events-json")
+def tool_events_json():
+    if not _auth(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    ns      = request.args.get("namespace", "").strip()
+    service = request.args.get("service",   "").strip()
+    if not _NS_RE.match(ns) or not _NS_RE.match(service):
+        return jsonify({"error": "Invalid namespace or service"}), 400
+
+    body, _ = _run([
+        "kubectl", "get", "events", "-n", ns,
+        "-o", "json", "--sort-by=.lastTimestamp",
+    ])
+    if body.get("returncode", 0) != 0:
+        return jsonify({"events": [], "error": body.get("stderr", "")[:200]})
+
+    try:
+        raw    = json.loads(body.get("stdout", "{}"))
+        items  = raw.get("items", [])
+        result = []
+        for e in items:
+            if e.get("type") != "Warning":
+                continue
+            obj_name = e.get("involvedObject", {}).get("name", "")
+            if not obj_name.startswith(service):
+                continue
+            result.append({
+                "reason":    e.get("reason", ""),
+                "message":   e.get("message", "")[:150],
+                "object":    obj_name,
+                "last_seen": e.get("lastTimestamp", ""),
+            })
+        return jsonify({"events": result[-3:]})
+    except (json.JSONDecodeError, KeyError):
+        return jsonify({"events": [], "error": "Failed to parse kubectl output"})
 
 
 @app.route("/tools/describe")
