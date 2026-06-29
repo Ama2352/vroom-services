@@ -175,6 +175,31 @@
   }
   .callout strong { color: var(--yellow); }
 
+  /* ── Expected evidence callout (green) ── */
+  .expected {
+    background: rgba(34,197,94,.06);
+    border-left: 3px solid var(--green);
+    border-radius: 0 6px 6px 0;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--text);
+    margin-top: 10px;
+  }
+  .expected strong { color: var(--green); }
+  .expected ul { margin: 6px 0 0 16px; }
+  /* Override ol.steps li — that selector is a descendant match, so it leaks into nested lists */
+  .expected li {
+    display: list-item !important;
+    grid-template-columns: unset !important;
+    counter-increment: none !important;
+    list-style: disc !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    margin-bottom: 4px;
+    line-height: 1.55;
+  }
+  .expected li::before { display: none !important; content: none !important; }
+
   /* ── Troubleshoot ── */
   details { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; }
   summary { padding: 12px 16px; cursor: pointer; font-weight: 600; font-size: 13px; list-style: none; display: flex; align-items: center; gap: 8px; }
@@ -309,6 +334,14 @@ kubectl get pods -n vroom-dev -l app=ride-service
 <span class="cm"># [rewoo] plan=[('get_pods', ...), ('get_events', ...)]
 # [rewoo:solver] raw=...scale_deployment...
 # [rewoo:hint] (empty — scale path skips hint)</span></code></pre>
+          <div class="expected">
+            <strong>Expected evidence in Slack after this implementation:</strong>
+            <ul>
+              <li><code>[get_events]</code>: <code>Normal  ScalingReplicaSet  replicaset/ride-service-xxx  Scaled down replica set … to 0 from 1</code> (kept — ScalingReplicaSet is the only Normal reason we preserve; Scheduled/Pulled/Started are dropped)</li>
+              <li><code>[get_logs]</code>: empty or error — no pods exist to fetch logs from</li>
+              <li><code>[get_metrics]</code>: <code>No running pods — live metrics unavailable</code> (explicit signal instead of silence; replicas=0 means header-only <code>kubectl top</code> output)</li>
+            </ul>
+          </div>
         </div>
       </li>
       <li>
@@ -416,14 +449,26 @@ kubectl describe pod -n vroom-dev -l app=ride-service | grep -A3 "Last State"
   | grep -E "^\[(rewoo|remediate)"
 <span class="cm"># [rewoo:solver] raw=...restart_deployment...
 # [remediate] alert=PodCrashLooping service=ride-service approved=True tool=restart_deployment</span></code></pre>
+          <div class="expected">
+            <strong>Expected evidence in Slack after this implementation:</strong>
+            <ul>
+              <li><code>[get_events]</code>: <code>Warning  OOMKilling  pod/ride-service-xxx  Container ride-service was using Xmi, above the limit of 6Mi</code> (Warning type → kept; Normal lifecycle events dropped)</li>
+              <li><code>[get_logs]</code>: Previous container logs (RESTARTS≥1 triggers <code>--previous</code> automatically); if the same exit message repeated, collapsed to <code>[×N] signal: killed</code></li>
+              <li><code>[get_metrics]</code>: <code>No running pods — live metrics unavailable</code> — pod is in CrashLoopBackOff; metrics-server has no data during crash window</li>
+            </ul>
+          </div>
         </div>
       </li>
       <li>
         <div class="step-body">
           <span class="step-label">Restore memory limit TRƯỚC khi click APPROVE</span>
-          <p class="step-note">Nếu restart chạy mà limit vẫn còn 4Mi, pod sẽ OOMKilled ngay lập tức và outcome = failed. Restore trước:</p>
+          <p class="step-note">Nếu restart chạy mà limit vẫn còn 6Mi, pod sẽ OOMKilled ngay lập tức và outcome = failed. Restore trước:</p>
           <pre><code>kubectl set resources deployment/ride-service -n vroom-dev \
-  --limits=memory=256Mi --requests=memory=32Mi</code></pre>
+  --limits=memory=256Mi --requests=memory=32Mi
+<span class="cm"># Verify deployment updated (không cần đợi pod, rollout restart sẽ làm)</span>
+kubectl get deployment/ride-service -n vroom-dev \
+  -o jsonpath='{.spec.template.spec.containers[0].resources}' | python3 -m json.tool
+<span class="cm"># Expected: "limits": {"memory": "256Mi"}, "requests": {"memory": "32Mi"}</span></code></pre>
         </div>
       </li>
       <li>
@@ -442,10 +487,25 @@ kubectl logs -n monitoring deployment/incident-agent --tail=10 \
       </li>
       <li>
         <div class="step-body">
-          <span class="step-label">Restore hoàn toàn nếu chưa làm ở bước 4</span>
-          <pre><code>kubectl set resources deployment/ride-service -n vroom-dev \
-  --limits=memory=256Mi
-kubectl rollout status deployment/ride-service -n vroom-dev</code></pre>
+          <span class="step-label">Full reset (nếu bỏ qua bước 4 hoặc test fail giữa chừng)</span>
+          <pre><code><span class="cm"># Option 1 — Restore về đúng giá trị kustomize overlay</span>
+kubectl set resources deployment/ride-service -n vroom-dev \
+  --limits=memory=256Mi --requests=memory=32Mi
+kubectl rollout status deployment/ride-service -n vroom-dev
+kubectl get pods -n vroom-dev -l app=ride-service
+<span class="cm"># Expected: READY=1/1  STATUS=Running</span>
+
+<span class="cm"># Option 2 — Force ArgoCD sync (khôi phục 100% về GitOps state)</span>
+argocd app sync vroom-apps-dev \
+  --resource apps:Deployment:vroom-dev/ride-service
+<span class="cm"># ArgoCD sẽ patch lại resources + replicas theo overlay</span>
+
+<span class="cm"># Verify resources đã về đúng</span>
+kubectl get deployment/ride-service -n vroom-dev \
+  -o jsonpath='{.spec.template.spec.containers[0].resources}' | python3 -m json.tool</code></pre>
+          <div class="callout" style="margin-top:8px;">
+            <strong>Lưu ý:</strong> <code>kubectl set resources</code> chỉ set <code>limits</code> hoặc <code>requests</code> riêng lẻ nếu chỉ truyền một trong hai — phải truyền cả hai cùng lúc để đảm bảo cả hai field được restore. ArgoCD auto-sync đã bị tắt (Phase 9) nên overlay không tự rollback.
+          </div>
         </div>
       </li>
     </ol>
@@ -514,6 +574,14 @@ kubectl get pods -n vroom-dev -l app=ride-service
 # [remediate] no approved remediation → outcome=skipped</span></code></pre>
           <div class="callout" style="margin-top:8px;">
             <strong>Expected:</strong> <code>confidence=HIGH</code>, <code>remediation_tool=none</code>. The 3rd LLM call generates a dev hint pointing to the bad env var. Solver should NOT output <code>restart_deployment</code> — a DNS lookup failure is a config error.
+          </div>
+          <div class="expected">
+            <strong>Expected evidence in Slack after this implementation:</strong>
+            <ul>
+              <li><code>[get_events]</code>: <code>Warning  BackOff  pod/ride-service-xxx  Back-off restarting failed container ride-service</code></li>
+              <li><code>[get_logs]</code>: Previous container logs (RESTARTS≥1 → <code>--previous</code>); DNS error repeated on every startup → collapsed: <code>[×N] dial tcp: lookup bad-host …: no such host</code>; successful health probe lines (<code>/healthz | 200 |</code>) are stripped</li>
+              <li>No <code>[get_metrics]</code> in evidence — metrics may be absent or very low (pod crashes before metrics-server collects data; planner may skip the tool)</li>
+            </ul>
           </div>
         </div>
       </li>
@@ -614,6 +682,15 @@ kubectl logs -n monitoring deployment/incident-agent --tail=60 \
 #                        error: "connection refused"</span></code></pre>
           <div class="callout" style="margin-top:8px;">
             <strong>Key check:</strong> The plan must include <code>get_traces</code>. If it doesn't, <code>traces_errored</code> in the bundle was 0 — wait longer for Tempo indexing and retry.
+          </div>
+          <div class="expected">
+            <strong>Expected evidence in Slack after this implementation:</strong>
+            <ul>
+              <li><code>[get_events]</code>: <code>(no Warning events for ride-service)</code> — DB being down is external; the pod itself generates no Warning events; only Normal lifecycle events exist and are dropped by filter</li>
+              <li><code>[get_logs]</code>: Deduplicated DB error lines — <code>[×N] level=error … connection refused to postgresql</code>; repeated identical lines merged; successful <code>/healthz | 200 |</code> probe lines stripped</li>
+              <li><code>[get_traces]</code>: Error span detail — <code>ride-service → CreateTrip  error: "connection refused"</code> with parent span context</li>
+              <li><code>[get_metrics]</code>: Normal pod resource row — pod IS Running; metrics-server has live data (e.g., <code>ride-service-xxx  4m  12Mi</code>)</li>
+            </ul>
           </div>
         </div>
       </li>

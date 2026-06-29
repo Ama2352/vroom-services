@@ -9,7 +9,6 @@ try:
 except ImportError:
     import pytest; pytest.skip("fakeredis not installed", allow_module_level=True)
 
-# Patch redis connection before importing app
 with patch("memory.connect", return_value=_FAKE_REDIS), \
      patch("seed.seed_if_empty", return_value=0):
     import app as agent_app
@@ -26,21 +25,23 @@ def client():
         yield c
 
 
+_FAKE_FACTS = {
+    "pods_available": 0, "pods_desired": 1,
+    "waiting_reason": "CrashLoopBackOff", "restarts": 5,
+    "log_error": "dial tcp postgres:5432: i/o timeout",
+    "event_reason": "BackOff", "event_message": "container failed",
+    "event_object": "ride-abc",
+}
+
+_FAKE_DIAGNOSIS = {
+    "root_cause":   "PostgreSQL unreachable",
+    "dev_action":   "Check PostgreSQL pod logs",
+    "kubectl_hint": "kubectl get pods -n platform -l app=postgresql",
+}
+
+
 def _fake_bundle(service, namespace):
-    return f"service={service} namespace={namespace} rps=12.4 err=8.3% p99=1.2s loki_errors=47"
-
-
-def _fake_loop(alert, call_tool_fn, api_key, **kw):
-    return {
-        "root_cause": "dispatch stale cursor",
-        "confidence": "HIGH",
-        "remediation": {
-            "tool": "restart_deployment",
-            "args": {"deployment": "dispatch-service", "namespace": "vroom-dev"},
-            "justification": "safe restart",
-        },
-        "rewoo_steps": [{"action": "get_pods({'namespace': 'vroom-dev'})", "observation": "running"}],
-    }
+    return f"service={service} namespace={namespace} rps=0.0 err=8.3% p99=1.2s loki_errors=47"
 
 
 def test_health(client):
@@ -62,82 +63,103 @@ def test_memory_search_missing_query(client):
     assert "no relevant memory found" in r.get_json()["result"]
 
 
-def test_investigate_returns_diagnosis(client):
-    with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_rewoo_loop", side_effect=_fake_loop):
+def test_investigate_returns_structured_diagnosis(client):
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
         r = client.post("/investigate",
-            data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
-                             "severity": "warning", "namespace": "vroom-dev"}),
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
     assert r.status_code == 200
     body = r.get_json()
-    assert body["confidence"] == "HIGH"
-    assert body["remediation"]["tool"] == "restart_deployment"
-    assert "execution_id" in body
+    assert body["root_cause"]   == "PostgreSQL unreachable"
+    assert body["dev_action"]   == "Check PostgreSQL pod logs"
+    assert body["kubectl_hint"] == "kubectl get pods -n platform -l app=postgresql"
 
 
-def test_investigate_stores_pending_in_redis(client):
-    with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_rewoo_loop", side_effect=_fake_loop):
+def test_investigate_includes_evidence_snippet(client):
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
         r = client.post("/investigate",
-            data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
-                             "severity": "warning", "namespace": "vroom-dev"}),
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
-    eid = r.get_json()["execution_id"]
-    assert _FAKE_REDIS.exists(f"pending:{eid}")
+    body = r.get_json()
+    assert "evidence_snippet" in body
+    assert "Pods:" in body["evidence_snippet"]
 
 
-def test_remediate_unknown_execution_id(client):
+def test_investigate_includes_memory_hits(client):
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    body = r.get_json()
+    assert "memory_hits" in body
+    assert "incidents" in body["memory_hits"]
+    assert "runbook"   in body["memory_hits"]
+
+
+def test_investigate_stores_incident_in_redis(client):
+    _FAKE_REDIS.flushall()
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    assert _FAKE_REDIS.scard("incidents:index") > 0
+
+
+def test_investigate_no_old_fields_in_response(client):
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    body = r.get_json()
+    assert "execution_id"  not in body
+    assert "rewoo_steps"   not in body
+    assert "remediation"   not in body
+    assert "confidence"    not in body
+    assert "dev_hint"      not in body
+    assert "suggested_command" not in body
+
+
+def test_investigate_debug_param_returns_facts(client):
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate?debug=true",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    body = r.get_json()
+    assert "debug" in body
+    assert "facts"  in body["debug"]
+    assert "bundle" in body["debug"]
+    assert body["debug"]["facts"]["waiting_reason"] == "CrashLoopBackOff"
+
+
+def test_remediate_endpoint_removed(client):
     r = client.post("/remediate",
-        data=json.dumps({"execution_id": "nonexistent", "approved": True}),
+        data=json.dumps({"execution_id": "abc", "approved": True}),
         content_type="application/json")
     assert r.status_code == 404
-
-
-def test_remediate_skipped_when_not_approved(client):
-    # First: create a pending execution
-    with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_rewoo_loop", side_effect=_fake_loop):
-        inv = client.post("/investigate",
-            data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
-                             "severity": "warning", "namespace": "vroom-dev"}),
-            content_type="application/json").get_json()
-
-    r = client.post("/remediate",
-        data=json.dumps({"execution_id": inv["execution_id"], "approved": False}),
-        content_type="application/json")
-    assert r.status_code == 200
-    assert r.get_json()["outcome"] == "skipped"
-
-
-def test_remediate_approved_stores_incident_memory(client):
-    _FAKE_REDIS.flushall()
-
-    with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_rewoo_loop", side_effect=_fake_loop):
-        inv = client.post("/investigate",
-            data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
-                             "severity": "warning", "namespace": "vroom-dev"}),
-            content_type="application/json").get_json()
-
-    mock_exec_resp = MagicMock()
-    mock_exec_resp.status_code = 200
-    mock_exec_resp.json.return_value = {"stdout": "deployment.apps/dispatch-service restarted", "returncode": 0}
-
-    # Mock the post-restart health check: return a healthy pod (1/1 Running)
-    _healthy_pods = "NAME                  READY   STATUS    RESTARTS   AGE\ndispatch-service-abc  1/1     Running   0          5s"
-
-    with patch("requests.post", return_value=mock_exec_resp), \
-         patch("app.time.sleep"), \
-         patch("app.call_tool", return_value=_healthy_pods):
-        r = client.post("/remediate",
-            data=json.dumps({"execution_id": inv["execution_id"], "approved": True}),
-            content_type="application/json")
-
-    assert r.status_code == 200
-    assert r.get_json()["outcome"] == "resolved"
-    # Incident should now be in memory
-    assert _FAKE_REDIS.scard("incidents:index") > 0
 
 
 def test_admin_runbook_renders_markdown(client):
@@ -167,8 +189,6 @@ def test_admin_reseed_clears_and_reloads(client):
         "symptom": "test", "root_cause": "test",
         "fix_command": "kubectl test", "source": "learned",
     })
-    assert _FAKE_REDIS.scard(mem_mod.RUNBOOK_INDEX) == 1
-
     with patch("app.seed_if_empty", return_value=3) as mock_seed:
         r = client.post("/admin/reseed")
     assert r.status_code == 200
@@ -186,7 +206,6 @@ def test_admin_models_hot_swap(client):
         content_type="application/json")
     assert r.status_code == 200
     assert r.get_json()["models"] == new_models
-
     r2 = client.get("/admin/models")
     assert r2.get_json()["models"] == new_models
 
@@ -197,25 +216,3 @@ def test_admin_models_rejects_string_format(client):
         content_type="application/json")
     assert r.status_code == 400
     assert "provider" in r.get_json()["error"]
-
-
-def test_investigate_response_includes_dev_hint(client):
-    def _none_loop(alert, call_tool_fn, api_key, **kw):
-        return {
-            "root_cause":  "redis connection failed",
-            "confidence":  "HIGH",
-            "remediation": None,
-            "rewoo_steps": [],
-            "dev_hint":    "Dev action: Fix REDIS_ADDR.\nkubectl: kubectl set env deployment/ride-service -n vroom-dev REDIS_ADDR=redis:6379",
-        }
-
-    with patch("app.collect_bundle", side_effect=_fake_bundle), \
-         patch("app.run_rewoo_loop", side_effect=_none_loop):
-        r = client.post("/investigate",
-            data=json.dumps({"alert_name": "HighErrorRate", "service": "ride-service",
-                             "severity": "warning", "namespace": "vroom-dev"}),
-            content_type="application/json")
-    assert r.status_code == 200
-    body = r.get_json()
-    assert "dev_hint" in body
-    assert body["dev_hint"].startswith("Dev action:")

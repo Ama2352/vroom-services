@@ -7,8 +7,8 @@ from memory import (store_incident, search_memory as memory_search,
                     connect as redis_connect,
                     store_runbook_entry, get_runbook_entries, search_runbook)
 from collector import collect_bundle
-from rewoo_loop import run_rewoo_loop, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
-from tools import call_tool
+from diagnostics import collect_diagnostics, format_evidence
+from interpreter import interpret, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 
 app = Flask(__name__)
@@ -16,10 +16,6 @@ app = Flask(__name__)
 REDIS_URL      = os.environ.get("REDIS_URL", "redis://redis.platform.svc.cluster.local:6379")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 GROQ_KEY       = os.environ.get("GROQ_API_KEY", "")
-EXECUTOR_URL   = os.environ.get("KUBECTL_EXECUTOR_URL",
-                                "http://kubectl-executor.monitoring.svc.cluster.local:5001")
-EXECUTOR_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
-PENDING_TTL    = 3600
 
 rdb = redis_connect(REDIS_URL)
 
@@ -64,70 +60,6 @@ def _format_memory_context(mem_text: str, runbook_hits: list) -> str:
         parts.append("Runbook:\n" + "\n".join(lines))
     return "\n\n".join(parts) if parts else ""
 
-
-def _extract_evidence(steps: list) -> str:
-    priority = ["get_traces", "get_events", "get_logs", "describe_pod", "get_pods"]
-    _skip    = {"[no output]", "No errored traces found in last 15 minutes.",
-                "[no output after filtering health checks]", "[traces unavailable]"}
-    by_tool  = {}
-    for step in steps:
-        obs = step.get("observation", "")
-        if not obs or obs.startswith(("[tool", "[traces unavailable")) or obs in _skip:
-            continue
-        for tool in priority:
-            if step["action"].startswith(tool) and tool not in by_tool:
-                by_tool[tool] = obs
-    sections = []
-    for tool in priority:
-        if tool not in by_tool:
-            continue
-        lines = [l for l in by_tool[tool].splitlines() if l.strip()]
-        # Skip metrics observations that only contain the header row (kubectl top returned no pods)
-        if tool == "get_metrics" and len(lines) <= 1:
-            continue
-        if lines[:4]:
-            sections.append(f"[{tool}]\n" + "\n".join(lines[:4]))
-    return "\n\n".join(sections)
-
-
-def _pod_health(pod_obs: str) -> tuple[bool, str]:
-    """Parse READY column as M/N. Returns (all_healthy, summary). No status-string enumeration."""
-    if pod_obs.startswith("[tool"):
-        return False, "pod check failed"
-    rows = [l for l in pod_obs.splitlines()[1:] if l.strip()]
-    if not rows:
-        return False, "no pods found"
-    unhealthy = []
-    for row in rows:
-        parts = row.split()
-        if len(parts) >= 3:
-            ready = parts[1]
-            m, sep, n = ready.partition("/")
-            if sep and m != n:
-                unhealthy.append(f"{parts[0]} {ready} {parts[2]}")
-    if unhealthy:
-        return False, "unhealthy: " + "; ".join(unhealthy)
-    return True, f"all {len(rows)} pod(s) healthy"
-
-
-def _suggested_command(rem: dict) -> str:
-    if not rem:
-        return ""
-    t   = rem.get("tool", "")
-    a   = rem.get("args", {})
-    dep = a.get("deployment", "")
-    ns  = a.get("namespace", "")
-    if t == "scale_deployment":
-        return f"kubectl scale deployment/{dep} -n {ns} --replicas=1"
-    if t == "restart_deployment":
-        return f"kubectl rollout restart deployment/{dep} -n {ns}"
-    return ""
-
-
-def _dispatch_tool(tool_name: str, args: dict) -> str:
-    if tool_name == "search_memory":
-        return memory_search(rdb, args.get("query", ""))
-    return call_tool(tool_name, args)
 
 
 def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
@@ -287,7 +219,6 @@ def investigate():
 
     seed_if_empty(rdb)
 
-    # Pre-fetch memory before Planner call (deterministic, no LLM)
     query        = f"{alert_name} {service}"
     mem_text     = memory_search(rdb, query, limit=3)
     runbook_hits = search_runbook(rdb, query, top_k=3)
@@ -299,154 +230,55 @@ def investigate():
           f"ctx_len={len(memory_ctx)}", flush=True)
 
     bundle = collect_bundle(service, namespace)
-    alert  = {
+    facts  = collect_diagnostics(service, namespace)
+
+    diagnosis = interpret(
+        alert_name, service, namespace,
+        facts, bundle, memory_ctx,
+        models=_current_models,
+        groq_key=GROQ_KEY,
+        openrouter_key=OPENROUTER_KEY,
+    )
+
+    evidence = format_evidence(facts)
+
+    store_incident(rdb, {
         "alert_name":     alert_name,
         "service":        service,
         "namespace":      namespace,
-        "bundle":         bundle,
-        "memory_context": memory_ctx,
-    }
+        "symptoms":       bundle,
+        "waiting_reason": facts["waiting_reason"],
+        "log_error":      facts["log_error"],
+        "root_cause":     diagnosis["root_cause"],
+        "kubectl_hint":   diagnosis["kubectl_hint"],
+        "outcome":        "acknowledged",
+    })
 
-    diagnosis = run_rewoo_loop(alert, _dispatch_tool, OPENROUTER_KEY,
-                               models=_current_models, groq_key=GROQ_KEY)
-
-    eid = str(uuid.uuid4())
-    rdb.set(f"pending:{eid}", json.dumps({"alert": alert, "diagnosis": diagnosis}),
-            ex=PENDING_TTL)
-
-    rem      = diagnosis.get("remediation")
-    steps    = diagnosis.get("rewoo_steps", [])
-    evidence = _extract_evidence(steps)
-    cmd      = _suggested_command(rem)
+    threading.Thread(
+        target=_reflect_and_store,
+        args=(rdb, {
+            "alert_name": alert_name,
+            "service":    service,
+            "root_cause": diagnosis["root_cause"],
+        }, diagnosis["kubectl_hint"]),
+        daemon=True,
+    ).start()
 
     return jsonify({
-        "execution_id":      eid,
-        "service":           service,
-        "alert_name":        alert_name,
-        "root_cause":        diagnosis["root_cause"],
-        "confidence":        diagnosis["confidence"],
-        "rewoo_steps":       len(steps),
-        "remediation":       rem,
-        "evidence_snippet":  evidence,
-        "suggested_command": cmd,
-        "dev_hint":          diagnosis.get("dev_hint", ""),
-        "memory_hits":       {"incidents": incident_hits, "runbook": len(runbook_hits)},
+        "service":          service,
+        "alert_name":       alert_name,
+        "root_cause":       diagnosis["root_cause"],
+        "dev_action":       diagnosis["dev_action"],
+        "kubectl_hint":     diagnosis["kubectl_hint"],
+        "evidence_snippet": evidence,
+        "memory_hits":      {"incidents": incident_hits, "runbook": len(runbook_hits)},
         **({"debug": {
             "bundle":         bundle,
             "memory_context": memory_ctx or "(none)",
-            "rewoo_steps_detail": steps,
+            "facts":          facts,
         }} if debug else {}),
     })
 
-
-@app.route("/remediate", methods=["POST"])
-def remediate():
-    data     = request.get_json(silent=True) or {}
-    eid      = data.get("execution_id", "")
-    approved = data.get("approved", False)
-
-    raw = rdb.getdel(f"pending:{eid}")
-    if raw is None:
-        return jsonify({"error": "Unknown or expired execution_id"}), 404
-
-    pending   = json.loads(raw)
-    diagnosis = pending["diagnosis"]
-    alert     = pending["alert"]
-    rem       = diagnosis.get("remediation")
-
-    # Extract context once — used in both the response and reflection
-    root_cause = diagnosis.get("root_cause", "")
-    confidence = diagnosis.get("confidence", "LOW")
-    steps      = diagnosis.get("rewoo_steps", [])
-    evidence   = _extract_evidence(steps)
-    cmd        = _suggested_command(rem) if rem else ""
-
-    alert_name_log = alert.get("alert_name", "?")
-    service_log    = alert.get("service", "?")
-    tool_log       = rem["tool"] if rem else "none"
-    print(f"[remediate] alert={alert_name_log} service={service_log} "
-          f"approved={approved} tool={tool_log}", flush=True)
-
-    if not approved or not rem:
-        print(f"[remediate] no approved remediation → outcome=skipped", flush=True)
-        return jsonify({
-            "outcome":             "skipped",
-            "stdout":              "",
-            "root_cause":          root_cause,
-            "confidence":          confidence,
-            "evidence_snippet":    evidence,
-            "suggested_command":   cmd,
-            "post_health_summary": "n/a",
-        })
-
-    headers  = {"Authorization": f"Bearer {EXECUTOR_TOKEN}",
-                "Content-Type": "application/json"}
-    tool     = rem.get("tool")
-    args     = dict(rem.get("args", {}))
-    if tool == "scale_deployment":
-        args["replicas"] = 1
-        endpoint = "/tools/scale"
-    else:
-        endpoint = "/tools/restart"
-
-    print(f"[remediate] dispatching: {cmd or tool + ' ' + str(args)}", flush=True)
-    r      = requests.post(f"{EXECUTOR_URL}{endpoint}", json=args,
-                           headers=headers, timeout=35)
-    stdout = r.json().get("stdout", "") if r.status_code == 200 \
-             else f"[executor error: HTTP {r.status_code}]"
-
-    if r.status_code != 200:
-        print(f"[remediate] executor HTTP {r.status_code} → outcome=escalated", flush=True)
-        outcome             = "escalated"
-        post_health_summary = "n/a"
-    elif tool == "restart_deployment":
-        print(f"[remediate] waiting 35s for pod restart...", flush=True)
-        time.sleep(35)
-        pod_obs = call_tool("get_pods", {
-            "namespace":      args.get("namespace", ""),
-            "label_selector": f"app={args.get('deployment', '')}",
-        })
-        all_healthy, post_health_summary = _pod_health(pod_obs)
-        outcome = "resolved" if all_healthy else "attempted"
-        print(f"[remediate] post-restart: {post_health_summary} → {outcome}", flush=True)
-    else:
-        print(f"[remediate] scale complete → outcome=resolved", flush=True)
-        outcome             = "resolved"
-        post_health_summary = "n/a"
-
-    store_incident(rdb, {
-        "alert_name":          alert["alert_name"],
-        "service":             alert["service"],
-        "namespace":           alert["namespace"],
-        "symptoms":            alert["bundle"],
-        "investigation_steps": steps,
-        "root_cause":          root_cause,
-        "remediation_tool":    rem["tool"],
-        "remediation_args":    rem.get("args", {}),
-        "outcome":             outcome,
-    })
-
-    if outcome == "resolved":
-        threading.Thread(
-            target=_reflect_and_store,
-            args=(rdb, {
-                "alert_name":       alert["alert_name"],
-                "service":          alert["service"],
-                "root_cause":       root_cause,
-                "remediation_tool": rem["tool"],
-            }, cmd),
-            daemon=True,
-        ).start()
-
-    return jsonify({
-        "outcome":             outcome,
-        "stdout":              stdout,
-        "root_cause":          root_cause,
-        "confidence":          confidence,
-        "evidence_snippet":    evidence,
-        "suggested_command":   cmd,
-        "post_health_summary": post_health_summary,
-    })
 
 
 if __name__ == "__main__":
