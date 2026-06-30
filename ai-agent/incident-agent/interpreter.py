@@ -117,20 +117,22 @@ def _quality_check(diagnosis: dict, facts: dict, pod: str, service: str) -> dict
     kh     = diagnosis.get("kubectl_hint", "")
     issues = []
 
-    if rc.startswith("insufficient evidence"):
-        return {"passed": True, "low_confidence": True, "issues": []}
-
-    if any(p in rc for p in GENERIC_ROOT_CAUSE):
-        issues.append(
-            "root_cause uses vague language — it must name a specific cause "
-            "drawn from the evidence (component, error, or resource name)"
-        )
-
     if "<" in kh and ">" in kh:
         replacement = pod if pod else f"-l app={service}"
         issues.append(
             f"kubectl_hint contains a placeholder — replace with actual value: "
             f"'{replacement}'"
+        )
+
+    if rc.startswith("insufficient evidence"):
+        # Honest low-confidence response — skip language checks, but still
+        # surface any placeholder issue found above so refine can fix it.
+        return {"passed": len(issues) == 0, "low_confidence": True, "issues": issues}
+
+    if any(p in rc for p in GENERIC_ROOT_CAUSE):
+        issues.append(
+            "root_cause uses vague language — it must name a specific cause "
+            "drawn from the evidence (component, error, or resource name)"
         )
 
     if any(p in da for p in GENERIC_DEV_ACTION):

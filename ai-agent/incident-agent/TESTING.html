@@ -462,13 +462,21 @@ kubectl describe pod -n vroom-dev -l app=ride-service | grep -A3 "Last State"
       <li>
         <div class="step-body">
           <span class="step-label">Restore memory limit TRƯỚC khi click APPROVE</span>
-          <p class="step-note">Nếu restart chạy mà limit vẫn còn 6Mi, pod sẽ OOMKilled ngay lập tức và outcome = failed. Restore trước:</p>
-          <pre><code>kubectl set resources deployment/ride-service -n vroom-dev \
-  --limits=memory=256Mi --requests=memory=32Mi
-<span class="cm"># Verify deployment updated (không cần đợi pod, rollout restart sẽ làm)</span>
+          <p class="step-note">Nếu restart chạy mà limit vẫn còn 6Mi, pod sẽ OOMKilled ngay lập tức và outcome = failed. Restore trước — cần restore cả init containers vì inject step (no -c) đã set tất cả containers xuống 6Mi:</p>
+          <pre><code><span class="cm"># Init containers (migrate runs DB migrations — needs more headroom)</span>
+kubectl set resources deployment/ride-service -n vroom-dev \
+  -c copy-migrations --limits=memory=32Mi --requests=memory=16Mi
+kubectl set resources deployment/ride-service -n vroom-dev \
+  -c migrate --limits=memory=64Mi --requests=memory=32Mi
+
+<span class="cm"># Main container</span>
+kubectl set resources deployment/ride-service -n vroom-dev \
+  -c ride-service --limits=cpu=200m,memory=128Mi --requests=cpu=50m,memory=32Mi
+
+<span class="cm"># Verify main container updated</span>
 kubectl get deployment/ride-service -n vroom-dev \
   -o jsonpath='{.spec.template.spec.containers[0].resources}' | python3 -m json.tool
-<span class="cm"># Expected: "limits": {"memory": "256Mi"}, "requests": {"memory": "32Mi"}</span></code></pre>
+<span class="cm"># Expected: "limits": {"cpu": "200m", "memory": "128Mi"}</span></code></pre>
         </div>
       </li>
       <li>
@@ -488,9 +496,13 @@ kubectl logs -n monitoring deployment/incident-agent --tail=10 \
       <li>
         <div class="step-body">
           <span class="step-label">Full reset (nếu bỏ qua bước 4 hoặc test fail giữa chừng)</span>
-          <pre><code><span class="cm"># Option 1 — Restore về đúng giá trị kustomize overlay</span>
+          <pre><code><span class="cm"># Option 1 — Restore từng container về đúng giá trị</span>
 kubectl set resources deployment/ride-service -n vroom-dev \
-  --limits=memory=256Mi --requests=memory=32Mi
+  -c copy-migrations --limits=memory=32Mi --requests=memory=16Mi
+kubectl set resources deployment/ride-service -n vroom-dev \
+  -c migrate --limits=memory=64Mi --requests=memory=32Mi
+kubectl set resources deployment/ride-service -n vroom-dev \
+  -c ride-service --limits=cpu=200m,memory=128Mi --requests=cpu=50m,memory=32Mi
 kubectl rollout status deployment/ride-service -n vroom-dev
 kubectl get pods -n vroom-dev -l app=ride-service
 <span class="cm"># Expected: READY=1/1  STATUS=Running</span>

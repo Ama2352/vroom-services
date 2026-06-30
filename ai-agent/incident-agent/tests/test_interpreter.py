@@ -190,6 +190,17 @@ class TestQualityCheck:
         assert r["low_confidence"] is True
         assert r["issues"] == []
 
+    def test_insufficient_evidence_with_placeholder_still_fails(self):
+        # Bug regression: early return on "insufficient evidence" was skipping
+        # the placeholder check, so <pod_name> would slip through undetected.
+        d = self._clean()
+        d["root_cause"]   = "Insufficient evidence: need previous container logs"
+        d["kubectl_hint"] = "kubectl logs ride-<pod_name> -n vroom-dev --previous"
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert r["low_confidence"] is True
+        assert any("placeholder" in issue for issue in r["issues"])
+
     def test_passes_clean_output(self):
         r = _quality_check(self._clean(), SAMPLE_FACTS, "ride-abc123", "ride")
         assert r["passed"] is True
