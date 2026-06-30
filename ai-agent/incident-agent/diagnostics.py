@@ -91,21 +91,42 @@ def collect_diagnostics(service: str, namespace: str) -> dict:
         f'kube_pod_container_status_waiting_reason{{namespace="{namespace}",pod=~"{service}-.*"}}',
         label="reason",
     )
+    last_terminated_reason = _prom_active_label(
+        f'kube_pod_container_status_last_terminated_reason{{namespace="{namespace}",pod=~"{service}-.*"}}',
+        label="reason",
+    )
     restarts = int(_prom_scalar(
         f'sum(kube_pod_container_status_restarts_total{{namespace="{namespace}",pod=~"{service}-.*"}})'
+    ))
+    # Init containers are tracked separately — PodInitializing on the main container
+    # means an init container is still running or crashing.
+    init_waiting_reason = _prom_active_label(
+        f'kube_pod_init_container_status_waiting_reason{{namespace="{namespace}",pod=~"{service}-.*"}}',
+        label="reason",
+    )
+    init_last_terminated_reason = _prom_active_label(
+        f'kube_pod_init_container_status_last_terminated_reason{{namespace="{namespace}",pod=~"{service}-.*"}}',
+        label="reason",
+    )
+    init_restarts = int(_prom_scalar(
+        f'sum(kube_pod_init_container_status_restarts_total{{namespace="{namespace}",pod=~"{service}-.*"}})'
     ))
     log_error = _loki_latest_error(service, namespace)
     event     = _k8s_latest_warning(service, namespace)
 
     return {
-        "pods_available": pods_available,
-        "pods_desired":   pods_desired,
-        "waiting_reason": waiting_reason,
-        "restarts":       restarts,
-        "log_error":      log_error,
-        "event_reason":   event.get("reason",   ""),
-        "event_message":  event.get("message",  ""),
-        "event_object":   event.get("object",   ""),
+        "pods_available":             pods_available,
+        "pods_desired":               pods_desired,
+        "waiting_reason":             waiting_reason,
+        "last_terminated_reason":     last_terminated_reason,
+        "restarts":                   restarts,
+        "init_waiting_reason":        init_waiting_reason,
+        "init_last_terminated_reason": init_last_terminated_reason,
+        "init_restarts":              init_restarts,
+        "log_error":                  log_error,
+        "event_reason":               event.get("reason",   ""),
+        "event_message":              event.get("message",  ""),
+        "event_object":               event.get("object",   ""),
     }
 
 
@@ -119,9 +140,20 @@ def format_evidence(facts: dict) -> str:
     pod_line = f"Pods: {facts['pods_available']}/{facts['pods_desired']} running"
     if facts.get("waiting_reason"):
         pod_line += f" ({facts['waiting_reason']}, {facts['restarts']} restarts)"
+        if facts.get("last_terminated_reason"):
+            pod_line += f" [last exit: {facts['last_terminated_reason']}]"
     elif facts.get("restarts", 0) > 0:
         pod_line += f" ({facts['restarts']} restarts)"
+        if facts.get("last_terminated_reason"):
+            pod_line += f" [last exit: {facts['last_terminated_reason']}]"
     lines.append(pod_line)
+
+    if facts.get("init_waiting_reason") or facts.get("init_last_terminated_reason"):
+        init_line = f"Init container: {facts.get('init_waiting_reason') or 'waiting'}"
+        init_line += f" ({facts.get('init_restarts', 0)} restarts)"
+        if facts.get("init_last_terminated_reason"):
+            init_line += f" — last exit: {facts['init_last_terminated_reason']}"
+        lines.append(init_line)
 
     if facts.get("log_error"):
         lines.append(f"Error: {facts['log_error'][:120]}")

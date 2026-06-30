@@ -72,9 +72,17 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
         f"  Pods: {facts['pods_available']}/{facts['pods_desired']} running",
     ]
     if facts.get("waiting_reason"):
-        lines.append(
-            f"  Container state: {facts['waiting_reason']} ({facts['restarts']} restarts)"
-        )
+        state_line = f"  Container state: {facts['waiting_reason']} ({facts['restarts']} restarts)"
+        if facts.get("last_terminated_reason"):
+            state_line += f" — last exit: {facts['last_terminated_reason']}"
+        lines.append(state_line)
+    elif facts.get("last_terminated_reason"):
+        lines.append(f"  Last exit reason: {facts['last_terminated_reason']} ({facts['restarts']} restarts)")
+    if facts.get("init_waiting_reason") or facts.get("init_last_terminated_reason"):
+        init_line = f"  Init container: {facts.get('init_waiting_reason') or 'waiting'} ({facts.get('init_restarts', 0)} restarts)"
+        if facts.get("init_last_terminated_reason"):
+            init_line += f" — last exit: {facts['init_last_terminated_reason']}"
+        lines.append(init_line)
     if facts.get("log_error"):
         lines.append(f"  Last error log: {facts['log_error']}")
     if facts.get("event_reason"):
@@ -196,7 +204,7 @@ def _fallback(service: str, namespace: str, facts: dict) -> dict:
 
 
 def _call_llm(messages: list, model_entry: dict,
-              groq_key: str, openrouter_key: str, max_tokens: int = 200) -> str:
+              groq_key: str, openrouter_key: str, max_tokens: int = 400) -> str:
     url = GROQ_URL if model_entry["provider"] == "groq" else OPENROUTER_URL
     key = groq_key if model_entry["provider"] == "groq" else openrouter_key
     resp = http_requests.post(
@@ -225,7 +233,7 @@ def interpret(
     raw    = _run_llm(messages, _llm, models, groq_key, openrouter_key)
     phase1 = _parse_output(raw)
     if phase1 is None:
-        print(f"[interpreter] parse failed — using fallback. raw={raw[:200]!r}", flush=True)
+        print(f"[interpreter] parse failed — using fallback. raw={raw[:600]!r}", flush=True)
         result = _fallback(service, namespace, facts)
         result["low_confidence"] = False
         return result

@@ -233,7 +233,10 @@ def investigate():
     bundle = collect_bundle(service, namespace)
     facts  = collect_diagnostics(service, namespace)
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
-          f"reason={facts['waiting_reason']!r} restarts={facts['restarts']} "
+          f"reason={facts['waiting_reason']!r} last_exit={facts['last_terminated_reason']!r} "
+          f"restarts={facts['restarts']} "
+          f"init={facts['init_waiting_reason']!r} init_last_exit={facts['init_last_terminated_reason']!r} "
+          f"init_restarts={facts['init_restarts']} "
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
     diagnosis = interpret(
