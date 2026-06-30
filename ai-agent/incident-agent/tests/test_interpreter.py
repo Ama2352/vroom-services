@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from interpreter import (
     interpret, _parse_output, _fallback, _build_grounded_prompt,
-    _quality_check,
+    _quality_check, _build_refine_prompt,
     K8S_KNOWLEDGE_TABLE, GROUNDING_RULE, REQUIRED_KEYS
 )
 
@@ -18,6 +18,14 @@ SAMPLE_FACTS = {
 VALID_JSON = ('{"root_cause":"postgres unreachable",'
               '"dev_action":"check postgres pod",'
               '"kubectl_hint":"kubectl get pods -n platform"}')
+
+_GENERIC_JSON = ('{"root_cause":"potential issue with container initialization",'
+                 '"dev_action":"investigate manually using kubectl",'
+                 '"kubectl_hint":"kubectl describe pod <pod_name> -n vroom-dev"}')
+
+_SPECIFIC_JSON = ('{"root_cause":"CrashLoopBackOff — postgres unreachable (dial tcp :5432: i/o timeout)",'
+                  '"dev_action":"check postgres pod status in the platform namespace",'
+                  '"kubectl_hint":"kubectl logs ride-abc123 -n vroom-dev --previous"}')
 
 
 class TestParseOutput:
@@ -221,3 +229,79 @@ class TestInterpret:
         )
         for k in REQUIRED_KEYS:
             assert isinstance(result[k], str) and result[k].strip()
+
+
+class TestBuildRefinePrompt:
+    def _original(self):
+        return _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
+
+    def test_contains_original_prompt(self):
+        original  = self._original()
+        diagnosis = {"root_cause": "potential issue", "dev_action": "investigate manually",
+                     "kubectl_hint": "kubectl get pods"}
+        refine = _build_refine_prompt(original, diagnosis, ["root_cause is vague"])
+        assert original in refine
+
+    def test_contains_issue_list(self):
+        original  = self._original()
+        diagnosis = {"root_cause": "potential issue", "dev_action": "investigate manually",
+                     "kubectl_hint": "kubectl get pods"}
+        issues = ["root_cause uses vague language", "dev_action is too vague"]
+        refine = _build_refine_prompt(original, diagnosis, issues)
+        assert "root_cause uses vague language" in refine
+        assert "dev_action is too vague" in refine
+
+    def test_contains_previous_diagnosis(self):
+        original  = self._original()
+        diagnosis = {"root_cause": "potential issue", "dev_action": "investigate manually",
+                     "kubectl_hint": "kubectl get pods"}
+        refine = _build_refine_prompt(original, diagnosis, ["root_cause is vague"])
+        assert "potential issue" in refine
+
+
+class TestInterpretPipeline:
+    def test_self_refine_triggered_when_quality_check_fails(self):
+        from unittest.mock import Mock
+        mock_llm = Mock(side_effect=[_GENERIC_JSON, _SPECIFIC_JSON])
+        interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                  pod="ride-abc123", _llm=mock_llm)
+        assert mock_llm.call_count == 2
+
+    def test_self_refine_not_triggered_when_quality_check_passes(self):
+        from unittest.mock import Mock
+        mock_llm = Mock(return_value=_SPECIFIC_JSON)
+        interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                  pod="ride-abc123", _llm=mock_llm)
+        assert mock_llm.call_count == 1
+
+    def test_refine_result_returned_when_successful(self):
+        from unittest.mock import Mock
+        mock_llm = Mock(side_effect=[_GENERIC_JSON, _SPECIFIC_JSON])
+        result = interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                           pod="ride-abc123", _llm=mock_llm)
+        assert "postgres unreachable" in result["root_cause"]
+
+    def test_phase1_returned_when_refine_parse_fails(self):
+        from unittest.mock import Mock
+        mock_llm = Mock(side_effect=[_GENERIC_JSON, "not valid json at all"])
+        result = interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                           pod="ride-abc123", _llm=mock_llm)
+        assert mock_llm.call_count == 2
+        assert "potential issue" in result["root_cause"]
+
+    def test_end_to_end_two_calls(self):
+        from unittest.mock import Mock
+        mock_llm = Mock(side_effect=[_GENERIC_JSON, _SPECIFIC_JSON])
+        result = interpret("KubePodNotReady", "ride", "vroom-dev",
+                           SAMPLE_FACTS, "", "", [], pod="ride-abc123", _llm=mock_llm)
+        assert mock_llm.call_count == 2
+        assert "postgres unreachable" in result["root_cause"]
+        assert result.get("low_confidence") is False
+
+    def test_end_to_end_one_call(self):
+        from unittest.mock import Mock
+        mock_llm = Mock(return_value=_SPECIFIC_JSON)
+        result = interpret("KubePodNotReady", "ride", "vroom-dev",
+                           SAMPLE_FACTS, "", "", [], pod="ride-abc123", _llm=mock_llm)
+        assert mock_llm.call_count == 1
+        assert result.get("low_confidence") is False

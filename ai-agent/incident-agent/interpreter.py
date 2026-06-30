@@ -150,6 +150,41 @@ def _parse_output(text: str) -> dict | None:
     return result
 
 
+def _build_refine_prompt(original_prompt: str, diagnosis: dict, issues: list) -> str:
+    lines = [
+        original_prompt,
+        "",
+        "Your previous answer was:",
+        json.dumps(diagnosis, indent=2),
+        "",
+        "The following specific issues were detected:",
+    ]
+    for issue in issues:
+        lines.append(f"- {issue}")
+    lines += [
+        "",
+        "Fix ONLY these issues. Keep all other fields the same.",
+        "Output exactly this JSON (no markdown, no explanation):",
+        '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}',
+    ]
+    return "\n".join(lines)
+
+
+def _run_llm(messages: list, _llm, models: list,
+             groq_key: str, openrouter_key: str) -> str:
+    if _llm is not None:
+        try:
+            return _llm(messages, openrouter_key)
+        except Exception:
+            return ""
+    for model_entry in (models or DEFAULT_MODELS):
+        try:
+            return _call_llm(messages, model_entry, groq_key, openrouter_key)
+        except Exception as exc:
+            print(f"[interpreter] {model_entry['id']} failed: {exc}", flush=True)
+    return ""
+
+
 def _fallback(service: str, namespace: str, facts: dict) -> dict:
     reason = facts.get("waiting_reason") or "Unknown state"
     log    = facts.get("log_error")     or "no log available"
@@ -180,32 +215,36 @@ def interpret(
     alert_name: str, service: str, namespace: str,
     facts: dict, bundle: str, memory_context: str,
     models: list, groq_key: str = "", openrouter_key: str = "",
-    _llm=None,
+    pod: str = "", _llm=None,
 ) -> dict:
-    """Interpret structured pod facts into a 3-field diagnosis via one LLM call.
-
-    Falls back to a Python-derived answer when the LLM is unavailable or returns
-    invalid output. Always returns dict with root_cause, dev_action, kubectl_hint.
-    """
-    prompt   = _build_grounded_prompt(alert_name, service, namespace, facts, bundle, memory_context, "")
+    prompt   = _build_grounded_prompt(alert_name, service, namespace,
+                                      facts, bundle, memory_context, pod)
     messages = [{"role": "user", "content": prompt}]
 
-    if _llm is not None:
-        try:
-            raw = _llm(messages, openrouter_key)
-        except Exception:
-            raw = ""
-    else:
-        raw = ""
-        for model_entry in (models or DEFAULT_MODELS):
-            try:
-                raw = _call_llm(messages, model_entry, groq_key, openrouter_key)
-                break
-            except Exception as exc:
-                print(f"[interpreter] {model_entry['id']} failed: {exc}", flush=True)
-
-    result = _parse_output(raw)
-    if result is None:
+    # Phase 1 — Grounded Generation
+    raw    = _run_llm(messages, _llm, models, groq_key, openrouter_key)
+    phase1 = _parse_output(raw)
+    if phase1 is None:
         print(f"[interpreter] parse failed — using fallback. raw={raw[:200]!r}", flush=True)
-        return _fallback(service, namespace, facts)
-    return result
+        result = _fallback(service, namespace, facts)
+        result["low_confidence"] = False
+        return result
+
+    # Phase 2 — Deterministic Quality Check
+    qc = _quality_check(phase1, facts, pod, service)
+    if qc["passed"]:
+        phase1["low_confidence"] = qc["low_confidence"]
+        return phase1
+
+    # Phase 3 — Targeted Self-Refine
+    print(f"[interpreter] quality issues detected: {qc['issues']}", flush=True)
+    refine_prompt   = _build_refine_prompt(prompt, phase1, qc["issues"])
+    refine_messages = [{"role": "user", "content": refine_prompt}]
+    raw2    = _run_llm(refine_messages, _llm, models, groq_key, openrouter_key)
+    refined = _parse_output(raw2)
+    if refined is None:
+        print(f"[interpreter] refine parse failed — returning phase1 output", flush=True)
+        phase1["low_confidence"] = False
+        return phase1
+    refined["low_confidence"] = False
+    return refined
