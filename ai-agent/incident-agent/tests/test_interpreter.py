@@ -87,6 +87,18 @@ class TestFallback:
 
 
 class TestBuildGroundedPrompt:
+    def test_custom_knowledge_table_replaces_constant(self):
+        custom = "- CustomReason: custom entry for testing."
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev",
+                                         SAMPLE_FACTS, "", "", "", custom)
+        assert custom in prompt
+        assert K8S_KNOWLEDGE_TABLE not in prompt
+
+    def test_empty_knowledge_table_falls_back_to_constant(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev",
+                                         SAMPLE_FACTS, "", "", "", "")
+        assert K8S_KNOWLEDGE_TABLE in prompt
+
     def test_grounding_constraint_in_prompt(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
         assert K8S_KNOWLEDGE_TABLE in prompt
@@ -186,6 +198,18 @@ class TestQualityCheck:
 
 
 class TestInterpret:
+    def test_custom_knowledge_table_passed_through(self):
+        captured = {}
+        def capturing_llm(msgs, key):
+            captured["prompt"] = msgs[0]["content"]
+            return VALID_JSON
+        custom = "- CustomEntry: my custom knowledge."
+        interpret("KubePodNotReady", "ride", "vroom-dev",
+                  SAMPLE_FACTS, "", "", [], _llm=capturing_llm,
+                  knowledge_table=custom)
+        assert custom in captured["prompt"]
+        assert K8S_KNOWLEDGE_TABLE not in captured["prompt"]
+
     def test_valid_llm_output_returned(self):
         result = interpret(
             "KubePodNotReady", "ride", "vroom-dev",

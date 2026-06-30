@@ -63,9 +63,9 @@ REQUIRED_KEYS = {"root_cause", "dev_action", "kubectl_hint"}
 
 def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
                             facts: dict, bundle: str, memory_context: str,
-                            pod: str) -> str:
+                            pod: str, knowledge_table: str = "") -> str:
     lines = [
-        K8S_KNOWLEDGE_TABLE,
+        knowledge_table or K8S_KNOWLEDGE_TABLE,
         "",
         f"Alert: {alert_name}",
         f"Service: {service}",
@@ -230,10 +230,11 @@ def interpret(
     alert_name: str, service: str, namespace: str,
     facts: dict, bundle: str, memory_context: str,
     models: list, groq_key: str = "", openrouter_key: str = "",
-    pod: str = "", _llm=None,
+    pod: str = "", _llm=None, knowledge_table: str = "",
 ) -> dict:
     prompt   = _build_grounded_prompt(alert_name, service, namespace,
-                                      facts, bundle, memory_context, pod)
+                                      facts, bundle, memory_context, pod,
+                                      knowledge_table)
     messages = [{"role": "user", "content": prompt}]
 
     # Phase 1 — Grounded Generation
