@@ -41,7 +41,7 @@ def _loki_latest_error(service: str, namespace: str) -> str:
     try:
         now_ms = int(time.time() * 1000)
         r = http_requests.get(LOKI_URL, params={
-            "query":     f'{{app="{service}",namespace="{namespace}"}} |= "error"',
+            "query":     f'{{app="{service}",namespace="{namespace}"}} |~ "(?i)(error|failed|panic|fatal|refused)"',
             "start":     str((now_ms - 15 * 60 * 1000) * 1_000_000),
             "end":       str(now_ms * 1_000_000),
             "limit":     "1",

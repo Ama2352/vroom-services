@@ -105,6 +105,23 @@ class TestCollectDiagnostics:
         assert result["log_error"] == log_line
 
     @patch("diagnostics.http_requests.get")
+    def test_loki_query_uses_broad_pattern_not_exact_error(self, mock_get):
+        # Regression: |= "error" (case-sensitive) misses "failed", "refused", etc.
+        # Query must use a regex pattern covering common failure keywords.
+        captured = {}
+        def side(url, **kw):
+            if "query_range" in url or "loki" in url:
+                captured["query"] = kw.get("params", {}).get("query", "")
+                return _loki_ok("redis: failed to dial after 5 attempts")
+            return _fail()
+        mock_get.side_effect = side
+        collect_diagnostics("ride", "vroom-dev")
+        q = captured.get("query", "")
+        assert "|= \"error\"" not in q, "exact |= match misses 'failed', 'refused', etc."
+        assert "failed" in q
+        assert "refused" in q
+
+    @patch("diagnostics.http_requests.get")
     def test_loki_log_truncated_at_200_chars(self, mock_get):
         long_log = "x" * 300
         def side(url, **kw):
