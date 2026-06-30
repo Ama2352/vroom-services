@@ -137,6 +137,190 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
         print(f"[reflect] failed (non-fatal): {e}", flush=True)
 
 
+_ADMIN_UI_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Incident Agent Admin</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: monospace; }
+body { background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+h1 { color: #4fc3f7; margin-bottom: 20px; font-size: 1.2em; }
+.tabs { display: flex; gap: 2px; margin-bottom: 20px; }
+.tab { padding: 8px 20px; background: #2a2a4a; border: none; color: #aaa; cursor: pointer; font-size: 0.9em; }
+.tab.active { background: #0d47a1; color: #fff; }
+.panel { display: none; }
+.panel.active { display: block; }
+textarea { width: 100%; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 10px; font-size: 0.85em; resize: vertical; line-height: 1.5; }
+button { padding: 8px 16px; border: none; cursor: pointer; font-size: 0.85em; margin: 4px 2px; }
+.btn-primary { background: #0d47a1; color: white; }
+.btn-secondary { background: #37474f; color: #ccc; }
+.btn-success { background: #1b5e20; color: white; }
+.divider { border-top: 1px solid #30363d; margin: 20px 0; padding-top: 20px; }
+label { display: block; color: #8b949e; font-size: 0.8em; margin-bottom: 4px; }
+.row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+pre { background: #0d1117; border: 1px solid #30363d; padding: 12px; overflow-y: auto;
+      white-space: pre-wrap; font-size: 0.8em; line-height: 1.5; max-height: 70vh; }
+.toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px; border-radius: 4px;
+         font-size: 0.85em; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.toast.ok  { background: #1b5e20; color: white; }
+.toast.err { background: #b71c1c; color: white; }
+.err-msg { color: #ef5350; font-size: 0.8em; margin-top: 4px; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<h1>Incident Agent &#8212; Admin</h1>
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('knowledge')">Knowledge</button>
+  <button class="tab"        onclick="switchTab('models')">Models</button>
+  <button class="tab"        onclick="switchTab('runbook')">Runbook</button>
+</div>
+
+<div id="tab-knowledge" class="panel active">
+  <div class="row">
+    <label style="flex:1;margin:0;">Knowledge Table</label>
+    <button class="btn-primary" onclick="saveKnowledge()">Save</button>
+  </div>
+  <textarea id="kt-text" rows="20" spellcheck="false"></textarea>
+
+  <div class="divider">
+    <label>Suggest new entry from incident data</label>
+    <label style="margin-top:8px;">Paste kubectl describe / logs / agent output:</label>
+    <textarea id="kt-raw" rows="6" spellcheck="false"
+              placeholder="paste raw incident data here..."></textarea>
+    <div class="row" style="margin-top:6px;">
+      <button class="btn-secondary" onclick="suggestEntry()">Suggest entry</button>
+      <span id="suggest-loading" style="display:none;color:#aaa;">generating&#8230;</span>
+    </div>
+    <label style="margin-top:12px;">Draft (edit before appending):</label>
+    <textarea id="kt-draft" rows="5" spellcheck="false"
+              placeholder="suggestion will appear here..."></textarea>
+    <div class="row">
+      <button class="btn-success" onclick="appendDraft()">Append to table &#8593;</button>
+      <small style="color:#666;">(still need to Save after appending)</small>
+    </div>
+    <div class="err-msg" id="suggest-error"></div>
+  </div>
+</div>
+
+<div id="tab-models" class="panel">
+  <div class="row">
+    <label style="flex:1;margin:0;">Model Priority List (JSON array)</label>
+    <button class="btn-primary" onclick="saveModels()">Save</button>
+  </div>
+  <textarea id="models-text" rows="10" spellcheck="false"></textarea>
+  <div class="err-msg" id="models-error"></div>
+</div>
+
+<div id="tab-runbook" class="panel">
+  <label>Runbook entries (read-only)</label>
+  <pre id="runbook-text">loading&#8230;</pre>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+const TABS = ["knowledge","models","runbook"];
+function switchTab(name) {
+  TABS.forEach(t => {
+    document.getElementById("tab-"+t).classList.toggle("active", t===name);
+  });
+  document.querySelectorAll(".tab").forEach((el,i) => {
+    el.classList.toggle("active", TABS[i]===name);
+  });
+  if (name==="knowledge") loadKnowledge();
+  if (name==="models")    loadModels();
+  if (name==="runbook")   loadRunbook();
+}
+function showToast(msg, ok) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "toast show " + (ok ? "ok" : "err");
+  setTimeout(() => { t.className = "toast"; }, 3000);
+}
+async function loadKnowledge() {
+  try {
+    const r = await fetch("/admin/knowledge");
+    const d = await r.json();
+    document.getElementById("kt-text").value = d.table || "";
+  } catch(e) { showToast("Failed to load knowledge table", false); }
+}
+async function saveKnowledge() {
+  const text = document.getElementById("kt-text").value;
+  try {
+    const r = await fetch("/admin/knowledge", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({table: text}),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    showToast("Knowledge table saved", true);
+  } catch(e) { showToast("Save failed: "+e.message, false); }
+}
+async function suggestEntry() {
+  const raw = document.getElementById("kt-raw").value.trim();
+  if (!raw) { showToast("Paste incident data first", false); return; }
+  document.getElementById("suggest-loading").style.display = "inline";
+  document.getElementById("suggest-error").textContent = "";
+  document.getElementById("kt-draft").value = "";
+  try {
+    const r = await fetch("/admin/knowledge/suggest", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({raw}),
+    });
+    const d = await r.json();
+    if (d.error) { document.getElementById("suggest-error").textContent = "LLM error: "+d.error; }
+    else         { document.getElementById("kt-draft").value = d.suggestion || ""; }
+  } catch(e) {
+    document.getElementById("suggest-error").textContent = "Request failed: "+e.message;
+  } finally {
+    document.getElementById("suggest-loading").style.display = "none";
+  }
+}
+function appendDraft() {
+  const draft = document.getElementById("kt-draft").value.trim();
+  if (!draft) { showToast("No draft to append", false); return; }
+  const kt = document.getElementById("kt-text");
+  kt.value  = kt.value.trimEnd() + "\\n" + draft;
+  showToast("Appended — remember to Save", true);
+}
+async function loadModels() {
+  try {
+    const r = await fetch("/admin/models");
+    const d = await r.json();
+    document.getElementById("models-text").value = JSON.stringify(d.models, null, 2);
+  } catch(e) { showToast("Failed to load models", false); }
+}
+async function saveModels() {
+  document.getElementById("models-error").textContent = "";
+  let parsed;
+  try   { parsed = JSON.parse(document.getElementById("models-text").value); }
+  catch (e) { document.getElementById("models-error").textContent = "Invalid JSON: "+e.message; return; }
+  try {
+    const r = await fetch("/admin/models", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(parsed),
+    });
+    const d = await r.json();
+    if (d.error) { document.getElementById("models-error").textContent = d.error; }
+    else {
+      showToast("Models saved", true);
+      document.getElementById("models-text").value = JSON.stringify(d.models, null, 2);
+    }
+  } catch(e) { showToast("Save failed: "+e.message, false); }
+}
+async function loadRunbook() {
+  try {
+    const r    = await fetch("/admin/runbook");
+    const text = await r.text();
+    document.getElementById("runbook-text").textContent = text;
+  } catch(e) { showToast("Failed to load runbook", false); }
+}
+loadKnowledge();
+</script>
+</body>
+</html>"""
+
 _SUGGEST_PROMPT = """\
 You are updating a Kubernetes diagnostic knowledge table used by an incident response agent.
 Each entry follows this exact format:
@@ -194,6 +378,11 @@ def admin_runbook():
             lines.append(f"**Fix:** `{e['fix_command']}`")
         lines.append(f"*Source: {e.get('source', 'unknown')} | {date_str}*")
     return app.response_class("\n".join(lines), mimetype="text/plain")
+
+
+@app.route("/admin/ui")
+def admin_ui():
+    return _ADMIN_UI_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 @app.route("/admin/reset-incidents", methods=["POST"])

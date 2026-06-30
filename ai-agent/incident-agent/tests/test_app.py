@@ -293,3 +293,16 @@ def test_suggest_knowledge_entry_missing_raw(client):
         content_type="application/json")
     assert r.status_code == 400
     assert "raw" in r.get_json()["error"]
+
+
+def test_admin_ui_returns_html(client):
+    r = client.get("/admin/ui")
+    assert r.status_code == 200
+    assert "text/html" in r.content_type
+    body = r.data.decode()
+    assert "Knowledge" in body
+    assert "Models"    in body
+    assert "Runbook"   in body
+    assert "/admin/knowledge" in body
+    assert "/admin/models"    in body
+    assert "/admin/runbook"   in body
