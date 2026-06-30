@@ -12,14 +12,21 @@ DEFAULT_MODELS = [
 
 K8S_KNOWLEDGE_TABLE = """\
 Kubernetes pod waiting reasons and their diagnostic signatures:
-- PodInitializing: Init containers are running and blocking pod startup.
-  Look for: which init container is stuck, missing Secret/ConfigMap it depends on,
-  external service unreachable during init. Primary source: init container logs.
+- PodInitializing + init_last_exit=OOMKilled: Init container was killed by the kernel OOM.
+  This IS a conclusive root cause — do NOT say "Insufficient evidence". No logs exist after an
+  OOM kill. root_cause: "Init container OOMKilled — memory limit too low".
+  dev_action: increase the init container memory limit in the deployment manifest.
+  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section).
+- PodInitializing + init=CrashLoopBackOff (no OOMKilled): Init container crashing repeatedly.
+  Look for: missing Secret/ConfigMap, DB/Redis unreachable during init, bad entrypoint.
+  Primary source: kubectl logs {pod} -n {namespace} -c {init-container-name} --previous.
 - CrashLoopBackOff: Container started but exited with non-zero exit code, repeatedly.
   Look for: application crash on startup, missing required env var, OOM at startup,
   dependency (DB, Redis) unreachable. Primary source: previous container logs (--previous).
 - OOMKilled: Container exceeded its memory limit and was killed by the kernel.
-  No application logs after kill point. Look for: memory limit in pod spec vs. actual usage.
+  This IS a conclusive root cause — do NOT say "Insufficient evidence". No logs exist after
+  an OOM kill. dev_action: increase memory limit in deployment manifest.
+  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section).
 - ImagePullBackOff / ErrImagePull: Registry cannot pull the container image.
   Look for: typo in image name/tag, private registry credentials missing, image deleted.
   Primary source: K8s event message (names the exact image).
