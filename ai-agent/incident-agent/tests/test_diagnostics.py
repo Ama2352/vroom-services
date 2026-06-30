@@ -37,12 +37,13 @@ def _fail():
 
 class TestCollectDiagnostics:
     @patch("diagnostics.http_requests.get")
-    def test_returns_all_eight_keys(self, mock_get):
+    def test_returns_all_expected_keys(self, mock_get):
         mock_get.return_value = _fail()
         result = collect_diagnostics("ride", "vroom-dev")
         assert set(result.keys()) == {
-            "pods_available", "pods_desired", "waiting_reason",
-            "restarts", "log_error", "event_reason", "event_message", "event_object",
+            "pods_available", "pods_desired", "waiting_reason", "last_terminated_reason",
+            "restarts", "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
+            "log_error", "event_reason", "event_message", "event_object",
         }
 
     @patch("diagnostics.http_requests.get")

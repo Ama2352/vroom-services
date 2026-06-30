@@ -8,7 +8,8 @@ from memory import (store_incident, search_memory as memory_search,
                     store_runbook_entry, get_runbook_entries, search_runbook)
 from collector import collect_bundle
 from diagnostics import collect_diagnostics, format_evidence
-from interpreter import interpret, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
+from interpreter import (interpret, _run_llm, DEFAULT_MODELS,
+                         GROQ_URL, OPENROUTER_URL, K8S_KNOWLEDGE_TABLE)
 from seed import seed_if_empty
 
 app = Flask(__name__)
@@ -19,7 +20,8 @@ GROQ_KEY       = os.environ.get("GROQ_API_KEY", "")
 
 rdb = redis_connect(REDIS_URL)
 
-_MODELS_KEY = "config:models"
+_MODELS_KEY    = "config:models"
+_KNOWLEDGE_KEY = "config:knowledge_table"
 
 
 def _load_models(rdb) -> list:
@@ -36,6 +38,17 @@ def _load_models(rdb) -> list:
 
 
 _current_models: list = _load_models(rdb)
+
+
+def _load_knowledge_table(rdb) -> str:
+    raw = rdb.get(_KNOWLEDGE_KEY)
+    if raw:
+        return raw.decode() if isinstance(raw, bytes) else raw
+    rdb.set(_KNOWLEDGE_KEY, K8S_KNOWLEDGE_TABLE)
+    return K8S_KNOWLEDGE_TABLE
+
+
+_current_knowledge_table: str = _load_knowledge_table(rdb)
 
 
 def _background_seed():
@@ -124,6 +137,20 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
         print(f"[reflect] failed (non-fatal): {e}", flush=True)
 
 
+_SUGGEST_PROMPT = """\
+You are updating a Kubernetes diagnostic knowledge table used by an incident response agent.
+Each entry follows this exact format:
+- <WaitingReason or pattern>: One-line description of what this means.
+  This IS / is NOT a conclusive root cause.
+  Look for: specific things to investigate.
+  Primary source: <exact kubectl command>.
+
+Here is raw incident data (kubectl output, logs, agent answer, or your notes):
+{raw}
+
+Write exactly ONE new entry in the format above.
+Output only the bullet text — no explanation, no markdown, no preamble."""
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.route("/health")
@@ -209,6 +236,38 @@ def set_models():
     return jsonify({"models": _current_models})
 
 
+@app.route("/admin/knowledge", methods=["GET"])
+def get_knowledge():
+    return jsonify({"table": _current_knowledge_table})
+
+
+@app.route("/admin/knowledge", methods=["POST"])
+def set_knowledge():
+    global _current_knowledge_table
+    data = request.get_json(silent=True) or {}
+    text = data.get("table", "")
+    if not isinstance(text, str):
+        return jsonify({"error": "'table' must be a string"}), 400
+    _current_knowledge_table = text
+    rdb.set(_KNOWLEDGE_KEY, text)
+    return jsonify({"saved": True, "length": len(text)})
+
+
+@app.route("/admin/knowledge/suggest", methods=["POST"])
+def suggest_knowledge_entry():
+    data = request.get_json(silent=True) or {}
+    raw  = data.get("raw", "").strip()
+    if not raw:
+        return jsonify({"error": "body must include non-empty 'raw' field"}), 400
+    messages   = [{"role": "user",
+                   "content": _SUGGEST_PROMPT.format(raw=raw)}]
+    suggestion = _run_llm(messages, None, _current_models, GROQ_KEY, OPENROUTER_KEY)
+    if not suggestion:
+        return jsonify({"suggestion": "",
+                        "error": "LLM returned empty response — check API keys and model list"})
+    return jsonify({"suggestion": suggestion.strip()})
+
+
 @app.route("/investigate", methods=["POST"])
 def investigate():
     data       = request.get_json(silent=True) or {}
@@ -246,6 +305,7 @@ def investigate():
         groq_key=GROQ_KEY,
         openrouter_key=OPENROUTER_KEY,
         pod=pod,
+        knowledge_table=_current_knowledge_table,
     )
 
     evidence = format_evidence(facts)

@@ -28,6 +28,8 @@ def client():
 _FAKE_FACTS = {
     "pods_available": 0, "pods_desired": 1,
     "waiting_reason": "CrashLoopBackOff", "restarts": 5,
+    "last_terminated_reason": "", "init_waiting_reason": "",
+    "init_last_terminated_reason": "", "init_restarts": 0,
     "log_error": "dial tcp postgres:5432: i/o timeout",
     "event_reason": "BackOff", "event_message": "container failed",
     "event_object": "ride-abc",
@@ -245,3 +247,49 @@ def test_investigate_forwards_pod_to_interpret(client):
             content_type="application/json")
     _, kwargs = mock_interpret.call_args
     assert kwargs.get("pod") == "ride-abc123"
+
+
+def test_get_knowledge_returns_default(client):
+    from interpreter import K8S_KNOWLEDGE_TABLE
+    _FAKE_REDIS.flushall()
+    agent_app._current_knowledge_table = agent_app._load_knowledge_table(_FAKE_REDIS)
+    r = client.get("/admin/knowledge")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "table" in body
+    assert "CrashLoopBackOff" in body["table"]
+
+
+def test_post_knowledge_saves_and_reloads(client):
+    new_table = "- TestEntry: testing hot-reload.\n  This is conclusive.\n"
+    r = client.post("/admin/knowledge",
+        data=json.dumps({"table": new_table}),
+        content_type="application/json")
+    assert r.status_code == 200
+    assert r.get_json()["saved"] is True
+    assert agent_app._current_knowledge_table == new_table
+    stored = _FAKE_REDIS.get("config:knowledge_table")
+    assert stored is not None
+    decoded = stored.decode() if isinstance(stored, bytes) else stored
+    assert new_table in decoded
+    r2 = client.get("/admin/knowledge")
+    assert r2.get_json()["table"] == new_table
+
+
+def test_suggest_knowledge_entry(client):
+    with patch("app._run_llm", return_value="- ErrImagePull: image not found."):
+        r = client.post("/admin/knowledge/suggest",
+            data=json.dumps({"raw": "kubectl describe shows ErrImagePull"}),
+            content_type="application/json")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "suggestion" in body
+    assert "ErrImagePull" in body["suggestion"]
+
+
+def test_suggest_knowledge_entry_missing_raw(client):
+    r = client.post("/admin/knowledge/suggest",
+        data=json.dumps({}),
+        content_type="application/json")
+    assert r.status_code == 400
+    assert "raw" in r.get_json()["error"]
