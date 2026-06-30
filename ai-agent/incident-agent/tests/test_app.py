@@ -216,3 +216,32 @@ def test_admin_models_rejects_string_format(client):
         content_type="application/json")
     assert r.status_code == 400
     assert "provider" in r.get_json()["error"]
+
+
+def test_investigate_includes_low_confidence(client):
+    _FAKE_DIAGNOSIS_WITH_LC = {**_FAKE_DIAGNOSIS, "low_confidence": False}
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS_WITH_LC), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    body = r.get_json()
+    assert "low_confidence" in body
+    assert body["low_confidence"] is False
+
+
+def test_investigate_forwards_pod_to_interpret(client):
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS) as mock_interpret, \
+         patch("app._reflect_and_store"):
+        client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev",
+                             "pod": "ride-abc123"}),
+            content_type="application/json")
+    _, kwargs = mock_interpret.call_args
+    assert kwargs.get("pod") == "ride-abc123"

@@ -215,6 +215,7 @@ def investigate():
     alert_name = data.get("alert_name", "UnknownAlert")
     service    = data.get("service", "unknown")
     namespace  = data.get("namespace", "vroom-dev")
+    pod        = data.get("pod", "")
     debug      = request.args.get("debug", "").lower() == "true"
 
     seed_if_empty(rdb)
@@ -241,6 +242,7 @@ def investigate():
         models=_current_models,
         groq_key=GROQ_KEY,
         openrouter_key=OPENROUTER_KEY,
+        pod=pod,
     )
 
     evidence = format_evidence(facts)
@@ -276,6 +278,7 @@ def investigate():
         "kubectl_hint":     diagnosis["kubectl_hint"],
         "evidence_snippet": evidence,
         "memory_hits":      {"incidents": incident_hits, "runbook": len(runbook_hits)},
+        "low_confidence":   diagnosis.get("low_confidence", False),
         **({"debug": {
             "bundle":         bundle,
             "memory_context": memory_ctx or "(none)",
