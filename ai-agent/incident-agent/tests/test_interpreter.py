@@ -3,6 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from interpreter import (
     interpret, _parse_output, _fallback, _build_grounded_prompt,
+    _quality_check,
     K8S_KNOWLEDGE_TABLE, GROUNDING_RULE, REQUIRED_KEYS
 )
 
@@ -123,6 +124,57 @@ class TestBuildGroundedPrompt:
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
         assert "root_cause" in prompt
         assert "kubectl_hint" in prompt
+
+
+class TestQualityCheck:
+    def _clean(self):
+        return {
+            "root_cause":   "CrashLoopBackOff — postgres unreachable (dial tcp :5432: i/o timeout)",
+            "dev_action":   "check postgres pod status in the platform namespace",
+            "kubectl_hint": "kubectl logs ride-abc123 -n vroom-dev --previous",
+        }
+
+    def test_flags_generic_root_cause(self):
+        d = self._clean()
+        d["root_cause"] = "potential issue with container initialization"
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert any("root_cause" in issue for issue in r["issues"])
+
+    def test_flags_placeholder_in_kubectl_hint(self):
+        d = self._clean()
+        d["kubectl_hint"] = "kubectl describe pod <pod_name> -n vroom-dev"
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert any("ride-abc123" in issue for issue in r["issues"])
+
+    def test_placeholder_uses_label_selector_when_pod_empty(self):
+        d = self._clean()
+        d["kubectl_hint"] = "kubectl describe pod <pod_name> -n vroom-dev"
+        r = _quality_check(d, SAMPLE_FACTS, "", "ride")
+        assert r["passed"] is False
+        assert any("-l app=ride" in issue for issue in r["issues"])
+
+    def test_flags_generic_dev_action(self):
+        d = self._clean()
+        d["dev_action"] = "investigate manually using kubectl"
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert any("dev_action" in issue for issue in r["issues"])
+
+    def test_passes_insufficient_evidence(self):
+        d = self._clean()
+        d["root_cause"] = "Insufficient evidence: need init container logs"
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is True
+        assert r["low_confidence"] is True
+        assert r["issues"] == []
+
+    def test_passes_clean_output(self):
+        r = _quality_check(self._clean(), SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is True
+        assert r["low_confidence"] is False
+        assert r["issues"] == []
 
 
 class TestInterpret:

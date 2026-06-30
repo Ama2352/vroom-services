@@ -96,6 +96,37 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
     return "\n".join(lines)
 
 
+def _quality_check(diagnosis: dict, facts: dict, pod: str, service: str) -> dict:
+    rc     = diagnosis.get("root_cause",   "").lower()
+    da     = diagnosis.get("dev_action",   "").lower()
+    kh     = diagnosis.get("kubectl_hint", "")
+    issues = []
+
+    if rc.startswith("insufficient evidence"):
+        return {"passed": True, "low_confidence": True, "issues": []}
+
+    if any(p in rc for p in GENERIC_ROOT_CAUSE):
+        issues.append(
+            "root_cause uses vague language — it must name a specific cause "
+            "drawn from the evidence (component, error, or resource name)"
+        )
+
+    if "<" in kh and ">" in kh:
+        replacement = pod if pod else f"-l app={service}"
+        issues.append(
+            f"kubectl_hint contains a placeholder — replace with actual value: "
+            f"'{replacement}'"
+        )
+
+    if any(p in da for p in GENERIC_DEV_ACTION):
+        issues.append(
+            "dev_action is too vague — state the specific action "
+            "(e.g. 'check init container logs', 'verify Secret X exists')"
+        )
+
+    return {"passed": len(issues) == 0, "low_confidence": False, "issues": issues}
+
+
 def _parse_output(text: str) -> dict | None:
     if not text:
         return None
