@@ -2,7 +2,8 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from interpreter import (
-    interpret, _parse_output, _fallback, _build_prompt, REQUIRED_KEYS
+    interpret, _parse_output, _fallback, _build_grounded_prompt,
+    K8S_KNOWLEDGE_TABLE, GROUNDING_RULE, REQUIRED_KEYS
 )
 
 SAMPLE_FACTS = {
@@ -76,37 +77,50 @@ class TestFallback:
         assert result["kubectl_hint"]
 
 
-class TestBuildPrompt:
+class TestBuildGroundedPrompt:
+    def test_grounding_constraint_in_prompt(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
+        assert K8S_KNOWLEDGE_TABLE in prompt
+        assert GROUNDING_RULE in prompt
+
+    def test_pod_name_in_prompt_when_provided(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "ride-abc123")
+        assert "Pod: ride-abc123" in prompt
+
+    def test_pod_line_absent_when_empty(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
+        assert "Pod:" not in prompt
+
     def test_includes_pod_count(self):
-        prompt = _build_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "")
-        assert "0 running / 1 desired" in prompt
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
+        assert "0/1 running" in prompt
 
     def test_includes_waiting_reason(self):
-        prompt = _build_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "")
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
         assert "CrashLoopBackOff" in prompt
 
     def test_includes_log_error(self):
-        prompt = _build_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "")
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
         assert "i/o timeout" in prompt
 
     def test_omits_empty_optional_fields(self):
         empty = {k: ("" if isinstance(v, str) else 0) for k, v in SAMPLE_FACTS.items()}
-        prompt = _build_prompt("Alert", "ride", "vroom-dev", empty, "", "")
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", empty, "", "", "")
         assert "Container state:" not in prompt
         assert "Last error log:"  not in prompt
         assert "Last K8s event:"  not in prompt
 
     def test_includes_bundle_when_present(self):
-        prompt = _build_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "rps=0.0 err=0.00%", "")
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "rps=0.0 err=0.00%", "", "")
         assert "rps=0.0" in prompt
 
     def test_includes_memory_context_when_present(self):
-        prompt = _build_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
-                               "[1] past incident → root cause: postgres unreachable")
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
+                                        "[1] past incident → root cause: postgres unreachable", "")
         assert "past incident" in prompt
 
     def test_ends_with_json_instruction(self):
-        prompt = _build_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "")
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
         assert "root_cause" in prompt
         assert "kubectl_hint" in prompt
 

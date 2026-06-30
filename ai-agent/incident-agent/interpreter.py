@@ -10,34 +10,85 @@ DEFAULT_MODELS = [
     {"id": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
 ]
 
+K8S_KNOWLEDGE_TABLE = """\
+Kubernetes pod waiting reasons and their diagnostic signatures:
+- PodInitializing: Init containers are running and blocking pod startup.
+  Look for: which init container is stuck, missing Secret/ConfigMap it depends on,
+  external service unreachable during init. Primary source: init container logs.
+- CrashLoopBackOff: Container started but exited with non-zero exit code, repeatedly.
+  Look for: application crash on startup, missing required env var, OOM at startup,
+  dependency (DB, Redis) unreachable. Primary source: previous container logs (--previous).
+- OOMKilled: Container exceeded its memory limit and was killed by the kernel.
+  No application logs after kill point. Look for: memory limit in pod spec vs. actual usage.
+- ImagePullBackOff / ErrImagePull: Registry cannot pull the container image.
+  Look for: typo in image name/tag, private registry credentials missing, image deleted.
+  Primary source: K8s event message (names the exact image).
+- CreateContainerConfigError: Pod spec references a Secret or ConfigMap that does not exist.
+  The K8s event message names the missing resource explicitly.
+- Pending with FailedScheduling event: No node can schedule the pod.
+  Look for: node selector mismatch, insufficient CPU/memory on all nodes, PodAffinity/Taint rules.
+- (empty waiting_reason, available=0, desired>0): Deployment has zero running replicas.
+  Look for: explicit scale-to-zero, HPA scale-down, manual kubectl scale."""
+
+GROUNDING_RULE = """\
+GROUNDING RULE: You may ONLY assert claims directly supported by one or more of the \
+evidence fields listed above. Do not invent component names, service names, port numbers, \
+error messages, or failure causes that are not present in the evidence.
+
+If the evidence is insufficient to identify a specific root cause, set root_cause to \
+exactly: "Insufficient evidence: need [the specific data that would clarify this]"
+
+Do not guess. An honest sparse answer is more useful than a confident hallucination."""
+
+GENERIC_ROOT_CAUSE = [
+    "potential issue", "possible issue", "might be", "could be",
+    "seems to be", "appears to be", "investigate the", "check the",
+    "there may be", "there might be",
+]
+GENERIC_DEV_ACTION = [
+    "investigate manually", "check the logs", "look into the",
+    "investigate the pod", "check for any errors",
+]
+
 _THINK_RE     = re.compile(r"<think>.*?</think>|</think>", re.DOTALL)
 REQUIRED_KEYS = {"root_cause", "dev_action", "kubectl_hint"}
 
 
-def _build_prompt(alert_name: str, service: str, namespace: str,
-                  facts: dict, bundle: str, memory_context: str) -> str:
+def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
+                            facts: dict, bundle: str, memory_context: str,
+                            pod: str) -> str:
     lines = [
+        K8S_KNOWLEDGE_TABLE,
+        "",
         f"Alert: {alert_name}",
         f"Service: {service}",
+        f"Namespace: {namespace}",
+    ]
+    if pod:
+        lines.append(f"Pod: {pod}")
+    lines += [
         "",
-        f"Pods: {facts['pods_available']} running / {facts['pods_desired']} desired",
+        "Evidence:",
+        f"  Pods: {facts['pods_available']}/{facts['pods_desired']} running",
     ]
     if facts.get("waiting_reason"):
         lines.append(
-            f"Container state: {facts['waiting_reason']} ({facts['restarts']} restarts)"
+            f"  Container state: {facts['waiting_reason']} ({facts['restarts']} restarts)"
         )
     if facts.get("log_error"):
-        lines.append(f"Last error log: {facts['log_error']}")
+        lines.append(f"  Last error log: {facts['log_error']}")
     if facts.get("event_reason"):
         lines.append(
-            f"Last K8s event: {facts['event_reason']} on "
+            f"  Last K8s event: {facts['event_reason']} on "
             f"{facts.get('event_object', '?')} — {facts.get('event_message', '')}"
         )
     if bundle:
-        lines.append(f"Service metrics (5m): {bundle}")
+        lines.append(f"  Service metrics (5 min): {bundle}")
     if memory_context:
         lines += ["", f"Past similar incidents:\n{memory_context}"]
     lines += [
+        "",
+        GROUNDING_RULE,
         "",
         "Output exactly this JSON (no markdown, no explanation):",
         '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}',
@@ -105,7 +156,7 @@ def interpret(
     Falls back to a Python-derived answer when the LLM is unavailable or returns
     invalid output. Always returns dict with root_cause, dev_action, kubectl_hint.
     """
-    prompt   = _build_prompt(alert_name, service, namespace, facts, bundle, memory_context)
+    prompt   = _build_grounded_prompt(alert_name, service, namespace, facts, bundle, memory_context, "")
     messages = [{"role": "user", "content": prompt}]
 
     if _llm is not None:
