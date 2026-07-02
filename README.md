@@ -42,42 +42,55 @@ Four Go microservices communicate through **Redis Streams** using the **Outbox p
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING: ride-service INSERT trips + outbox_events\n(single Postgres txn, type=Trip.Requested)
-    PENDING --> PUBLISHED: OutboxWorker XADD ride_events\n(polls every 2s)
+    classDef highlight fill:#1f6f43,color:#fff,stroke:#1f6f43
+
+    state fork_state <<fork>>
+    state join_state <<join>>
+    state "trips: REQUESTED" as trip_row
+    state "outbox_events: PENDING\ntype=Trip.Requested" as outbox_row
+
+    [*] --> fork_state: POST /v1/trips
+    fork_state --> trip_row: INSERT
+    fork_state --> outbox_row: INSERT
+    trip_row --> join_state
+    outbox_row --> join_state
+    join_state --> COMMITTED: COMMIT\n(atomic — no dual-write)
+
+    COMMITTED --> PUBLISHED: OutboxWorker XADD ride_events\n(polls every 2s)
     PUBLISHED --> [*]
+
+    class COMMITTED,PUBLISHED highlight
 ```
 
 ### Saga Choreography
 
 Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the shared `ride_events` stream and publish the next event themselves. A rejected or timed-out offer is a compensating action, not an error: `dispatch-service` releases the driver and retries the next-nearest candidate (the 5 km waterfall).
 
+Green states are the happy path; orange states are compensation / terminal failure — driver matching backtracks along the same edge it came from instead of erroring out.
+
 ```mermaid
 stateDiagram-v2
-    [*] --> REQUESTED: POST /v1/trips → Trip.Requested
+    classDef happy fill:#1f6f43,color:#fff,stroke:#1f6f43
+    classDef stop fill:#8a3b12,color:#fff,stroke:#8a3b12
 
-    state REQUESTED {
-        [*] --> Matching
-        Matching --> ON_OFFER: GeoSearch hit, reserve driver → Trip.Matched
-        ON_OFFER --> Matching: reject / 10s timeout → Trip.OfferRejected
-        ON_OFFER --> [*]: driver accepts
-        Matching --> [*]: radius exhausted
-    }
-
-    REQUESTED --> MATCHFAILED: no driver found → Trip.MatchFailed
-    REQUESTED --> ACCEPTED: driver accepts → Trip.Accepted
-
-    state ACCEPTED {
-        [*] --> WaitingForStart
-        WaitingForStart --> IN_PROGRESS: PUT /start
-        WaitingForStart --> [*]: 5min timeout
-    }
-
-    ACCEPTED --> CANCELLED: timeout or cancel → Trip.Cancelled
+    [*] --> REQUESTED
+    REQUESTED --> MATCHING: Trip.Requested
+    MATCHING --> ON_OFFER: GeoSearch hit → Trip.Matched
+    ON_OFFER --> ACCEPTED: driver accepts → Trip.Accepted
+    ACCEPTED --> IN_PROGRESS: PUT /start
     IN_PROGRESS --> COMPLETED: PUT /complete
+    COMPLETED --> [*]: release driver
 
-    MATCHFAILED --> [*]
+    ON_OFFER --> MATCHING: reject / 10s timeout → Trip.OfferRejected\n(release driver, retry waterfall)
+    MATCHING --> MATCH_FAILED: radius exhausted → Trip.MatchFailed
+    REQUESTED --> CANCELLED: passenger cancels → Trip.Cancelled
+    ACCEPTED --> CANCELLED: 5min no-start / cancel → Trip.Cancelled
+
+    MATCH_FAILED --> [*]
     CANCELLED --> [*]: compensate — release driver to AVAILABLE
-    COMPLETED --> [*]: release driver to AVAILABLE
+
+    class REQUESTED,MATCHING,ON_OFFER,ACCEPTED,IN_PROGRESS,COMPLETED happy
+    class MATCH_FAILED,CANCELLED stop
 ```
 
 ---
