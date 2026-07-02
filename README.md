@@ -36,6 +36,73 @@ Four Go microservices communicate through **Redis Streams** using the **Outbox p
 | **Distributed tracing** | OTEL → Tempo, all 4 services | `traceparent` propagated through Redis Streams, not just HTTP |
 | **Structured diagnostics agent** | `incident-diagnosis/` | LLM-assisted SRE tool: collects Prometheus/Loki/K8s-events facts, one interpretation call, semantic memory of past incidents |
 
+### Transactional Outbox
+
+`ride-service` never publishes to Redis from the HTTP handler. It writes the trip row and an `outbox_events` row in the same Postgres transaction, so the event can never be lost even if the process crashes right after `COMMIT`. `OutboxWorker` polls every 2 seconds and publishes anything still `PENDING`.
+
+```mermaid
+sequenceDiagram
+    participant C as Passenger app
+    participant R as ride-service
+    participant PG as Postgres (rides schema)
+    participant OW as OutboxWorker
+    participant RS as Redis Stream ride_events
+
+    C->>R: POST /v1/trips
+    activate R
+    R->>PG: BEGIN
+    R->>PG: INSERT trips (status=REQUESTED)
+    R->>PG: INSERT outbox_events (type="Trip.Requested", status=PENDING)
+    R->>PG: COMMIT
+    R-->>C: 201 Created
+    deactivate R
+
+    loop every 2s
+        OW->>PG: SELECT outbox_events WHERE status=PENDING
+        PG-->>OW: Trip.Requested
+        OW->>RS: XADD ride_events type=Trip.Requested
+        OW->>PG: UPDATE outbox_events SET status=PUBLISHED
+    end
+```
+
+### Saga Choreography
+
+Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the same `ride_events` stream and publish the next event themselves. A rejected or timed-out offer is a compensating action, not an error: `dispatch-service` releases the driver and retries the next-nearest candidate (the 5 km waterfall).
+
+```mermaid
+sequenceDiagram
+    actor D as Driver
+    participant RS as ride-service
+    participant TW as TripTimeoutWorker
+    participant Stream as Redis Stream ride_events
+    participant DS as dispatch-service
+
+    RS->>Stream: Trip.Requested
+    DS->>Stream: XReadGroup (dispatch_group)
+    DS->>DS: GeoSearch nearest driver, reserve ON_OFFER
+
+    alt driver found
+        DS->>Stream: Trip.Matched (driver_id)
+        Stream-->>D: WebSocket offer (via notification-service)
+
+        alt driver accepts within 10s
+            RS->>Stream: Trip.Accepted
+            DS->>DS: ON_OFFER -> ON_TRIP
+        else offer times out (10s)
+            TW->>Stream: Trip.OfferRejected
+            DS->>DS: release driver, retry next-nearest (waterfall)
+            DS->>Stream: Trip.Matched (next driver) or Trip.MatchFailed
+        end
+    else no driver in radius
+        DS->>Stream: Trip.MatchFailed
+    end
+
+    opt passenger or driver cancels
+        RS->>Stream: Trip.Cancelled
+        DS->>DS: compensate - release driver back to AVAILABLE
+    end
+```
+
 ---
 
 ## Repository Layout
