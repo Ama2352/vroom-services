@@ -61,64 +61,9 @@ flowchart LR
 
 Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the shared `ride_events` stream and publish the next one themselves. Every compensation is explicit about who triggers it: a rejected offer or 10s timeout is detected by `ride-service` (`TripTimeoutWorker` or `POST /reject-offer`), which publishes `Trip.OfferRejected`; `dispatch-service` consumes it, releases the driver, and the waterfall loop retries the next-nearest candidate.
 
-```mermaid
-%%{init: {'theme':'base', 'themeVariables': {
-  'actorBkg': '#22304a', 'actorBorder': '#ffffff', 'actorTextColor': '#e8eef7', 'actorLineColor': '#8a93a6',
-  'signalColor': '#333333', 'signalTextColor': '#111111',
-  'labelBoxBkgColor': '#22304a', 'labelBoxBorderColor': '#ffffff', 'labelTextColor': '#ffffff',
-  'loopTextColor': '#111111',
-  'noteBkgColor': '#4b5563', 'noteBorderColor': '#ffffff', 'noteTextColor': '#ffffff',
-  'activationBkgColor': '#1f6f43', 'activationBorderColor': '#ffffff',
-  'sequenceNumberColor': '#ffffff'
-}}}%%
-sequenceDiagram
-    participant Passenger
-    participant Ride as ride-service
-    participant Redis as Redis Stream<br/>ride_events
-    participant Dispatch as dispatch-service
-    participant Driver
+This is a static image rather than a live Mermaid block — sequence-diagram message/loop text renders on a transparent canvas with no background box behind it, so a color scheme readable in GitHub's light mode goes invisible in dark mode (and vice versa). Baking the render in as an image avoids that.
 
-    Passenger->>Ride: POST /v1/trips
-    Ride->>Ride: TX: INSERT trip (REQUESTED)<br/>+ outbox Trip.Requested
-    Ride->>Redis: XADD Trip.Requested
-    Redis->>Dispatch: XReadGroup dispatch_group
-
-    loop waterfall — retry until matched or exhausted
-        Dispatch->>Dispatch: GeoSearch nearest<br/>available driver
-        alt driver found
-            Dispatch->>Redis: XADD Trip.Matched
-            Redis->>Ride: consume → status ON_OFFER
-            Dispatch->>Driver: offer trip (10s to respond)
-            Driver-->>Dispatch: accept / reject / timeout
-        else no candidates left
-            Dispatch->>Redis: XADD Trip.MatchFailed
-            Redis->>Ride: consume → status CANCELLED
-        end
-    end
-
-    alt driver accepted
-        Driver->>Ride: POST /accept
-        Ride->>Redis: XADD Trip.Accepted
-        Redis->>Dispatch: consume → driver ON_TRIP
-        Driver->>Ride: PUT /start
-        Ride->>Ride: status IN_PROGRESS
-        Driver->>Ride: PUT /complete
-        Ride->>Ride: status COMPLETED
-    else driver rejected / 10s offer timeout
-        Note over Driver,Ride: explicit POST /reject-offer<br/>or TripTimeoutWorker (10s offer_deadline)
-        Ride->>Redis: XADD Trip.OfferRejected
-        Redis->>Dispatch: consume → ReleaseDriver (compensation)
-        Note over Redis,Dispatch: retries next-nearest driver
-    else 5min no-start on ACCEPTED
-        Ride->>Ride: TripTimeoutWorker<br/>cancelStuckAccepted
-        Ride->>Redis: XADD Trip.Cancelled
-        Redis->>Dispatch: consume → ReleaseDriver (compensation)
-    else passenger cancels
-        Passenger->>Ride: POST /cancel
-        Ride->>Redis: XADD Trip.Cancelled
-        Redis->>Dispatch: consume → ReleaseDriver (compensation)
-    end
-```
+![Saga choreography sequence diagram](docs/images/h33-saga-sequence.png)
 
 ---
 
