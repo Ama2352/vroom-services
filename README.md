@@ -2,7 +2,6 @@
 
 [![pipeline status](https://gitlab.com/AmaUIT/vroom-services/badges/main/pipeline.svg)](https://gitlab.com/AmaUIT/vroom-services/-/commits/main)
 [![Go Version](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](services/user/go.mod)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Go microservices backend, React frontend, and CI/CD pipeline for the **Vroom** ride-hailing platform.
 
@@ -20,16 +19,7 @@ Part of a three-repo GitOps setup — each repo has a single responsibility:
 
 Four Go microservices communicate through **Redis Streams** using the **Outbox pattern** to guarantee delivery. Driver matching is a **Saga choreography** — no central orchestrator, compensating transactions handle failures.
 
-```
-Passenger app                    Driver app
-     │                                │
-     ▼                                ▼
-[user-service] ──JWT─► [ride-service] ──outbox──► Redis Stream: ride_events
-                                                        │              │
-                                              [dispatch-service]  [notification-service]
-                                              Redis Geo matching    WebSocket push
-                                              Saga coordinator
-```
+![Architecture diagram](docs/images/h21-architecture.png)
 
 ### Applied patterns
 
@@ -82,8 +72,8 @@ vroom-services/
 │   └── demo/                     Chaos/resilience demo scripts (pod crash, consumer crash, DLQ)
 ├── local/
 │   └── init-db.sql               Bootstrap DB users + schemas for docker-compose
+├── docs/images/                   README diagrams
 ├── docker-compose.yml             Full local stack (Postgres + Redis + all services + frontend)
-├── LICENSE
 └── README.md
 ```
 
