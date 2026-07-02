@@ -46,3 +46,7 @@ Thumbs.db
 
 __pycache__
 .pytest_cache
+
+incident-diagnosis/draft/
+incident-diagnosis/free-models.txt
+incident-diagnosis/agent/TESTING.html
