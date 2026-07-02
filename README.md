@@ -15,7 +15,7 @@ Part of a three-repo GitOps setup — each repo has a single responsibility:
 
 ---
 
-## Architecture at a Glance
+## Architecture
 
 Four Go microservices communicate through **Redis Streams** using the **Outbox pattern** to guarantee delivery. Driver matching is a **Saga choreography** — no central orchestrator, compensating transactions handle failures.
 
