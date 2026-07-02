@@ -110,20 +110,40 @@ go test ./internal/integration/... -tags integration -v   # requires Docker
 
 ---
 
-## CI/CD Pipeline (GitLab CI)
+## CI/CD Pipeline
+
+GitLab CI only builds and publishes — it never touches `vroom-gitops`. Delivery from there is owned end-to-end by Kargo, which polls GHCR directly and promotes through three gated environments:
 
 ```
-build → publish
+Developer pushes to main
+        │
+        ▼
+GitLab CI (this repo)
+  ├── build     Docker multi-stage build → .tar artifact, per service
+  └── publish   Push to GHCR (ghcr.io/ama2352/vroom-mvp-*)
+        │
+        ▼
+Kargo Warehouse (vroom-gitops) polls GHCR for new tags → creates Freight
+        │
+        ▼
+  dev        auto-promote as soon as Freight appears
+        │    verified by prometheus-checks (error rate, P95 latency, OOMKill)
+        ▼
+  staging    auto-promote once dev's Freight is verified
+        │    verified by prometheus-checks
+        ▼
+  prod       requires human approval (`kargo approve`)
+             verified by prometheus-checks
 ```
-
-CI's job ends at publishing images to GHCR — it does not touch `vroom-gitops`. Kargo's Warehouse polls GHCR directly for new tags and owns promotion into every environment: dev and staging promote automatically once a tag passes `prometheus-checks` verification (error rate, P95 latency, OOMKill events), prod promotion additionally requires human approval (`kargo approve`).
-
-`test`, `integration`, `gosec`, and a Trivy scan stage are implemented in `.gitlab-ci.yml` (see the commented-out blocks) but currently disabled while cluster iteration is the priority.
 
 | Stage | What runs | Notes |
 |-------|-----------|-------|
 | `build` | Docker multi-stage build → `.tar` artifact | Per-service jobs for `user`/`ride`/`dispatch`/`notification`/`frontend` |
 | `publish` | Push to GHCR (`ghcr.io/ama2352/vroom-mvp-*`) | Tags: `latest`, semver, short SHA. `incident-diagnosis/*` build+push in one combined job (Python images exceed GitLab's artifact upload limit as `.tar`, so they skip the intermediate `build` stage) |
+
+`test`, `integration`, `gosec`, and a Trivy scan stage are implemented in `.gitlab-ci.yml` (see the commented-out blocks) but currently disabled while cluster iteration is the priority.
+
+Everything after `publish` — dev/staging/prod promotion, verification, approval — lives in [vroom-gitops](https://github.com/Ama2352/vroom-gitops) (`delivery/`), not here.
 
 Required CI variables (GitLab Settings → CI/CD → Variables):
 
