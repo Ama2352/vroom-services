@@ -38,69 +38,46 @@ Four Go microservices communicate through **Redis Streams** using the **Outbox p
 
 ### Transactional Outbox
 
-`ride-service` never publishes to Redis from the HTTP handler. It writes the trip row and an `outbox_events` row in the same Postgres transaction, so the event can never be lost even if the process crashes right after `COMMIT`. `OutboxWorker` polls every 2 seconds and publishes anything still `PENDING`.
+`ride-service` never publishes to Redis from the HTTP handler. It writes the trip row and an `outbox_events` row in the same Postgres transaction, so the event can never be lost even if the process crashes right after `COMMIT`. `OutboxWorker` polls every 2 seconds and publishes anything still `PENDING` to the `ride_events` Redis Stream.
 
 ```mermaid
-sequenceDiagram
-    participant C as Passenger app
-    participant R as ride-service
-    participant PG as Postgres (rides schema)
-    participant OW as OutboxWorker
-    participant RS as Redis Stream ride_events
-
-    C->>R: POST /v1/trips
-    activate R
-    R->>PG: BEGIN
-    R->>PG: INSERT trips (status=REQUESTED)
-    R->>PG: INSERT outbox_events (type="Trip.Requested", status=PENDING)
-    R->>PG: COMMIT
-    R-->>C: 201 Created
-    deactivate R
-
-    loop every 2s
-        OW->>PG: SELECT outbox_events WHERE status=PENDING
-        PG-->>OW: Trip.Requested
-        OW->>RS: XADD ride_events type=Trip.Requested
-        OW->>PG: UPDATE outbox_events SET status=PUBLISHED
-    end
+stateDiagram-v2
+    [*] --> PENDING: ride-service INSERT trips + outbox_events\n(single Postgres txn, type=Trip.Requested)
+    PENDING --> PUBLISHED: OutboxWorker XADD ride_events\n(polls every 2s)
+    PUBLISHED --> [*]
 ```
 
 ### Saga Choreography
 
-Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the same `ride_events` stream and publish the next event themselves. A rejected or timed-out offer is a compensating action, not an error: `dispatch-service` releases the driver and retries the next-nearest candidate (the 5 km waterfall).
+Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the shared `ride_events` stream and publish the next event themselves. A rejected or timed-out offer is a compensating action, not an error: `dispatch-service` releases the driver and retries the next-nearest candidate (the 5 km waterfall).
 
 ```mermaid
-sequenceDiagram
-    actor D as Driver
-    participant RS as ride-service
-    participant TW as TripTimeoutWorker
-    participant Stream as Redis Stream ride_events
-    participant DS as dispatch-service
+stateDiagram-v2
+    [*] --> REQUESTED: POST /v1/trips → Trip.Requested
 
-    RS->>Stream: Trip.Requested
-    DS->>Stream: XReadGroup (dispatch_group)
-    DS->>DS: GeoSearch nearest driver, reserve ON_OFFER
+    state REQUESTED {
+        [*] --> Matching
+        Matching --> ON_OFFER: GeoSearch hit, reserve driver → Trip.Matched
+        ON_OFFER --> Matching: reject / 10s timeout → Trip.OfferRejected
+        ON_OFFER --> [*]: driver accepts
+        Matching --> [*]: radius exhausted
+    }
 
-    alt driver found
-        DS->>Stream: Trip.Matched (driver_id)
-        Stream-->>D: WebSocket offer (via notification-service)
+    REQUESTED --> MATCHFAILED: no driver found → Trip.MatchFailed
+    REQUESTED --> ACCEPTED: driver accepts → Trip.Accepted
 
-        alt driver accepts within 10s
-            RS->>Stream: Trip.Accepted
-            DS->>DS: ON_OFFER -> ON_TRIP
-        else offer times out (10s)
-            TW->>Stream: Trip.OfferRejected
-            DS->>DS: release driver, retry next-nearest (waterfall)
-            DS->>Stream: Trip.Matched (next driver) or Trip.MatchFailed
-        end
-    else no driver in radius
-        DS->>Stream: Trip.MatchFailed
-    end
+    state ACCEPTED {
+        [*] --> WaitingForStart
+        WaitingForStart --> IN_PROGRESS: PUT /start
+        WaitingForStart --> [*]: 5min timeout
+    }
 
-    opt passenger or driver cancels
-        RS->>Stream: Trip.Cancelled
-        DS->>DS: compensate - release driver back to AVAILABLE
-    end
+    ACCEPTED --> CANCELLED: timeout or cancel → Trip.Cancelled
+    IN_PROGRESS --> COMPLETED: PUT /complete
+
+    MATCHFAILED --> [*]
+    CANCELLED --> [*]: compensate — release driver to AVAILABLE
+    COMPLETED --> [*]: release driver to AVAILABLE
 ```
 
 ---
@@ -186,8 +163,11 @@ Developer pushes to main
         │
         ▼
 GitLab CI (this repo)
-  ├── build     Docker multi-stage build → .tar artifact, per service
-  └── publish   Push to GHCR (ghcr.io/ama2352/vroom-mvp-*)
+  ├── test         go test per service + gosec + GitLab SAST
+  ├── integration  testcontainers (real Postgres + Redis) — outbox, saga, geo matching
+  ├── build        Docker multi-stage build → .tar artifact, per service
+  ├── scan         Trivy image scan (HIGH/CRITICAL, SARIF report)
+  └── publish      Push to GHCR (ghcr.io/ama2352/vroom-mvp-*)
         │
         ▼
 Kargo Warehouse (vroom-gitops) polls GHCR for new tags → creates Freight
@@ -205,10 +185,11 @@ Kargo Warehouse (vroom-gitops) polls GHCR for new tags → creates Freight
 
 | Stage | What runs | Notes |
 |-------|-----------|-------|
+| `test` | `go test ./...` per service + `gosec` SAST + GitLab SAST template | `ride`/`dispatch` block the pipeline on failure; `user`/`notification` are `allow_failure: true` |
+| `integration` | testcontainers-backed tests behind `-tags integration` | Real Postgres + Redis via `docker:dind`; covers outbox atomicity, saga compensation, geo matching, cross-service choreography |
 | `build` | Docker multi-stage build → `.tar` artifact | Per-service jobs for `user`/`ride`/`dispatch`/`notification`/`frontend` |
-| `publish` | Push to GHCR (`ghcr.io/ama2352/vroom-mvp-*`) | Tags: `latest`, semver, short SHA. `incident-diagnosis/*` build+push in one combined job (Python images exceed GitLab's artifact upload limit as `.tar`, so they skip the intermediate `build` stage) |
-
-`test`, `integration`, `gosec`, and a Trivy scan stage are implemented in `.gitlab-ci.yml` (see the commented-out blocks) but currently disabled while cluster iteration is the priority.
+| `scan` | Trivy image scan on the `.tar` artifact | HIGH/CRITICAL, SARIF report, non-blocking |
+| `publish` | Push to GHCR (`ghcr.io/ama2352/vroom-mvp-*`) | Tags: `latest`, semver, short SHA. `incident-diagnosis/*` build+push in one combined job (Python images exceed GitLab's artifact upload limit as `.tar`, so they skip `build`/`scan` and publish directly) |
 
 Everything after `publish` — dev/staging/prod promotion, verification, approval — lives in [vroom-gitops](https://github.com/Ama2352/vroom-gitops) (`delivery/`), not here.
 
