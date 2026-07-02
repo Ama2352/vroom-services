@@ -1,5 +1,9 @@
 # vroom-services
 
+[![pipeline status](https://gitlab.com/AmaUIT/vroom-services/badges/main/pipeline.svg)](https://gitlab.com/AmaUIT/vroom-services/-/commits/main)
+[![Go Version](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](services/user/go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Go microservices backend, React frontend, and CI/CD pipeline for the **Vroom** ride-hailing platform.
 
 Part of a three-repo GitOps setup — each repo has a single responsibility:
@@ -34,12 +38,13 @@ Passenger app                    Driver app
 | **Domain-Driven Design** | Each service's `internal/domain/` | Trip state machine + value objects own the business rules |
 | **Transactional Outbox** | `ride-service` → Redis Streams | Prevents dual-write: event is committed atomically with the trip row |
 | **Saga Choreography** | `ride` ↔ `dispatch` via Redis Streams | No orchestrator process; each service reacts to events and compensates on failure |
-| **Consumer Groups** | `dispatch_group`, `notification_group` on `ride_events` | At-least-once delivery with XAUTOCLAIM for crash recovery |
+| **Consumer Groups + DLQ** | `dispatch_group`, `notification_group` on `ride_events` | At-least-once delivery with XAUTOCLAIM crash recovery; poison messages move to `ride_events_dlq` after 3 retries |
 | **Repository pattern** | `internal/repository/` in each service | Isolates DB access; SQLC generates the implementation |
 | **JWT RS256** | `user-service` issues; others validate via `JWT_PUBLIC_KEY_PEM` | Asymmetric — only user-service holds the private key |
 | **Redis Geo** | `dispatch-service`: `drivers:available` | O(log N) radius search; 5 km waterfall to nearest driver |
-
-Full pattern details: [docs/architecture.md](docs/architecture.md)
+| **HPA autoscaling** | `ride`, `dispatch`, `user` (CPU 60%, min=1, max=4) | Scales under load; verified by `validation/load-tests/spike.js` |
+| **Distributed tracing** | OTEL → Tempo, all 4 services | `traceparent` propagated through Redis Streams, not just HTTP |
+| **Structured diagnostics agent** | `incident-diagnosis/` | LLM-assisted SRE tool: collects Prometheus/Loki/K8s-events facts, one interpretation call, semantic memory of past incidents |
 
 ---
 
@@ -47,41 +52,42 @@ Full pattern details: [docs/architecture.md](docs/architecture.md)
 
 ```
 vroom-services/
-├── services/                   Application code
-│   ├── user/                   Identity — JWT RS256, user CRUD
+├── services/                    Application code
+│   ├── user/                    Identity — JWT RS256, user CRUD
 │   │   ├── internal/
-│   │   │   ├── domain/         User entity, value objects
-│   │   │   ├── handler/        Gin HTTP handlers
-│   │   │   ├── repository/     DB interface + SQLC postgres impl
-│   │   │   └── service/        Business logic
-│   │   ├── migrations/         golang-migrate SQL files
-│   │   ├── sqlc.yaml           SQLC config
-│   │   └── Dockerfile.dev      Alpine + Air hot-reload
-│   ├── ride/                   Trip lifecycle — Outbox publisher, Saga participant
+│   │   │   ├── domain/          User entity, value objects
+│   │   │   ├── handler/         Gin HTTP handlers
+│   │   │   ├── repository/      DB interface + SQLC postgres impl
+│   │   │   └── service/         Business logic
+│   │   ├── migrations/          golang-migrate SQL files
+│   │   ├── sqlc.yaml            SQLC config
+│   │   └── Dockerfile.dev       Alpine + Air hot-reload
+│   ├── ride/                    Trip lifecycle — Outbox publisher, Saga participant
 │   │   └── internal/
-│   │       ├── domain/         Trip entity + state machine (REQUESTED→COMPLETED)
-│   │       ├── worker/         OutboxWorker (polls → XADD), TripTimeoutWorker
-│   │       └── integration/    testcontainers integration tests
-│   ├── dispatch/               Driver matching — Saga coordinator, Redis Geo
+│   │       ├── domain/          Trip entity + state machine (REQUESTED→COMPLETED)
+│   │       ├── worker/          OutboxWorker (polls → XADD), TripTimeoutWorker
+│   │       └── integration/     testcontainers integration tests
+│   ├── dispatch/                 Driver matching — Saga coordinator, Redis Geo
 │   │   └── internal/
-│   │       ├── domain/         DriverState (AVAILABLE / ON_OFFER / ON_TRIP)
-│   │       └── worker/         Redis Streams XReadGroup consumer
-│   ├── notification/           Event fan-out — WebSocket push to clients
-│   └── frontend/               React 19 + Vite (passenger + driver UIs)
-├── ai-agent/                   ReAct incident response agent (Plan 10 — in progress)
-│   ├── kubectl-executor/       Python — allowlist-gated kubectl HTTP gateway
-│   ├── runbook-retriever/      Python — keyword-search RAG over runbooks
-│   └── runbooks/               Operational runbooks (Markdown)
-├── load-tests/                 k6 scenarios
-│   ├── baseline.js             50 VU / 2 min — P95 < 500 ms
-│   ├── spike.js                Ramp to 200 VU
-│   └── geo_flood.js            200 drivers × 2 s — P95 < 50 ms (dispatch stress)
-├── scripts/
-│   └── init-db.sql             Bootstrap DB users + schemas for local dev
-└── docker-compose.yml          Full local stack (Postgres + Redis + all services + frontend)
+│   │       ├── domain/          DriverState (AVAILABLE / ON_OFFER / ON_TRIP)
+│   │       └── worker/          Redis Streams XReadGroup consumer, DLQ handling
+│   ├── notification/             Event fan-out — WebSocket push, XAUTOCLAIM + DLQ
+│   ├── frontend/                 React 19 + Vite (passenger + driver UIs)
+│   └── tests/                    Cross-service choreography integration tests
+├── incident-diagnosis/           SRE incident diagnosis agent (deployed as "incident-agent")
+│   ├── agent/                    Diagnostics + interpretation — Prometheus/Loki/K8s events → root cause
+│   └── kubectl-executor/         Allowlist-gated kubectl HTTP gateway
+├── validation/                   Things that exercise a running deployed cluster
+│   ├── load-tests/               k6 scenarios — baseline (P95<500ms), spike, geo_flood
+│   └── demo/                     Chaos/resilience demo scripts (pod crash, consumer crash, DLQ)
+├── local/
+│   └── init-db.sql               Bootstrap DB users + schemas for docker-compose
+├── docker-compose.yml             Full local stack (Postgres + Redis + all services + frontend)
+├── LICENSE
+└── README.md
 ```
 
-Each Go service follows the same internal layout. See [docs/architecture.md](docs/architecture.md) for the canonical structure.
+Each Go service follows the same internal layout — see `services/ride/internal/` above for the canonical structure.
 
 ---
 
@@ -117,16 +123,17 @@ go test ./internal/integration/... -tags integration -v   # requires Docker
 ## CI/CD Pipeline (GitLab CI)
 
 ```
-test → integration → build → publish → deploy
+build → publish
 ```
+
+CI's job ends at publishing images to GHCR — it does not touch `vroom-gitops`. Kargo's Warehouse polls GHCR directly for new tags and owns promotion into every environment: dev and staging promote automatically once a tag passes `prometheus-checks` verification (error rate, P95 latency, OOMKill events), prod promotion additionally requires human approval (`kargo approve`).
+
+`test`, `integration`, `gosec`, and a Trivy scan stage are implemented in `.gitlab-ci.yml` (see the commented-out blocks) but currently disabled while cluster iteration is the priority.
 
 | Stage | What runs | Notes |
 |-------|-----------|-------|
-| `test` | `go test ./...` per service | gosec SAST + GitLab SAST runs here |
-| `integration` | testcontainers (real Postgres + Redis) | `//go:build integration` tag; ride + dispatch only |
-| `build` | Docker multi-stage build → `.tar` artifact | `BASE_IMAGE_PREFIX=` keeps images on Docker Hub |
-| `publish` | Push to GHCR (`ghcr.io/ama2352/vroom-mvp-*`) | Tags: `latest`, semver, short SHA |
-| `deploy` | Patch image tag in vroom-gitops dev overlay | ArgoCD syncs → Kargo promotes dev→staging→prod |
+| `build` | Docker multi-stage build → `.tar` artifact | Per-service jobs for `user`/`ride`/`dispatch`/`notification`/`frontend` |
+| `publish` | Push to GHCR (`ghcr.io/ama2352/vroom-mvp-*`) | Tags: `latest`, semver, short SHA. `incident-diagnosis/*` build+push in one combined job (Python images exceed GitLab's artifact upload limit as `.tar`, so they skip the intermediate `build` stage) |
 
 Required CI variables (GitLab Settings → CI/CD → Variables):
 
@@ -134,12 +141,4 @@ Required CI variables (GitLab Settings → CI/CD → Variables):
 |----------|---------|
 | `GHCR_USER` | GitHub username |
 | `GHCR_TOKEN` | GitHub PAT with `write:packages` scope |
-| `GITHUB_GITOPS_TOKEN` | Classic PAT with `repo` scope — pushes overlay changes to vroom-gitops |
-
----
-
-## Documentation
-
-- [Architecture & patterns](docs/architecture.md) — DDD layers, Outbox flow, Saga steps, state machine, auth, driver geo
-- [API reference](docs/api.md) — all endpoints across all 4 services
-- [AI agent](docs/ai-agent.md) — ReAct incident responder (kubectl-executor + runbook-retriever)
+| `GITHUB_GITOPS_TOKEN` | Classic PAT with `repo` scope — used by Kargo, not CI, to push promoted overlays to vroom-gitops |
