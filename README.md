@@ -41,56 +41,57 @@ Four Go microservices communicate through **Redis Streams** using the **Outbox p
 `ride-service` never publishes to Redis from the HTTP handler. It writes the trip row and an `outbox_events` row in the same Postgres transaction, so the event can never be lost even if the process crashes right after `COMMIT`. `OutboxWorker` polls every 2 seconds and publishes anything still `PENDING` to the `ride_events` Redis Stream.
 
 ```mermaid
-stateDiagram-v2
-    classDef highlight fill:#1f6f43,color:#fff,stroke:#1f6f43
+flowchart TD
+    A(["POST /v1/trips"]) --> B["Postgres TX:<br/>INSERT trips (REQUESTED)<br/>INSERT outbox_events (PENDING, type=Trip.Requested)"]
+    B --> C["COMMIT<br/>atomic — no dual-write"]
+    C --> D(["201 Created"])
+    C --> E["OutboxWorker<br/>polls every 2s"]
+    E --> F["XADD ride_events<br/>type=Trip.Requested"]
+    F --> G["UPDATE outbox_events → PUBLISHED"]
 
-    state fork_state <<fork>>
-    state join_state <<join>>
-    state "trips: REQUESTED" as trip_row
-    state "outbox_events: PENDING\ntype=Trip.Requested" as outbox_row
-
-    [*] --> fork_state: POST /v1/trips
-    fork_state --> trip_row: INSERT
-    fork_state --> outbox_row: INSERT
-    trip_row --> join_state
-    outbox_row --> join_state
-    join_state --> COMMITTED: COMMIT\n(atomic — no dual-write)
-
-    COMMITTED --> PUBLISHED: OutboxWorker XADD ride_events\n(polls every 2s)
-    PUBLISHED --> [*]
-
-    class COMMITTED,PUBLISHED highlight
+    classDef step fill:#22304a,stroke:#3a4d73,color:#e8eef7
+    classDef async fill:#1f6f43,stroke:#154f30,color:#ffffff
+    class A,B,C,D step
+    class E,F,G async
 ```
 
 ### Saga Choreography
 
 Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the shared `ride_events` stream and publish the next event themselves. A rejected or timed-out offer is a compensating action, not an error: `dispatch-service` releases the driver and retries the next-nearest candidate (the 5 km waterfall).
 
-Green states are the happy path; orange states are compensation / terminal failure — driver matching backtracks along the same edge it came from instead of erroring out.
+The solid green line down the middle is the happy path. Dashed lines are compensation — a rejected offer retries the waterfall instead of failing the trip.
 
 ```mermaid
-stateDiagram-v2
-    classDef happy fill:#1f6f43,color:#fff,stroke:#1f6f43
-    classDef stop fill:#8a3b12,color:#fff,stroke:#8a3b12
+flowchart TD
+    REQUESTED(["REQUESTED"])
+    MATCHING["MATCHING<br/>GeoSearch nearest driver"]
+    ON_OFFER["ON_OFFER<br/>10s to respond"]
+    ACCEPTED(["ACCEPTED"])
+    IN_PROGRESS["IN_PROGRESS"]
+    COMPLETED(["COMPLETED"])
+    MATCH_FAILED(["MATCH_FAILED"])
+    CANCELLED(["CANCELLED"])
 
-    [*] --> REQUESTED
-    REQUESTED --> MATCHING: Trip.Requested
-    MATCHING --> ON_OFFER: GeoSearch hit → Trip.Matched
-    ON_OFFER --> ACCEPTED: driver accepts → Trip.Accepted
-    ACCEPTED --> IN_PROGRESS: PUT /start
-    IN_PROGRESS --> COMPLETED: PUT /complete
-    COMPLETED --> [*]: release driver
+    REQUESTED -->|Trip.Requested| MATCHING
+    MATCHING -->|Trip.Matched| ON_OFFER
+    ON_OFFER -->|Trip.Accepted| ACCEPTED
+    ACCEPTED -->|PUT /start| IN_PROGRESS
+    IN_PROGRESS -->|PUT /complete| COMPLETED
 
-    ON_OFFER --> MATCHING: reject / 10s timeout → Trip.OfferRejected\n(release driver, retry waterfall)
-    MATCHING --> MATCH_FAILED: radius exhausted → Trip.MatchFailed
-    REQUESTED --> CANCELLED: passenger cancels → Trip.Cancelled
-    ACCEPTED --> CANCELLED: 5min no-start / cancel → Trip.Cancelled
+    ON_OFFER -.->|"Trip.OfferRejected<br/>reject / 10s timeout<br/>retry next-nearest"| MATCHING
+    MATCHING -.->|Trip.MatchFailed| MATCH_FAILED
+    REQUESTED -.->|Trip.Cancelled| CANCELLED
+    ACCEPTED -.->|"Trip.Cancelled<br/>5min no-start"| CANCELLED
 
-    MATCH_FAILED --> [*]
-    CANCELLED --> [*]: compensate — release driver to AVAILABLE
-
-    class REQUESTED,MATCHING,ON_OFFER,ACCEPTED,IN_PROGRESS,COMPLETED happy
+    classDef step fill:#22304a,stroke:#3a4d73,color:#e8eef7
+    classDef done fill:#1f6f43,stroke:#154f30,color:#ffffff
+    classDef stop fill:#7a4326,stroke:#5c331c,color:#ffffff
+    class REQUESTED,MATCHING,ON_OFFER,ACCEPTED,IN_PROGRESS step
+    class COMPLETED done
     class MATCH_FAILED,CANCELLED stop
+
+    linkStyle 0,1,2,3,4 stroke:#2f8f5b,stroke-width:2px
+    linkStyle 5,6,7,8 stroke:#c2703d,stroke-width:1.5px,stroke-dasharray: 4 3
 ```
 
 ---
