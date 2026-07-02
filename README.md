@@ -59,53 +59,65 @@ flowchart LR
 
 ### Saga Choreography
 
-Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the shared `ride_events` stream and publish the next one themselves. Green solid arrows are the happy path; dashed orange arrows are compensation — a rejected or timed-out offer (`Trip.OfferRejected`) retries the 5 km waterfall against the next-nearest driver instead of failing the trip.
+Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the shared `ride_events` stream and publish the next one themselves. Every compensation is explicit about who triggers it: a rejected offer or 10s timeout is detected by `ride-service` (`TripTimeoutWorker` or `POST /reject-offer`), which publishes `Trip.OfferRejected`; `dispatch-service` consumes it, releases the driver, and the waterfall loop retries the next-nearest candidate.
 
 ```mermaid
-flowchart TD
-    start((" ")) -->|"POST /v1/trips"| REQ
+%%{init: {'theme':'base', 'themeVariables': {
+  'actorBkg': '#22304a', 'actorBorder': '#ffffff', 'actorTextColor': '#e8eef7', 'actorLineColor': '#8a93a6',
+  'signalColor': '#333333', 'signalTextColor': '#111111',
+  'labelBoxBkgColor': '#22304a', 'labelBoxBorderColor': '#ffffff', 'labelTextColor': '#ffffff',
+  'loopTextColor': '#111111',
+  'noteBkgColor': '#4b5563', 'noteBorderColor': '#ffffff', 'noteTextColor': '#ffffff',
+  'activationBkgColor': '#1f6f43', 'activationBorderColor': '#ffffff',
+  'sequenceNumberColor': '#ffffff'
+}}}%%
+sequenceDiagram
+    participant Passenger
+    participant Ride as ride-service
+    participant Redis as Redis Stream<br/>ride_events
+    participant Dispatch as dispatch-service
+    participant Driver
 
-    subgraph REQ["REQUESTED"]
-        direction LR
-        ML["Matching_Loop<br/>GeoSearch nearest driver"]
-        OFFER["ON_OFFER<br/>10s to respond"]
-        ML -->|"Trip.Matched"| OFFER
-        OFFER -.->|"Trip.OfferRejected<br/>reject / timeout → retry"| ML
+    Passenger->>Ride: POST /v1/trips
+    Ride->>Ride: TX: INSERT trip (REQUESTED)<br/>+ outbox Trip.Requested
+    Ride->>Redis: XADD Trip.Requested
+    Redis->>Dispatch: XReadGroup dispatch_group
+
+    loop waterfall — retry until matched or exhausted
+        Dispatch->>Dispatch: GeoSearch nearest<br/>available driver
+        alt driver found
+            Dispatch->>Redis: XADD Trip.Matched
+            Redis->>Ride: consume → status ON_OFFER
+            Dispatch->>Driver: offer trip (10s to respond)
+            Driver-->>Dispatch: accept / reject / timeout
+        else no candidates left
+            Dispatch->>Redis: XADD Trip.MatchFailed
+            Redis->>Ride: consume → status CANCELLED
+        end
     end
 
-    REQ -->|"Trip.Accepted"| ACC
-
-    subgraph ACC["ACCEPTED"]
-        direction LR
-        WAIT["WaitingForStart"]
-        PROG["IN_PROGRESS"]
-        WAIT -->|"PUT /start"| PROG
+    alt driver accepted
+        Driver->>Ride: POST /accept
+        Ride->>Redis: XADD Trip.Accepted
+        Redis->>Dispatch: consume → driver ON_TRIP
+        Driver->>Ride: PUT /start
+        Ride->>Ride: status IN_PROGRESS
+        Driver->>Ride: PUT /complete
+        Ride->>Ride: status COMPLETED
+    else driver rejected / 10s offer timeout
+        Note over Driver,Ride: explicit POST /reject-offer<br/>or TripTimeoutWorker (10s offer_deadline)
+        Ride->>Redis: XADD Trip.OfferRejected
+        Redis->>Dispatch: consume → ReleaseDriver (compensation)
+        Note over Redis,Dispatch: retries next-nearest driver
+    else 5min no-start on ACCEPTED
+        Ride->>Ride: TripTimeoutWorker<br/>cancelStuckAccepted
+        Ride->>Redis: XADD Trip.Cancelled
+        Redis->>Dispatch: consume → ReleaseDriver (compensation)
+    else passenger cancels
+        Passenger->>Ride: POST /cancel
+        Ride->>Redis: XADD Trip.Cancelled
+        Redis->>Dispatch: consume → ReleaseDriver (compensation)
     end
-
-    PROG -->|"PUT /complete"| COMPLETED(("COMPLETED"))
-    ML -.->|"Trip.MatchFailed<br/>no drivers found"| FAILED(("MATCH_FAILED"))
-    REQ -.->|"Trip.Cancelled"| CANCELLED(("CANCELLED"))
-    WAIT -.->|"Trip.Cancelled<br/>5min no-start"| CANCELLED
-
-    COMPLETED --> stop((" "))
-    FAILED -->|"release driver"| stop
-    CANCELLED -->|"release driver"| stop
-
-    style REQ fill:#0d1117,stroke:#ffffff,color:#ffffff
-    style ACC fill:#0d1117,stroke:#ffffff,color:#ffffff
-
-    classDef state fill:#22304a,stroke:#ffffff,stroke-width:1px,color:#e8eef7
-    classDef done fill:#1f6f43,stroke:#ffffff,stroke-width:1px,color:#ffffff
-    classDef stop fill:#7a4326,stroke:#ffffff,stroke-width:1px,color:#ffffff
-    classDef edgeNode fill:#0d1117,stroke:#ffffff,stroke-width:2px,color:#ffffff
-    class ML,OFFER,WAIT,PROG state
-    class COMPLETED done
-    class FAILED,CANCELLED stop
-    class start,stop edgeNode
-
-    linkStyle 0,1,3,4,5,9 stroke:#2f8f5b,stroke-width:2px
-    linkStyle 2,6,7,8 stroke:#c2703d,stroke-width:1.5px,stroke-dasharray: 4 3
-    linkStyle 10,11 stroke:#8a93a6,stroke-width:1.5px
 ```
 
 ---
