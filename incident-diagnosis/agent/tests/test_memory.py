@@ -18,6 +18,22 @@ def rdb():
     return fakeredis.FakeRedis()
 
 
+def test_tokenize_splits_on_punctuation():
+    assert memory._tokenize("postgres-primary:5432") == ["postgres", "primary", "5432"]
+
+
+def test_tokenize_lowercases():
+    assert memory._tokenize("CrashLoopBackOff") == ["crashloopbackoff"]
+
+
+def test_tokenize_empty_string_returns_empty_list():
+    assert memory._tokenize("") == []
+
+
+def test_tokenize_splits_on_whitespace_and_slashes():
+    assert memory._tokenize("dial tcp i/o timeout") == ["dial", "tcp", "i", "o", "timeout"]
+
+
 def _make_incident(**kwargs):
     base = {
         "alert_name": "HighErrorRate",

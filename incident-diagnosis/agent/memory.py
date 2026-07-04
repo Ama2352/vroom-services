@@ -1,4 +1,5 @@
 import json, time, uuid, os
+import re
 import numpy as np
 import redis as redis_lib
 from fastembed import TextEmbedding
@@ -11,6 +12,13 @@ INDEX_KEY = "incidents:index"
 # after real score distributions can be observed post query/embedding-symmetry fix.
 # See docs/superpowers/specs/2026-07-04-incident-agent-memory-retrieval-fix-design.md (D6).
 FLOOR = float(os.environ.get("MEMORY_SCORE_FLOOR", "0.15"))
+
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> list:
+    return _TOKEN_RE.findall(text.lower())
 
 
 def _model() -> TextEmbedding:
