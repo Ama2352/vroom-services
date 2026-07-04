@@ -4,7 +4,7 @@ import pytest
 from interpreter import (
     interpret, _parse_output, _fallback, _build_grounded_prompt,
     _quality_check, _build_refine_prompt,
-    K8S_KNOWLEDGE_TABLE, GROUNDING_RULE, REQUIRED_KEYS
+    K8S_KNOWLEDGE_TABLE, GROUNDING_RULE, REQUIRED_KEYS, MEMORY_USAGE_EXAMPLE
 )
 
 SAMPLE_FACTS = {
@@ -139,6 +139,20 @@ class TestBuildGroundedPrompt:
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
                                         "[1] past incident → root cause: postgres unreachable", "")
         assert "past incident" in prompt
+
+    def test_includes_memory_usage_example_when_context_present(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
+                                        "[1] (similarity: 0.71) past incident → root cause: postgres unreachable", "")
+        assert MEMORY_USAGE_EXAMPLE in prompt
+
+    def test_includes_reference_only_instruction_when_context_present(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
+                                        "[1] (similarity: 0.71) past incident → root cause: postgres unreachable", "")
+        assert "reference only" in prompt
+
+    def test_omits_memory_usage_example_when_no_context(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
+        assert MEMORY_USAGE_EXAMPLE not in prompt
 
     def test_ends_with_json_instruction(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")

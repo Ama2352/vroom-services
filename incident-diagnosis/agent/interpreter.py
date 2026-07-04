@@ -47,6 +47,22 @@ exactly: "Insufficient evidence: need [the specific data that would clarify this
 
 Do not guess. An honest sparse answer is more useful than a confident hallucination."""
 
+MEMORY_USAGE_EXAMPLE = """\
+Example — how to use past-incident/runbook similarity scores:
+
+Evidence: waiting_reason=CrashLoopBackOff, log_error="connection refused: postgres:5432"
+
+  Past incident: (similarity: 0.68) CrashLoopBackOff on ride
+    -> root cause: "DB connection refused, Postgres unreachable" -> outcome: resolved
+    -> Similarity is meaningful AND the symptom matches the Evidence (both point to DB
+       connection failure) -> USE this as supporting context for your root_cause.
+
+  Past incident: (similarity: 0.22) OOMKilled on dispatch
+    -> root cause: "memory limit too low"
+    -> Similarity is low AND the symptom does not match the Evidence (no OOM signal
+       present above) -> IGNORE this entirely. Do not mention memory limits just because
+       it was the top-ranked match."""
+
 GENERIC_ROOT_CAUSE = [
     "potential issue", "possible issue", "might be", "could be",
     "seems to be", "appears to be", "investigate the", "check the",
@@ -100,7 +116,17 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
     if bundle:
         lines.append(f"  Service metrics (5 min): {bundle}")
     if memory_context:
-        lines += ["", f"Past similar incidents:\n{memory_context}"]
+        lines += [
+            "",
+            f"Past similar incidents:\n{memory_context}",
+            "",
+            "Past-incident/runbook entries are reference only, not evidence. Only let "
+            "them inform your root_cause if the similarity score is meaningful AND the "
+            "symptom is consistent with the Evidence section above. If they don't match, "
+            "ignore them — do not copy their root_cause just because it ranked highest.",
+            "",
+            MEMORY_USAGE_EXAMPLE,
+        ]
     lines += [
         "",
         GROUNDING_RULE,
