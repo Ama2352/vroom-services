@@ -478,7 +478,7 @@ def investigate():
           f"init_restarts={facts['init_restarts']} "
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
-    query        = build_symptom_text(alert_name, service, facts["waiting_reason"], facts["log_error"])
+    query        = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
     mem_text     = memory_search(rdb, query, limit=3)
     runbook_hits = search_runbook(rdb, query, top_k=3)
     memory_ctx   = _format_memory_context(mem_text, runbook_hits)
