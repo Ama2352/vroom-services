@@ -37,6 +37,11 @@ def _get_field(raw: dict, k: str) -> str:
     return v.decode() if isinstance(v, bytes) else (v or "")
 
 
+def build_symptom_text(alert_name: str, service: str,
+                        waiting_reason: str = "", log_error: str = "") -> str:
+    return f"{alert_name} {service} {waiting_reason} {log_error}".strip()
+
+
 def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
     iid = str(uuid.uuid4())
     query_text = (f"{incident['alert_name']} {incident['service']} "

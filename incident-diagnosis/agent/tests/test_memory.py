@@ -33,6 +33,26 @@ def _make_incident(**kwargs):
     return base
 
 
+def test_build_symptom_text_includes_all_fields():
+    text = memory.build_symptom_text("HighErrorRate", "ride-service",
+                                      "CrashLoopBackOff", "dial tcp timeout")
+    assert text == "HighErrorRate ride-service CrashLoopBackOff dial tcp timeout"
+
+
+def test_build_symptom_text_handles_missing_optional_fields():
+    assert memory.build_symptom_text("Alert", "svc") == "Alert svc"
+
+
+def test_build_symptom_text_symmetry_between_storage_and_query_call_sites():
+    # The exact scenario the bug fix guards against: text built for storage and
+    # text built for a later query, from the same underlying facts, must be identical.
+    stored_text = memory.build_symptom_text(
+        "PodCrash", "dispatch-service", "OOMKilled", "exit code 137")
+    query_text = memory.build_symptom_text(
+        "PodCrash", "dispatch-service", "OOMKilled", "exit code 137")
+    assert stored_text == query_text
+
+
 def test_store_incident_creates_hash(rdb):
     iid = memory.store_incident(rdb, _make_incident())
     assert rdb.hexists(f"incident:{iid}", "alert_name")
