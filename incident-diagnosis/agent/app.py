@@ -67,7 +67,8 @@ def _format_memory_context(mem_text: str, runbook_hits: list) -> str:
         parts.append(f"Past incidents:\n{mem_text}")
     if runbook_hits:
         lines = [
-            f"- {h['title']} ({h['service']}): {h['symptom']} → Fix: {h['fix_command']}"
+            f"- (similarity: {h['score']:.2f}) {h['title']} ({h['service']}): "
+            f"{h['symptom']} → Fix: {h['fix_command']}"
             for h in runbook_hits
         ]
         parts.append("Runbook:\n" + "\n".join(lines))

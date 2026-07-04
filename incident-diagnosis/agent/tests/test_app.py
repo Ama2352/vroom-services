@@ -358,3 +358,11 @@ def test_investigate_query_includes_waiting_reason_and_log_error(client):
 
     assert _FAKE_FACTS["waiting_reason"] in captured["query"]
     assert _FAKE_FACTS["log_error"] in captured["query"]
+
+
+def test_format_memory_context_renders_runbook_score():
+    ctx = agent_app._format_memory_context("no relevant memory found", [
+        {"title": "Deployment scaled to zero", "service": "ride-service",
+         "symptom": "No pods running", "fix_command": "kubectl scale ...", "score": 0.71},
+    ])
+    assert "(similarity: 0.71)" in ctx
