@@ -138,14 +138,21 @@ def test_search_memory_empty_query_no_crash(rdb):
 def test_service_not_part_of_scored_text(rdb):
     # D2 regression: service must not leak into the corpus-side scored text, even
     # if a caller's query string happens to literally mention a service name.
+    # The two incidents deliberately use DIFFERENT alert_names (not both
+    # "PodNotReady") so the wrong-cause incident has zero legitimate overlap with
+    # the query once service is excluded — under the regressed (service-included)
+    # design it would still match on "ride"/"service" and survive the floor,
+    # making `len(scored) == 1` the assertion that actually distinguishes the two
+    # designs (checking only scored[0]'s identity can degrade to a coin-flip tie).
     memory.store_incident(rdb, _make_incident(
-        alert_name="PodNotReady", service="ride-service",
+        alert_name="Unrelated", service="ride-service",
         waiting_reason="OOMKilled", log_error="memory limit exceeded"))
     memory.store_incident(rdb, _make_incident(
         alert_name="PodNotReady", service="dispatch-service",
         waiting_reason="CrashLoopBackOff", log_error="connection refused unreachable"))
 
     scored = memory._score_all(rdb, "ride-service PodNotReady CrashLoopBackOff")
+    assert len(scored) == 1
     assert scored[0][1]["service"] == "dispatch-service"
 
 
@@ -289,4 +296,10 @@ def test_search_runbook_service_not_part_of_scored_text(rdb):
         symptom="CrashLoopBackOff connection refused postgres"))
 
     results = memory.search_runbook(rdb, "ride-service CrashLoopBackOff connection refused postgres")
+    # The "Unrelated fix" entry shares zero tokens with the query once `service` is
+    # excluded from scored text — it must be excluded by the floor entirely, not just
+    # rank second. Under the regressed (service-included) design it would match on
+    # "ride"/"service" and appear here too — this assertion is what actually
+    # distinguishes the two designs (a same-rank-order-only assertion does not).
+    assert len(results) == 1
     assert results[0]["service"] == "dispatch-service"
