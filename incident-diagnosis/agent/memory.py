@@ -1,15 +1,16 @@
-import json, time, uuid, os, random
+import json, time, uuid, os
 import numpy as np
 import redis as redis_lib
 from fastembed import TextEmbedding
 
 _MODEL = None
-INDEX_KEY  = "incidents:index"
-FLOOR_KEY  = "memory:config:score_floor"
-CLIFF_KEY  = "memory:config:cliff_gap"
+INDEX_KEY = "incidents:index"
 
-DEFAULT_FLOOR     = float(os.environ.get("MEMORY_SCORE_FLOOR", "0.30"))
-DEFAULT_CLIFF_GAP = float(os.environ.get("MEMORY_CLIFF_GAP",   "0.12"))
+# Provisional sanity floor on raw cosine similarity — excludes only near-orthogonal
+# (obviously unrelated) matches. Not a precisely-tuned relevance boundary; revisit
+# after real score distributions can be observed post query/embedding-symmetry fix.
+# See docs/superpowers/specs/2026-07-04-incident-agent-memory-retrieval-fix-design.md (D6).
+FLOOR = float(os.environ.get("MEMORY_SCORE_FLOOR", "0.15"))
 
 
 def _model() -> TextEmbedding:
@@ -44,8 +45,10 @@ def build_symptom_text(alert_name: str, service: str,
 
 def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
     iid = str(uuid.uuid4())
-    query_text = (f"{incident['alert_name']} {incident['service']} "
-                  f"{incident.get('waiting_reason', '')} {incident.get('log_error', '')}")
+    query_text = build_symptom_text(
+        incident["alert_name"], incident["service"],
+        incident.get("waiting_reason", ""), incident.get("log_error", ""),
+    )
     embedding = _encode(query_text)
     rdb.hset(f"incident:{iid}", mapping={
         "alert_name":     incident["alert_name"],
@@ -61,43 +64,7 @@ def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
         "embedding":      json.dumps(embedding),
     })
     rdb.sadd(INDEX_KEY, iid)
-    recalibrate_thresholds(rdb)
     return iid
-
-
-def recalibrate_thresholds(rdb: redis_lib.Redis) -> None:
-    keys = list(rdb.smembers(INDEX_KEY))
-    if len(keys) < 3:
-        return
-
-    sample_keys = random.sample(keys, min(50, len(keys)))
-    embeddings = []
-    for key in sample_keys:
-        key_str = key.decode() if isinstance(key, bytes) else key
-        raw_emb = rdb.hget(f"incident:{key_str}", "embedding")
-        if raw_emb:
-            embeddings.append(np.array(json.loads(raw_emb)))
-
-    if len(embeddings) < 3:
-        return
-
-    sims = []
-    for i in range(len(embeddings)):
-        for j in range(i + 1, len(embeddings)):
-            a, b = embeddings[i], embeddings[j]
-            norm = np.linalg.norm(a) * np.linalg.norm(b)
-            if norm > 1e-9:
-                sims.append(float(np.dot(a, b) / norm))
-
-    if not sims:
-        return
-
-    sims_arr = np.array(sims)
-    floor     = float(np.clip(np.percentile(sims_arr, 25), 0.20, 0.60))
-    cliff_gap = float(np.clip(0.5 * np.std(sims_arr),     0.08, 0.25))
-
-    rdb.set(FLOOR_KEY, str(floor))
-    rdb.set(CLIFF_KEY, str(cliff_gap))
 
 
 def _score_all(rdb: redis_lib.Redis, query: str) -> list:
@@ -120,7 +87,7 @@ def _score_all(rdb: redis_lib.Redis, query: str) -> list:
         score   = (0.6 * cos_sim
                  + 0.3 * _recency_score(ts)
                  + 0.1 * (1.0 if outcome == "resolved" else 0.5))
-        scored.append((score, {
+        scored.append((score, cos_sim, {
             "alert_name":       _get_field(raw, "alert_name"),
             "service":          _get_field(raw, "service"),
             "root_cause":       _get_field(raw, "root_cause"),
@@ -135,7 +102,7 @@ def _score_all(rdb: redis_lib.Redis, query: str) -> list:
 
 def retrieve_similar(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
     scored = _score_all(rdb, query)
-    return [item for _, item in scored[:top_k]]
+    return [item for _, _, item in scored[:top_k]]
 
 
 RUNBOOK_INDEX = "runbook:index"
@@ -210,24 +177,15 @@ def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
     if not scored:
         return "no relevant memory found"
 
-    floor     = float(rdb.get(FLOOR_KEY) or DEFAULT_FLOOR)
-    cliff_gap = float(rdb.get(CLIFF_KEY) or DEFAULT_CLIFF_GAP)
-
-    scores = [s for s, _ in scored]
-    cutoff = len(scores)
-    if len(scores) > 1:
-        gaps = [scores[i] - scores[i + 1] for i in range(len(scores) - 1)]
-        if max(gaps) > cliff_gap:
-            cutoff = gaps.index(max(gaps)) + 1
-
-    filtered = [item for score, item in scored[:cutoff] if score > floor][:limit]
+    filtered = [(score, cos_sim, item) for score, cos_sim, item in scored
+                if cos_sim > FLOOR][:limit]
     if not filtered:
         return "no relevant memory found"
 
     lines = []
-    for i, inc in enumerate(filtered, 1):
+    for i, (score, cos_sim, inc) in enumerate(filtered, 1):
         lines.append(
-            f"[{i}] {inc['alert_name']} on {inc['service']} → "
+            f"[{i}] (similarity: {cos_sim:.2f}) {inc['alert_name']} on {inc['service']} → "
             f"root cause: {inc['root_cause']} → "
             f"{inc.get('remediation_tool') or 'no action'} → {inc['outcome']}"
         )

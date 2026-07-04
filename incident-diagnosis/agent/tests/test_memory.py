@@ -1,5 +1,6 @@
 import json, time
 import pytest
+from unittest.mock import patch
 
 # fakeredis lets us test Redis operations without a real server
 try:
@@ -67,6 +68,20 @@ def test_store_incident_saves_embedding(rdb):
     assert len(emb) == 384  # all-MiniLM-L6-v2 output dimension
 
 
+def test_store_incident_uses_build_symptom_text_for_embedding(rdb):
+    # The embedded text must come from build_symptom_text, not an inline duplicate
+    # of the same formula — otherwise storage and query text can drift apart again.
+    import numpy as np
+    incident = _make_incident(alert_name="PodCrash", service="dispatch-service",
+                               waiting_reason="OOMKilled", log_error="exit code 137")
+    iid = memory.store_incident(rdb, incident)
+    stored_emb = json.loads(rdb.hget(f"incident:{iid}", "embedding"))
+    expected_text = memory.build_symptom_text("PodCrash", "dispatch-service",
+                                                "OOMKilled", "exit code 137")
+    expected_emb = memory._encode(expected_text)
+    assert np.allclose(stored_emb, expected_emb)
+
+
 def test_retrieve_similar_returns_top_k(rdb):
     memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
     memory.store_incident(rdb, _make_incident(alert_name="PodCrash", service="dispatch-service"))
@@ -81,6 +96,16 @@ def test_retrieve_similar_returns_top_k(rdb):
 def test_retrieve_similar_empty_store(rdb):
     results = memory.retrieve_similar(rdb, "any query", top_k=3)
     assert results == []
+
+
+def test_score_all_returns_score_cos_sim_and_item_tuple(rdb):
+    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
+    scored = memory._score_all(rdb, "HighErrorRate ride-service")
+    assert len(scored) == 1
+    score, cos_sim, item = scored[0]
+    assert isinstance(score, float)
+    assert isinstance(cos_sim, float)
+    assert item["alert_name"] == "HighErrorRate"
 
 
 def test_recency_score_decays(rdb):
@@ -114,7 +139,7 @@ def test_search_memory_returns_no_match_for_unrelated_query(rdb):
         alert_name="OOMKilled", service="notification-service",
         symptoms="node memory pressure", root_cause="connection pool leak"
     ))
-    # Add enough incidents to trigger calibration
+    # Add a few more incidents so the store isn't trivially small
     for i in range(4):
         memory.store_incident(rdb, _make_incident(
             alert_name=f"Alert{i}", service="ride-service",
@@ -125,17 +150,30 @@ def test_search_memory_returns_no_match_for_unrelated_query(rdb):
     assert isinstance(result, str)
 
 
-def test_recalibrate_thresholds_sets_redis_keys(rdb):
-    for i in range(5):
-        memory.store_incident(rdb, _make_incident(
-            alert_name=f"Alert{i}", service="ride-service",
-            symptoms=f"symptom {i}", root_cause=f"cause {i}"
-        ))
-    # store_incident calls recalibrate_thresholds internally after 3+ incidents
-    assert rdb.exists("memory:config:score_floor")
-    assert rdb.exists("memory:config:cliff_gap")
-    floor = float(rdb.get("memory:config:score_floor"))
-    assert 0.10 <= floor <= 0.70
+def test_recalibrate_thresholds_removed():
+    assert not hasattr(memory, "recalibrate_thresholds")
+
+
+def test_search_memory_filters_on_raw_cosine_not_blended_score(rdb):
+    # Regression test for the bug where the floor gated the blended score
+    # (0.6*cos_sim + 0.3*recency + 0.1*outcome) instead of cos_sim alone. A
+    # same-day, "acknowledged" incident with near-zero semantic similarity used
+    # to score 0.6*0 + 0.3*1.0 + 0.1*0.5 = 0.35, clearing the old default floor
+    # of 0.30 despite having no real relevance to the query.
+    memory.store_incident(rdb, _make_incident(
+        alert_name="Unrelated", service="unrelated-service", outcome="acknowledged"
+    ))
+    # Force cos_sim to exactly 0.0 for every candidate regardless of the real
+    # embedding model's output, so the test isolates the filter logic itself.
+    with patch.object(memory, "_encode", return_value=[0.0] * 384):
+        result = memory.search_memory(rdb, "completely different query")
+    assert result == "no relevant memory found"
+
+
+def test_search_memory_output_includes_similarity_score(rdb):
+    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
+    result = memory.search_memory(rdb, "HighErrorRate ride-service")
+    assert "(similarity:" in result
 
 
 # ── Semantic memory (runbook tier) ────────────────────────────────────────────
