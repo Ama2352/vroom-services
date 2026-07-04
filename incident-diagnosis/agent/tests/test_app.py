@@ -306,3 +306,55 @@ def test_admin_ui_returns_html(client):
     assert "/admin/knowledge" in body
     assert "/admin/models"    in body
     assert "/admin/runbook"   in body
+
+
+def test_investigate_collects_diagnostics_before_memory_query(client):
+    call_order = []
+
+    def fake_collect_diagnostics(service, namespace):
+        call_order.append("collect_diagnostics")
+        return _FAKE_FACTS
+
+    def fake_memory_search(rdb, query, limit=3):
+        call_order.append("memory_search")
+        return "no relevant memory found"
+
+    def fake_search_runbook(rdb, query, top_k=3):
+        call_order.append("search_runbook")
+        return []
+
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", side_effect=fake_collect_diagnostics), \
+         patch("app.memory_search",       side_effect=fake_memory_search), \
+         patch("app.search_runbook",      side_effect=fake_search_runbook), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+
+    assert call_order.index("collect_diagnostics") < call_order.index("memory_search")
+    assert call_order.index("collect_diagnostics") < call_order.index("search_runbook")
+
+
+def test_investigate_query_includes_waiting_reason_and_log_error(client):
+    captured = {}
+
+    def fake_memory_search(rdb, query, limit=3):
+        captured["query"] = query
+        return "no relevant memory found"
+
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.memory_search",       side_effect=fake_memory_search), \
+         patch("app.search_runbook",      return_value=[]), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+
+    assert _FAKE_FACTS["waiting_reason"] in captured["query"]
+    assert _FAKE_FACTS["log_error"] in captured["query"]

@@ -4,7 +4,7 @@ import requests
 from flask import Flask, request, jsonify
 
 from memory import (store_incident, search_memory as memory_search,
-                    connect as redis_connect,
+                    connect as redis_connect, build_symptom_text,
                     store_runbook_entry, get_runbook_entries, search_runbook)
 from collector import collect_bundle
 from diagnostics import collect_diagnostics, format_evidence
@@ -468,16 +468,6 @@ def investigate():
 
     seed_if_empty(rdb)
 
-    query        = f"{alert_name} {service}"
-    mem_text     = memory_search(rdb, query, limit=3)
-    runbook_hits = search_runbook(rdb, query, top_k=3)
-    memory_ctx   = _format_memory_context(mem_text, runbook_hits)
-
-    incident_hits = 0 if (not mem_text or mem_text == "no relevant memory found") \
-                    else len([l for l in mem_text.splitlines() if l.strip()])
-    print(f"[memory] pre-fetch: incidents={incident_hits} runbook={len(runbook_hits)} "
-          f"ctx_len={len(memory_ctx)}", flush=True)
-
     bundle = collect_bundle(service, namespace)
     facts  = collect_diagnostics(service, namespace)
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
@@ -486,6 +476,16 @@ def investigate():
           f"init={facts['init_waiting_reason']!r} init_last_exit={facts['init_last_terminated_reason']!r} "
           f"init_restarts={facts['init_restarts']} "
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
+
+    query        = build_symptom_text(alert_name, service, facts["waiting_reason"], facts["log_error"])
+    mem_text     = memory_search(rdb, query, limit=3)
+    runbook_hits = search_runbook(rdb, query, top_k=3)
+    memory_ctx   = _format_memory_context(mem_text, runbook_hits)
+
+    incident_hits = 0 if (not mem_text or mem_text == "no relevant memory found") \
+                    else len([l for l in mem_text.splitlines() if l.strip()])
+    print(f"[memory] pre-fetch: incidents={incident_hits} runbook={len(runbook_hits)} "
+          f"ctx_len={len(memory_ctx)}", flush=True)
 
     diagnosis = interpret(
         alert_name, service, namespace,
