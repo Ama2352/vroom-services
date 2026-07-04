@@ -160,6 +160,8 @@ def search_runbook(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
         emb  = np.array(json.loads(emb_raw))
         norm = np.linalg.norm(q_emb) * np.linalg.norm(emb)
         cos  = float(np.dot(q_emb, emb) / (norm + 1e-9))
+        if cos <= FLOOR:
+            continue
         scored.append((cos, {
             "title":       _get_field(raw, "title"),
             "service":     _get_field(raw, "service"),
@@ -167,6 +169,7 @@ def search_runbook(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
             "root_cause":  _get_field(raw, "root_cause"),
             "fix_command": _get_field(raw, "fix_command"),
             "source":      _get_field(raw, "source"),
+            "score":       cos,
         }))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item for _, item in scored[:top_k]]

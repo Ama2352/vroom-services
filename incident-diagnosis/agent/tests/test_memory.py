@@ -239,3 +239,23 @@ def test_search_runbook_respects_top_k(rdb):
         memory.store_runbook_entry(rdb, _make_runbook_entry(title=f"Entry {i}", service="svc"))
     results = memory.search_runbook(rdb, "svc", top_k=2)
     assert len(results) == 2
+
+
+def test_search_runbook_applies_floor(rdb):
+    # Regression test for the pre-fix behavior where search_runbook had no
+    # relevance filter at all and always returned the top-k nearest entries.
+    memory.store_runbook_entry(rdb, _make_runbook_entry())
+    with patch.object(memory, "_encode", return_value=[0.0] * 384):
+        results = memory.search_runbook(rdb, "completely different query")
+    assert results == []
+
+
+def test_search_runbook_returns_score_field(rdb):
+    memory.store_runbook_entry(rdb, _make_runbook_entry(
+        title="Deployment scaled to zero", service="ride-service",
+        symptom="No pods running for ride-service, replicas=0",
+    ))
+    results = memory.search_runbook(rdb, "ride-service replicas 0 pods missing")
+    assert len(results) == 1
+    assert "score" in results[0]
+    assert isinstance(results[0]["score"], float)
