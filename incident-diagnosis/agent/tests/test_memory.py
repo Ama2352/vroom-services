@@ -124,6 +124,30 @@ def test_diversify_keeps_highest_score_per_signature():
     assert result[1] == (0.5, item_c)
 
 
+def test_diversify_keeps_different_waiting_reasons_separate():
+    # Regression: waiting_reason must be a discriminating field in the diversify key.
+    # Two incidents with identical service + alert_name but DIFFERENT waiting_reason
+    # must NOT be collapsed by _diversify() — both must survive in the result.
+    item_a = {
+        "service": "ride-service",
+        "alert_name": "HighErrorRate",
+        "waiting_reason": "CrashLoopBackOff"
+    }
+    item_b = {
+        "service": "ride-service",
+        "alert_name": "HighErrorRate",
+        "waiting_reason": "OOMKilled"
+    }
+    scored = [(0.9, item_a), (0.8, item_b)]
+
+    result = memory._diversify(scored, top_k=3)
+
+    # Both must survive because waiting_reason is different
+    assert len(result) == 2
+    assert result[0] == (0.9, item_a)
+    assert result[1] == (0.8, item_b)
+
+
 def test_search_memory_empty_query_no_crash(rdb):
     memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate"))
     result = memory.search_memory(rdb, "")
