@@ -36,15 +36,15 @@ def test_tokenize_splits_on_whitespace_and_slashes():
 
 def _make_incident(**kwargs):
     base = {
-        "alert_name": "HighErrorRate",
-        "service": "ride-service",
-        "namespace": "vroom-dev",
-        "symptoms": "rps=12.4 err=8.3% p99=1.2s loki_errors=47",
-        "investigation_steps": [],
-        "root_cause": "dispatch consumer stale cursor",
-        "remediation_tool": "restart_deployment",
-        "remediation_args": {"deployment": "dispatch-service", "namespace": "vroom-dev"},
-        "outcome": "resolved",
+        "alert_name":     "HighErrorRate",
+        "service":        "ride-service",
+        "namespace":      "vroom-dev",
+        "symptoms":       "rps=12.4 err=8.3% p99=1.2s loki_errors=47",
+        "waiting_reason": "",
+        "log_error":      "",
+        "root_cause":     "dispatch consumer stale cursor",
+        "kubectl_hint":   "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
+        "outcome":        "resolved",
     }
     base.update(kwargs)
     return base
@@ -164,7 +164,7 @@ def test_search_memory_returns_no_match_on_empty_store(rdb):
 def test_search_memory_returns_formatted_text(rdb):
     memory.store_incident(rdb, _make_incident(
         alert_name="HighErrorRate", service="ride-service",
-        root_cause="dispatch consumer stale cursor", remediation_tool="restart_deployment"
+        root_cause="dispatch consumer stale cursor",
     ))
     result = memory.search_memory(rdb, "HighErrorRate ride-service")
     assert "HighErrorRate" in result
@@ -206,6 +206,22 @@ def test_search_memory_output_includes_similarity_score(rdb):
     memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
     result = memory.search_memory(rdb, "HighErrorRate ride-service")
     assert "(similarity:" in result
+
+
+def test_search_memory_shows_kubectl_hint(rdb):
+    memory.store_incident(rdb, _make_incident(
+        alert_name="HighErrorRate", service="ride-service",
+        kubectl_hint="kubectl rollout restart deployment/ride-service -n vroom-dev"))
+    result = memory.search_memory(rdb, "HighErrorRate ride-service")
+    assert "kubectl rollout restart deployment/ride-service -n vroom-dev" in result
+
+
+def test_search_memory_does_not_show_outcome(rdb):
+    memory.store_incident(rdb, _make_incident(
+        alert_name="HighErrorRate", service="ride-service", outcome="acknowledged"))
+    result = memory.search_memory(rdb, "HighErrorRate ride-service")
+    assert "acknowledged" not in result
+    assert "resolved" not in result
 
 
 # ── Semantic memory (runbook tier) ────────────────────────────────────────────

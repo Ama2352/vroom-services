@@ -77,12 +77,12 @@ def _score_all(rdb: redis_lib.Redis, query: str) -> list:
         )
         corpus_tokens.append(_tokenize(text))
         items.append({
-            "alert_name":       _get_field(raw, "alert_name"),
-            "service":          _get_field(raw, "service"),
-            "root_cause":       _get_field(raw, "root_cause"),
-            "remediation_tool": _get_field(raw, "remediation_tool"),
-            "outcome":          _get_field(raw, "outcome"),
-            "timestamp":        int(_get_field(raw, "timestamp") or 0),
+            "alert_name":     _get_field(raw, "alert_name"),
+            "service":        _get_field(raw, "service"),
+            "waiting_reason": _get_field(raw, "waiting_reason"),
+            "root_cause":     _get_field(raw, "root_cause"),
+            "kubectl_hint":   _get_field(raw, "kubectl_hint"),
+            "timestamp":      int(_get_field(raw, "timestamp") or 0),
         })
 
     if not corpus_tokens:
@@ -190,6 +190,6 @@ def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
         lines.append(
             f"[{i}] (similarity: {score:.2f}) {inc['alert_name']} on {inc['service']} → "
             f"root cause: {inc['root_cause']} → "
-            f"{inc.get('remediation_tool') or 'no action'} → {inc['outcome']}"
+            f"{inc.get('kubectl_hint') or 'no action'}"
         )
     return "\n".join(lines)
