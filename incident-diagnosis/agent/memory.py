@@ -99,6 +99,19 @@ def _score_all(rdb: redis_lib.Redis, query: str) -> list:
     return scored
 
 
+def _diversify(scored: list, top_k: int) -> list:
+    seen, picked = set(), []
+    for score, item in scored:
+        key = (item["service"], item["alert_name"], item["waiting_reason"])
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append((score, item))
+        if len(picked) >= top_k:
+            break
+    return picked
+
+
 def retrieve_similar(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
     scored = _score_all(rdb, query)
     return [item for _, item in scored[:top_k]]
@@ -185,8 +198,9 @@ def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
     if not scored:
         return "no relevant memory found"
 
+    diverse = _diversify(scored, limit)
     lines = []
-    for i, (score, inc) in enumerate(scored[:limit], 1):
+    for i, (score, inc) in enumerate(diverse, 1):
         lines.append(
             f"[{i}] (similarity: {score:.2f}) {inc['alert_name']} on {inc['service']} → "
             f"root cause: {inc['root_cause']} → "

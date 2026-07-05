@@ -129,6 +129,19 @@ def test_score_all_empty_corpus_returns_empty(rdb):
     assert memory._score_all(rdb, "any query") == []
 
 
+def test_diversify_keeps_highest_score_per_signature():
+    item_a = {"service": "ride-service", "alert_name": "HighErrorRate", "waiting_reason": "CrashLoopBackOff"}
+    item_b = {"service": "ride-service", "alert_name": "HighErrorRate", "waiting_reason": "CrashLoopBackOff"}
+    item_c = {"service": "dispatch-service", "alert_name": "PodCrash", "waiting_reason": "OOMKilled"}
+    scored = [(0.9, item_a), (0.7, item_b), (0.5, item_c)]
+
+    result = memory._diversify(scored, top_k=3)
+
+    assert len(result) == 2
+    assert result[0] == (0.9, item_a)
+    assert result[1] == (0.5, item_c)
+
+
 def test_search_memory_empty_query_no_crash(rdb):
     memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate"))
     result = memory.search_memory(rdb, "")
@@ -222,6 +235,23 @@ def test_search_memory_does_not_show_outcome(rdb):
     result = memory.search_memory(rdb, "HighErrorRate ride-service")
     assert "acknowledged" not in result
     assert "resolved" not in result
+
+
+def test_search_memory_diversifies_duplicate_signature(rdb):
+    memory.store_incident(rdb, _make_incident(
+        alert_name="HighErrorRate", service="ride-service",
+        waiting_reason="CrashLoopBackOff", log_error="postgres timeout"))
+    memory.store_incident(rdb, _make_incident(
+        alert_name="HighErrorRate", service="ride-service",
+        waiting_reason="CrashLoopBackOff", log_error="postgres timeout"))
+    memory.store_incident(rdb, _make_incident(
+        alert_name="PodCrash", service="dispatch-service",
+        waiting_reason="OOMKilled", log_error="memory exceeded"))
+
+    result = memory.search_memory(
+        rdb, "HighErrorRate CrashLoopBackOff postgres timeout PodCrash OOMKilled memory exceeded")
+    lines = [l for l in result.splitlines() if l.strip()]
+    assert len(lines) == 2
 
 
 # ── Semantic memory (runbook tier) ────────────────────────────────────────────
