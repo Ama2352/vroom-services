@@ -293,6 +293,14 @@ def test_post_knowledge_rejects_non_string_values(client):
     assert "table" in r.get_json()["error"]
 
 
+def test_post_knowledge_rejects_empty_key(client):
+    r = client.post("/admin/knowledge",
+        data=json.dumps({"table": {"": "valid text but empty key"}}),
+        content_type="application/json")
+    assert r.status_code == 400
+    assert "table" in r.get_json()["error"]
+
+
 def test_suggest_knowledge_entry(client):
     llm_output = json.dumps({"key": "image_pull_variant",
                               "text": "- ErrImagePull: image not found."})

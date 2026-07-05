@@ -466,7 +466,7 @@ def set_knowledge():
     data  = request.get_json(silent=True) or {}
     table = data.get("table")
     if not isinstance(table, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in table.items()
+        isinstance(k, str) and isinstance(v, str) and k.strip() and v.strip() for k, v in table.items()
     ):
         return jsonify({"error": 'body must be {"table": {"<key>": "<text>", ...}} '
                                   'with non-empty string values'}), 400
