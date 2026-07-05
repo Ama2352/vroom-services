@@ -176,6 +176,9 @@ pre { background: #0d1117; border: 1px solid #30363d; padding: 12px; overflow-y:
 .toast.ok  { background: #1b5e20; color: white; }
 .toast.err { background: #b71c1c; color: white; }
 .err-msg { color: #ef5350; font-size: 0.8em; margin-top: 4px; min-height: 1.2em; }
+.kt-entry { border: 1px solid #30363d; padding: 8px; margin-bottom: 8px; }
+input { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 6px;
+        font-size: 0.85em; font-family: monospace; }
 </style>
 </head>
 <body>
@@ -189,9 +192,10 @@ pre { background: #0d1117; border: 1px solid #30363d; padding: 12px; overflow-y:
 <div id="tab-knowledge" class="panel active">
   <div class="row">
     <label style="flex:1;margin:0;">Knowledge Table</label>
+    <button class="btn-secondary" onclick="addEntryRow()">+ Add entry</button>
     <button class="btn-primary" onclick="saveKnowledge()">Save</button>
   </div>
-  <textarea id="kt-text" rows="20" spellcheck="false"></textarea>
+  <div id="kt-entries"></div>
 
   <div class="divider">
     <label>Suggest new entry from incident data</label>
@@ -202,12 +206,15 @@ pre { background: #0d1117; border: 1px solid #30363d; padding: 12px; overflow-y:
       <button class="btn-secondary" onclick="suggestEntry()">Suggest entry</button>
       <span id="suggest-loading" style="display:none;color:#aaa;">generating&#8230;</span>
     </div>
-    <label style="margin-top:12px;">Draft (edit before appending):</label>
-    <textarea id="kt-draft" rows="5" spellcheck="false"
+    <label style="margin-top:12px;">Draft (edit before adding):</label>
+    <div class="row">
+      <input id="kt-draft-key" style="flex:1;" placeholder="key (e.g. crashloop)" spellcheck="false">
+    </div>
+    <textarea id="kt-draft-text" rows="5" spellcheck="false"
               placeholder="suggestion will appear here..."></textarea>
     <div class="row">
-      <button class="btn-success" onclick="appendDraft()">Append to table &#8593;</button>
-      <small style="color:#666;">(still need to Save after appending)</small>
+      <button class="btn-success" onclick="addDraftEntry()">Add as new entry &#8593;</button>
+      <small style="color:#666;">(still need to Save after adding)</small>
     </div>
     <div class="err-msg" id="suggest-error"></div>
   </div>
@@ -247,21 +254,51 @@ function showToast(msg, ok) {
   t.className = "toast show " + (ok ? "ok" : "err");
   setTimeout(() => { t.className = "toast"; }, 3000);
 }
+function renderEntries(table) {
+  const container = document.getElementById("kt-entries");
+  container.innerHTML = "";
+  Object.entries(table || {}).forEach(([key, text]) => addEntryRow(key, text));
+}
+function addEntryRow(key = "", text = "") {
+  const container = document.getElementById("kt-entries");
+  const row = document.createElement("div");
+  row.className = "kt-entry";
+  row.innerHTML = `
+    <div class="row">
+      <input class="kt-key" style="flex:1;" value="${key.replace(/"/g, "&quot;")}"
+             placeholder="key (e.g. crashloop)" spellcheck="false">
+      <button class="btn-secondary" onclick="this.closest('.kt-entry').remove()">Delete</button>
+    </div>
+    <textarea class="kt-value" rows="6" spellcheck="false"></textarea>
+  `;
+  row.querySelector(".kt-value").value = text;
+  container.appendChild(row);
+}
+function collectEntries() {
+  const table = {};
+  document.querySelectorAll(".kt-entry").forEach(row => {
+    const key  = row.querySelector(".kt-key").value.trim();
+    const text = row.querySelector(".kt-value").value;
+    if (key) table[key] = text;
+  });
+  return table;
+}
 async function loadKnowledge() {
   try {
     const r = await fetch("/admin/knowledge");
     const d = await r.json();
-    document.getElementById("kt-text").value = d.table || "";
+    renderEntries(d.table);
   } catch(e) { showToast("Failed to load knowledge table", false); }
 }
 async function saveKnowledge() {
-  const text = document.getElementById("kt-text").value;
+  const table = collectEntries();
   try {
     const r = await fetch("/admin/knowledge", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({table: text}),
+      body: JSON.stringify({table}),
     });
-    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    if (d.error) { showToast("Save failed: "+d.error, false); return; }
     showToast("Knowledge table saved", true);
   } catch(e) { showToast("Save failed: "+e.message, false); }
 }
@@ -270,7 +307,8 @@ async function suggestEntry() {
   if (!raw) { showToast("Paste incident data first", false); return; }
   document.getElementById("suggest-loading").style.display = "inline";
   document.getElementById("suggest-error").textContent = "";
-  document.getElementById("kt-draft").value = "";
+  document.getElementById("kt-draft-key").value  = "";
+  document.getElementById("kt-draft-text").value = "";
   try {
     const r = await fetch("/admin/knowledge/suggest", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -278,19 +316,22 @@ async function suggestEntry() {
     });
     const d = await r.json();
     if (d.error) { document.getElementById("suggest-error").textContent = "LLM error: "+d.error; }
-    else         { document.getElementById("kt-draft").value = d.suggestion || ""; }
+    else if (d.suggestion) {
+      document.getElementById("kt-draft-key").value  = d.suggestion.key  || "";
+      document.getElementById("kt-draft-text").value = d.suggestion.text || "";
+    }
   } catch(e) {
     document.getElementById("suggest-error").textContent = "Request failed: "+e.message;
   } finally {
     document.getElementById("suggest-loading").style.display = "none";
   }
 }
-function appendDraft() {
-  const draft = document.getElementById("kt-draft").value.trim();
-  if (!draft) { showToast("No draft to append", false); return; }
-  const kt = document.getElementById("kt-text");
-  kt.value  = kt.value.trimEnd() + "\\n" + draft;
-  showToast("Appended — remember to Save", true);
+function addDraftEntry() {
+  const key  = document.getElementById("kt-draft-key").value.trim();
+  const text = document.getElementById("kt-draft-text").value.trim();
+  if (!key || !text) { showToast("Draft needs both a key and text", false); return; }
+  addEntryRow(key, text);
+  showToast("Added — remember to Save", true);
 }
 async function loadModels() {
   try {
