@@ -188,17 +188,27 @@ def search_runbook(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
     return [item for _, item in scored[:top_k]]
 
 
-def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
+def search_memory_items(rdb: redis_lib.Redis, query: str, limit: int = 3) -> list:
     scored = _score_all(rdb, query)
     if not scored:
-        return "no relevant memory found"
-
+        return []
     diverse = _diversify(scored, limit)
+    return [{**item, "score": score} for score, item in diverse]
+
+
+def format_incidents(items: list) -> str:
     lines = []
-    for i, (score, inc) in enumerate(diverse, 1):
+    for i, item in enumerate(items, 1):
         lines.append(
-            f"[{i}] (similarity: {score:.2f}) {inc['alert_name']} on {inc['service']} → "
-            f"root cause: {inc['root_cause']} → "
-            f"{inc.get('kubectl_hint') or 'no action'}"
+            f"[{i}] (similarity: {item['score']:.2f}) {item['alert_name']} on {item['service']} → "
+            f"root cause: {item['root_cause']} → "
+            f"{item.get('kubectl_hint') or 'no action'}"
         )
     return "\n".join(lines)
+
+
+def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
+    items = search_memory_items(rdb, query, limit)
+    if not items:
+        return "no relevant memory found"
+    return format_incidents(items)

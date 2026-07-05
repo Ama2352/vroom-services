@@ -148,6 +148,46 @@ def test_diversify_keeps_different_waiting_reasons_separate():
     assert result[1] == (0.8, item_b)
 
 
+def test_search_memory_items_returns_score_and_fields(rdb):
+    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
+    items = memory.search_memory_items(rdb, "HighErrorRate ride-service")
+    assert len(items) == 1
+    assert items[0]["alert_name"] == "HighErrorRate"
+    assert items[0]["service"] == "ride-service"
+    assert isinstance(items[0]["score"], float)
+
+
+def test_search_memory_items_empty_store_returns_empty_list(rdb):
+    assert memory.search_memory_items(rdb, "anything") == []
+
+
+def test_search_memory_items_respects_limit(rdb):
+    for i in range(5):
+        memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service=f"svc-{i}"))
+    items = memory.search_memory_items(rdb, "HighErrorRate", limit=2)
+    assert len(items) == 2
+
+
+def test_format_incidents_renders_expected_line_format():
+    items = [{"alert_name": "HighErrorRate", "service": "ride-service",
+              "root_cause": "dispatch consumer stale cursor",
+              "kubectl_hint": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
+              "score": 0.85}]
+    result = memory.format_incidents(items)
+    assert result == (
+        "[1] (similarity: 0.85) HighErrorRate on ride-service → "
+        "root cause: dispatch consumer stale cursor → "
+        "kubectl rollout restart deployment/dispatch-service -n vroom-dev"
+    )
+
+
+def test_format_incidents_shows_no_action_when_kubectl_hint_missing():
+    items = [{"alert_name": "HighErrorRate", "service": "ride-service",
+              "root_cause": "unknown", "kubectl_hint": "", "score": 0.5}]
+    result = memory.format_incidents(items)
+    assert "no action" in result
+
+
 def test_search_memory_empty_query_no_crash(rdb):
     memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate"))
     result = memory.search_memory(rdb, "")
