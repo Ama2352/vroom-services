@@ -40,15 +40,22 @@ def _load_models(rdb) -> list:
 _current_models: list = _load_models(rdb)
 
 
-def _load_knowledge_table(rdb) -> str:
+def _load_knowledge_table(rdb) -> dict:
     raw = rdb.get(_KNOWLEDGE_KEY)
     if raw:
-        return raw.decode() if isinstance(raw, bytes) else raw
-    rdb.set(_KNOWLEDGE_KEY, K8S_KNOWLEDGE_TABLE)
-    return K8S_KNOWLEDGE_TABLE
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and all(
+                isinstance(k, str) and isinstance(v, str) for k, v in data.items()
+            ):
+                return data
+        except json.JSONDecodeError:
+            pass
+    rdb.set(_KNOWLEDGE_KEY, json.dumps(K8S_KNOWLEDGE_TABLE))
+    return dict(K8S_KNOWLEDGE_TABLE)
 
 
-_current_knowledge_table: str = _load_knowledge_table(rdb)
+_current_knowledge_table: dict = _load_knowledge_table(rdb)
 
 
 def _background_seed():
@@ -324,7 +331,7 @@ loadKnowledge();
 
 _SUGGEST_PROMPT = """\
 You are updating a Kubernetes diagnostic knowledge table used by an incident response agent.
-Each entry follows this exact format:
+Each entry is keyed by a short lowercase_snake_case identifier and a text value in this exact format:
 - <WaitingReason or pattern>: One-line description of what this means.
   This IS / is NOT a conclusive root cause.
   Look for: specific things to investigate.
@@ -333,8 +340,30 @@ Each entry follows this exact format:
 Here is raw incident data (kubectl output, logs, agent answer, or your notes):
 {raw}
 
-Write exactly ONE new entry in the format above.
-Output only the bullet text — no explanation, no markdown, no preamble."""
+Output exactly this JSON (no markdown, no explanation):
+{{"key": "short_snake_case_id", "text": "- <bullet text in the exact format above>"}}"""
+
+
+def _parse_suggestion(text: str) -> dict | None:
+    if not text:
+        return None
+    try:
+        result = json.loads(text.strip())
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            return None
+        try:
+            result = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(result, dict):
+        return None
+    if not {"key", "text"}.issubset(result.keys()):
+        return None
+    if not all(isinstance(result[k], str) and result[k].strip() for k in ("key", "text")):
+        return None
+    return result
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -434,13 +463,16 @@ def get_knowledge():
 @app.route("/admin/knowledge", methods=["POST"])
 def set_knowledge():
     global _current_knowledge_table
-    data = request.get_json(silent=True) or {}
-    text = data.get("table", "")
-    if not isinstance(text, str):
-        return jsonify({"error": "'table' must be a string"}), 400
-    _current_knowledge_table = text
-    rdb.set(_KNOWLEDGE_KEY, text)
-    return jsonify({"saved": True, "length": len(text)})
+    data  = request.get_json(silent=True) or {}
+    table = data.get("table")
+    if not isinstance(table, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in table.items()
+    ):
+        return jsonify({"error": 'body must be {"table": {"<key>": "<text>", ...}} '
+                                  'with non-empty string values'}), 400
+    _current_knowledge_table = table
+    rdb.set(_KNOWLEDGE_KEY, json.dumps(table))
+    return jsonify({"saved": True, "entries": len(table)})
 
 
 @app.route("/admin/knowledge/suggest", methods=["POST"])
@@ -449,13 +481,13 @@ def suggest_knowledge_entry():
     raw  = data.get("raw", "").strip()
     if not raw:
         return jsonify({"error": "body must include non-empty 'raw' field"}), 400
-    messages   = [{"role": "user",
-                   "content": _SUGGEST_PROMPT.format(raw=raw)}]
-    suggestion = _run_llm(messages, None, _current_models, GROQ_KEY, OPENROUTER_KEY)
-    if not suggestion:
-        return jsonify({"suggestion": "",
-                        "error": "LLM returned empty response — check API keys and model list"})
-    return jsonify({"suggestion": suggestion.strip()})
+    messages   = [{"role": "user", "content": _SUGGEST_PROMPT.format(raw=raw)}]
+    raw_output = _run_llm(messages, None, _current_models, GROQ_KEY, OPENROUTER_KEY)
+    suggestion = _parse_suggestion(raw_output)
+    if suggestion is None:
+        return jsonify({"suggestion": None,
+                        "error": "LLM returned empty or invalid JSON — check API keys and model list"})
+    return jsonify({"suggestion": suggestion})
 
 
 @app.route("/investigate", methods=["POST"])

@@ -250,18 +250,19 @@ def test_investigate_forwards_pod_to_interpret(client):
 
 
 def test_get_knowledge_returns_default(client):
-    from interpreter import K8S_KNOWLEDGE_TABLE
     _FAKE_REDIS.flushall()
     agent_app._current_knowledge_table = agent_app._load_knowledge_table(_FAKE_REDIS)
     r = client.get("/admin/knowledge")
     assert r.status_code == 200
     body = r.get_json()
     assert "table" in body
-    assert "CrashLoopBackOff" in body["table"]
+    assert isinstance(body["table"], dict)
+    assert "crashloop" in body["table"]
+    assert "CrashLoopBackOff" in body["table"]["crashloop"]
 
 
 def test_post_knowledge_saves_and_reloads(client):
-    new_table = "- TestEntry: testing hot-reload.\n  This is conclusive.\n"
+    new_table = {"test_entry": "- TestEntry: testing hot-reload.\n  This is conclusive."}
     r = client.post("/admin/knowledge",
         data=json.dumps({"table": new_table}),
         content_type="application/json")
@@ -271,20 +272,50 @@ def test_post_knowledge_saves_and_reloads(client):
     stored = _FAKE_REDIS.get("config:knowledge_table")
     assert stored is not None
     decoded = stored.decode() if isinstance(stored, bytes) else stored
-    assert new_table in decoded
+    assert json.loads(decoded) == new_table
     r2 = client.get("/admin/knowledge")
     assert r2.get_json()["table"] == new_table
 
 
+def test_post_knowledge_rejects_non_dict_table(client):
+    r = client.post("/admin/knowledge",
+        data=json.dumps({"table": "- Not a dict: plain text."}),
+        content_type="application/json")
+    assert r.status_code == 400
+    assert "table" in r.get_json()["error"]
+
+
+def test_post_knowledge_rejects_non_string_values(client):
+    r = client.post("/admin/knowledge",
+        data=json.dumps({"table": {"bad_entry": 123}}),
+        content_type="application/json")
+    assert r.status_code == 400
+    assert "table" in r.get_json()["error"]
+
+
 def test_suggest_knowledge_entry(client):
-    with patch("app._run_llm", return_value="- ErrImagePull: image not found."):
+    llm_output = json.dumps({"key": "image_pull_variant",
+                              "text": "- ErrImagePull: image not found."})
+    with patch("app._run_llm", return_value=llm_output):
         r = client.post("/admin/knowledge/suggest",
             data=json.dumps({"raw": "kubectl describe shows ErrImagePull"}),
             content_type="application/json")
     assert r.status_code == 200
     body = r.get_json()
     assert "suggestion" in body
-    assert "ErrImagePull" in body["suggestion"]
+    assert body["suggestion"]["key"]  == "image_pull_variant"
+    assert "ErrImagePull" in body["suggestion"]["text"]
+
+
+def test_suggest_knowledge_entry_rejects_invalid_llm_json(client):
+    with patch("app._run_llm", return_value="not valid json at all"):
+        r = client.post("/admin/knowledge/suggest",
+            data=json.dumps({"raw": "kubectl describe shows ErrImagePull"}),
+            content_type="application/json")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["suggestion"] is None
+    assert "error" in body
 
 
 def test_suggest_knowledge_entry_missing_raw(client):
