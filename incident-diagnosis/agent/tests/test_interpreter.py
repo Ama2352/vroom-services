@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from interpreter import (
     interpret, _parse_output, _fallback, _build_grounded_prompt,
-    _quality_check, _build_refine_prompt,
+    _quality_check, _build_refine_prompt, _is_grounded,
     K8S_KNOWLEDGE_TABLE, GROUNDING_RULE, REQUIRED_KEYS, MEMORY_USAGE_EXAMPLE
 )
 
@@ -220,6 +220,25 @@ class TestQualityCheck:
         assert r["passed"] is True
         assert r["low_confidence"] is False
         assert r["issues"] == []
+
+    def test_flags_ungrounded_root_cause(self):
+        d = self._clean()
+        d["root_cause"] = "Redis eviction causing dropped requests"
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert any("not grounded" in issue for issue in r["issues"])
+
+
+class TestIsGrounded:
+    def test_passes_when_no_free_text_evidence(self):
+        empty = {**SAMPLE_FACTS, "log_error": "", "event_message": ""}
+        assert _is_grounded("Redis eviction causing dropped requests", empty) is True
+
+    def test_fails_on_disconnected_root_cause(self):
+        assert _is_grounded("Redis eviction causing dropped requests", SAMPLE_FACTS) is False
+
+    def test_passes_on_overlapping_root_cause(self):
+        assert _is_grounded("Database connection timeout during startup", SAMPLE_FACTS) is True
 
 
 class TestInterpret:

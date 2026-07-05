@@ -137,6 +137,25 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
     return "\n".join(lines)
 
 
+_MIN_GROUNDING_TOKEN_LEN = 5
+
+
+def _tokenize_for_grounding(text: str) -> set:
+    return {t for t in re.findall(r"[a-zA-Z0-9_./:-]+", text.lower())
+            if len(t) >= _MIN_GROUNDING_TOKEN_LEN}
+
+
+def _is_grounded(root_cause: str, facts: dict) -> bool:
+    evidence_text = " ".join(s for s in (facts.get("log_error", ""), facts.get("event_message", ""))
+                              if s)
+    if not evidence_text:
+        return True
+    evidence_tokens = _tokenize_for_grounding(evidence_text)
+    if not evidence_tokens:
+        return True
+    return bool(evidence_tokens & _tokenize_for_grounding(root_cause))
+
+
 def _quality_check(diagnosis: dict, facts: dict, pod: str, service: str) -> dict:
     rc     = diagnosis.get("root_cause",   "").lower()
     da     = diagnosis.get("dev_action",   "").lower()
@@ -154,6 +173,12 @@ def _quality_check(diagnosis: dict, facts: dict, pod: str, service: str) -> dict
         # Honest low-confidence response — skip language checks, but still
         # surface any placeholder issue found above so refine can fix it.
         return {"passed": len(issues) == 0, "low_confidence": True, "issues": issues}
+
+    if not _is_grounded(rc, facts):
+        issues.append(
+            "root_cause is not grounded in the available evidence (log_error/event_message) — "
+            "reference specific text from those fields or lower confidence"
+        )
 
     if any(p in rc for p in GENERIC_ROOT_CAUSE):
         issues.append(
