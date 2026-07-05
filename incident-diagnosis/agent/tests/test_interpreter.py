@@ -373,3 +373,23 @@ class TestInterpretPipeline:
                            SAMPLE_FACTS, "", "", [], pod="ride-abc123", _llm=mock_llm)
         assert mock_llm.call_count == 1
         assert result.get("low_confidence") is False
+
+
+class TestRefineTemperature:
+    def test_refine_call_uses_higher_temperature(self):
+        from unittest.mock import patch, Mock
+        resp1 = Mock()
+        resp1.raise_for_status = Mock()
+        resp1.json.return_value = {"choices": [{"message": {"content": _GENERIC_JSON}}]}
+        resp2 = Mock()
+        resp2.raise_for_status = Mock()
+        resp2.json.return_value = {"choices": [{"message": {"content": _SPECIFIC_JSON}}]}
+        with patch("interpreter.http_requests.post", side_effect=[resp1, resp2]) as mock_post:
+            interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "",
+                      [{"id": "test-model", "provider": "groq"}],
+                      groq_key="fake-key", pod="ride-abc123")
+        assert mock_post.call_count == 2
+        first_temp  = mock_post.call_args_list[0].kwargs["json"]["temperature"]
+        second_temp = mock_post.call_args_list[1].kwargs["json"]["temperature"]
+        assert first_temp  == 0.1
+        assert second_temp == 0.4

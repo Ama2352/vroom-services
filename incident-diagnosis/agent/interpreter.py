@@ -10,6 +10,8 @@ DEFAULT_MODELS = [
     {"id": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"},
 ]
 
+REFINE_TEMPERATURE = 0.4
+
 K8S_KNOWLEDGE_TABLE = """\
 Kubernetes pod waiting reasons and their diagnostic signatures:
 - PodInitializing + init_last_exit=OOMKilled: Init container was killed by the kernel OOM.
@@ -239,7 +241,7 @@ def _build_refine_prompt(original_prompt: str, diagnosis: dict, issues: list) ->
 
 
 def _run_llm(messages: list, _llm, models: list,
-             groq_key: str, openrouter_key: str) -> str:
+             groq_key: str, openrouter_key: str, temperature: float = 0.1) -> str:
     if _llm is not None:
         try:
             return _llm(messages, openrouter_key)
@@ -247,7 +249,7 @@ def _run_llm(messages: list, _llm, models: list,
             return ""
     for model_entry in (models or DEFAULT_MODELS):
         try:
-            return _call_llm(messages, model_entry, groq_key, openrouter_key)
+            return _call_llm(messages, model_entry, groq_key, openrouter_key, temperature=temperature)
         except Exception as exc:
             print(f"[interpreter] {model_entry['id']} failed: {exc}", flush=True)
     return ""
@@ -264,14 +266,15 @@ def _fallback(service: str, namespace: str, facts: dict) -> dict:
 
 
 def _call_llm(messages: list, model_entry: dict,
-              groq_key: str, openrouter_key: str, max_tokens: int = 400) -> str:
+              groq_key: str, openrouter_key: str, max_tokens: int = 400,
+              temperature: float = 0.1) -> str:
     url = GROQ_URL if model_entry["provider"] == "groq" else OPENROUTER_URL
     key = groq_key if model_entry["provider"] == "groq" else openrouter_key
     resp = http_requests.post(
         url,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json={"model": model_entry["id"], "messages": messages,
-              "temperature": 0.1, "max_tokens": max_tokens},
+              "temperature": temperature, "max_tokens": max_tokens},
         timeout=30,
     )
     resp.raise_for_status()
@@ -309,7 +312,8 @@ def interpret(
     print(f"[interpreter] quality issues detected: {qc['issues']}", flush=True)
     refine_prompt   = _build_refine_prompt(prompt, phase1, qc["issues"])
     refine_messages = [{"role": "user", "content": refine_prompt}]
-    raw2    = _run_llm(refine_messages, _llm, models, groq_key, openrouter_key)
+    raw2    = _run_llm(refine_messages, _llm, models, groq_key, openrouter_key,
+                       temperature=REFINE_TEMPERATURE)
     refined = _parse_output(raw2)
     if refined is None:
         print(f"[interpreter] refine parse failed — returning phase1 output", flush=True)
