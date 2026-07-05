@@ -212,3 +212,24 @@ def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
     if not items:
         return "no relevant memory found"
     return format_incidents(items)
+
+
+_ROOT_CAUSE_OVERLAP_THRESHOLD = 0.6
+
+
+def _is_same_lesson(incident_item: dict, runbook_item: dict) -> bool:
+    if incident_item.get("service", "").strip().lower() != runbook_item.get("service", "").strip().lower():
+        return False
+    tokens_a = set(_tokenize(incident_item.get("root_cause", "")))
+    tokens_b = set(_tokenize(runbook_item.get("root_cause", "")))
+    if not tokens_a or not tokens_b:
+        return False
+    overlap = len(tokens_a & tokens_b) / min(len(tokens_a), len(tokens_b))
+    return overlap >= _ROOT_CAUSE_OVERLAP_THRESHOLD
+
+
+def dedupe_against_runbook(incident_items: list, runbook_hits: list) -> list:
+    return [
+        inc for inc in incident_items
+        if not any(_is_same_lesson(inc, rb) for rb in runbook_hits)
+    ]

@@ -395,3 +395,86 @@ def test_search_runbook_service_not_part_of_scored_text(rdb):
     # distinguishes the two designs (a same-rank-order-only assertion does not).
     assert len(results) == 1
     assert results[0]["service"] == "dispatch-service"
+
+
+# ── Cross-tier dedup (Group D) ────────────────────────────────────────────────
+
+def test_is_same_lesson_true_when_same_service_and_high_overlap_root_cause():
+    incident = {"service": "ride-service", "root_cause": "dispatch consumer stale cursor"}
+    runbook  = {"service": "ride-service",
+                "root_cause": "Dispatch service consumer had a stale Redis cursor"}
+    assert memory._is_same_lesson(incident, runbook) is True
+
+
+def test_is_same_lesson_false_when_different_service_even_with_identical_root_cause():
+    incident = {"service": "ride-service", "root_cause": "dispatch consumer stale cursor"}
+    runbook  = {"service": "dispatch-service", "root_cause": "dispatch consumer stale cursor"}
+    assert memory._is_same_lesson(incident, runbook) is False
+
+
+def test_is_same_lesson_false_when_same_service_but_low_overlap_root_cause():
+    incident = {"service": "ride-service", "root_cause": "dispatch consumer stale cursor"}
+    runbook  = {"service": "ride-service", "root_cause": "postgres connection pool exhausted"}
+    assert memory._is_same_lesson(incident, runbook) is False
+
+
+def test_is_same_lesson_false_when_incident_root_cause_empty():
+    incident = {"service": "ride-service", "root_cause": ""}
+    runbook  = {"service": "ride-service", "root_cause": "dispatch consumer stale cursor"}
+    assert memory._is_same_lesson(incident, runbook) is False
+
+
+def test_is_same_lesson_false_when_runbook_root_cause_empty():
+    incident = {"service": "ride-service", "root_cause": "dispatch consumer stale cursor"}
+    runbook  = {"service": "ride-service", "root_cause": ""}
+    assert memory._is_same_lesson(incident, runbook) is False
+
+
+def test_is_same_lesson_service_comparison_is_case_insensitive():
+    incident = {"service": "Ride-Service", "root_cause": "dispatch consumer stale cursor"}
+    runbook  = {"service": "ride-service",
+                "root_cause": "Dispatch service consumer had a stale Redis cursor"}
+    assert memory._is_same_lesson(incident, runbook) is True
+
+
+def test_dedupe_drops_incident_matching_a_runbook_hit():
+    incidents = [{"service": "ride-service", "root_cause": "dispatch consumer stale cursor",
+                  "alert_name": "HighErrorRate", "score": 0.9}]
+    runbook_hits = [{"service": "ride-service",
+                     "root_cause": "Dispatch service consumer had a stale Redis cursor",
+                     "title": "Stale cursor fix", "score": 0.8}]
+    result = memory.dedupe_against_runbook(incidents, runbook_hits)
+    assert result == []
+
+
+def test_dedupe_keeps_incident_with_no_matching_runbook_hit():
+    incidents = [{"service": "ride-service", "root_cause": "dispatch consumer stale cursor",
+                  "alert_name": "HighErrorRate", "score": 0.9}]
+    runbook_hits = [{"service": "notification-service", "root_cause": "SMTP timeout",
+                     "title": "SMTP fix", "score": 0.8}]
+    result = memory.dedupe_against_runbook(incidents, runbook_hits)
+    assert result == incidents
+
+
+def test_dedupe_keeps_non_matching_incident_and_drops_matching_one():
+    matching = {"service": "ride-service", "root_cause": "dispatch consumer stale cursor",
+                "alert_name": "HighErrorRate", "score": 0.9}
+    non_matching = {"service": "dispatch-service", "root_cause": "OOM killed",
+                    "alert_name": "PodCrash", "score": 0.7}
+    runbook_hits = [{"service": "ride-service",
+                     "root_cause": "Dispatch service consumer had a stale Redis cursor",
+                     "title": "Stale cursor fix", "score": 0.8}]
+    result = memory.dedupe_against_runbook([matching, non_matching], runbook_hits)
+    assert result == [non_matching]
+
+
+def test_dedupe_empty_runbook_hits_keeps_all_incidents():
+    incidents = [{"service": "ride-service", "root_cause": "dispatch consumer stale cursor",
+                  "alert_name": "HighErrorRate", "score": 0.9}]
+    result = memory.dedupe_against_runbook(incidents, [])
+    assert result == incidents
+
+
+def test_dedupe_empty_incident_items_returns_empty_list():
+    runbook_hits = [{"service": "ride-service", "root_cause": "x", "title": "t", "score": 0.5}]
+    assert memory.dedupe_against_runbook([], runbook_hits) == []
