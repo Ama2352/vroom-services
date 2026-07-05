@@ -64,10 +64,10 @@ def _select_knowledge_key(facts: dict) -> str | None:
             return "init_oom"
         if facts.get("init_waiting_reason") == "CrashLoopBackOff":
             return "init_crashloop"
-    if facts.get("waiting_reason") == "CrashLoopBackOff":
-        return "crashloop"
     if facts.get("last_terminated_reason") == "OOMKilled":
         return "oom"
+    if facts.get("waiting_reason") == "CrashLoopBackOff":
+        return "crashloop"
     if facts.get("waiting_reason") in ("ImagePullBackOff", "ErrImagePull"):
         return "image_pull"
     if facts.get("waiting_reason") == "CreateContainerConfigError":

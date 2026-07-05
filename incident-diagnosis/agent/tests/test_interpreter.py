@@ -173,6 +173,14 @@ class TestSelectKnowledgeKey:
     def test_crashloop(self):
         assert _select_knowledge_key({"waiting_reason": "CrashLoopBackOff"}) == "crashloop"
 
+    def test_oom_takes_priority_over_crashloop_when_both_present(self):
+        # Regression: a repeatedly OOM-killed container shows waiting_reason=CrashLoopBackOff
+        # AND last_terminated_reason=OOMKilled simultaneously in steady state — this is the
+        # common real-world pattern after AlertManager's `for:` window elapses. OOM must win
+        # since it's the conclusive root cause; CrashLoopBackOff alone is not.
+        facts = {"waiting_reason": "CrashLoopBackOff", "last_terminated_reason": "OOMKilled"}
+        assert _select_knowledge_key(facts) == "oom"
+
     def test_oom(self):
         facts = {"waiting_reason": "", "last_terminated_reason": "OOMKilled"}
         assert _select_knowledge_key(facts) == "oom"
