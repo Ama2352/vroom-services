@@ -12,32 +12,78 @@ DEFAULT_MODELS = [
 
 REFINE_TEMPERATURE = 0.4
 
-K8S_KNOWLEDGE_TABLE = """\
-Kubernetes pod waiting reasons and their diagnostic signatures:
-- PodInitializing + init_last_exit=OOMKilled: Init container was killed by the kernel OOM.
-  This IS a conclusive root cause — do NOT say "Insufficient evidence". No logs exist after an
-  OOM kill. root_cause: "Init container OOMKilled — memory limit too low".
-  dev_action: increase the init container memory limit in the deployment manifest.
-  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section).
-- PodInitializing + init=CrashLoopBackOff (no OOMKilled): Init container crashing repeatedly.
-  Look for: missing Secret/ConfigMap, DB/Redis unreachable during init, bad entrypoint.
-  Primary source: kubectl logs {pod} -n {namespace} -c {init-container-name} --previous.
-- CrashLoopBackOff: Container started but exited with non-zero exit code, repeatedly.
-  Look for: application crash on startup, missing required env var, OOM at startup,
-  dependency (DB, Redis) unreachable. Primary source: previous container logs (--previous).
-- OOMKilled: Container exceeded its memory limit and was killed by the kernel.
-  This IS a conclusive root cause — do NOT say "Insufficient evidence". No logs exist after
-  an OOM kill. dev_action: increase memory limit in deployment manifest.
-  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section).
-- ImagePullBackOff / ErrImagePull: Registry cannot pull the container image.
-  Look for: typo in image name/tag, private registry credentials missing, image deleted.
-  Primary source: K8s event message (names the exact image).
-- CreateContainerConfigError: Pod spec references a Secret or ConfigMap that does not exist.
-  The K8s event message names the missing resource explicitly.
-- Pending with FailedScheduling event: No node can schedule the pod.
-  Look for: node selector mismatch, insufficient CPU/memory on all nodes, PodAffinity/Taint rules.
-- (empty waiting_reason, available=0, desired>0): Deployment has zero running replicas.
-  Look for: explicit scale-to-zero, HPA scale-down, manual kubectl scale."""
+KNOWLEDGE_HEADER = "Kubernetes pod waiting reasons and their diagnostic signatures:"
+
+K8S_KNOWLEDGE_TABLE = {
+    "init_oom": (
+        "- PodInitializing + init_last_exit=OOMKilled: Init container was killed by the kernel OOM.\n"
+        "  This IS a conclusive root cause — do NOT say \"Insufficient evidence\". No logs exist after an\n"
+        "  OOM kill. root_cause: \"Init container OOMKilled — memory limit too low\".\n"
+        "  dev_action: increase the init container memory limit in the deployment manifest.\n"
+        "  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section)."
+    ),
+    "init_crashloop": (
+        "- PodInitializing + init=CrashLoopBackOff (no OOMKilled): Init container crashing repeatedly.\n"
+        "  Look for: missing Secret/ConfigMap, DB/Redis unreachable during init, bad entrypoint.\n"
+        "  Primary source: kubectl logs {pod} -n {namespace} -c {init-container-name} --previous."
+    ),
+    "crashloop": (
+        "- CrashLoopBackOff: Container started but exited with non-zero exit code, repeatedly.\n"
+        "  Look for: application crash on startup, missing required env var, OOM at startup,\n"
+        "  dependency (DB, Redis) unreachable. Primary source: previous container logs (--previous)."
+    ),
+    "oom": (
+        "- OOMKilled: Container exceeded its memory limit and was killed by the kernel.\n"
+        "  This IS a conclusive root cause — do NOT say \"Insufficient evidence\". No logs exist after\n"
+        "  an OOM kill. dev_action: increase memory limit in deployment manifest.\n"
+        "  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section)."
+    ),
+    "image_pull": (
+        "- ImagePullBackOff / ErrImagePull: Registry cannot pull the container image.\n"
+        "  Look for: typo in image name/tag, private registry credentials missing, image deleted.\n"
+        "  Primary source: K8s event message (names the exact image)."
+    ),
+    "config_error": (
+        "- CreateContainerConfigError: Pod spec references a Secret or ConfigMap that does not exist.\n"
+        "  The K8s event message names the missing resource explicitly."
+    ),
+    "failed_scheduling": (
+        "- Pending with FailedScheduling event: No node can schedule the pod.\n"
+        "  Look for: node selector mismatch, insufficient CPU/memory on all nodes, PodAffinity/Taint rules."
+    ),
+    "zero_replica": (
+        "- (empty waiting_reason, available=0, desired>0): Deployment has zero running replicas.\n"
+        "  Look for: explicit scale-to-zero, HPA scale-down, manual kubectl scale."
+    ),
+}
+
+
+def _select_knowledge_key(facts: dict) -> str | None:
+    if facts.get("waiting_reason") == "PodInitializing":
+        if facts.get("init_last_terminated_reason") == "OOMKilled":
+            return "init_oom"
+        if facts.get("init_waiting_reason") == "CrashLoopBackOff":
+            return "init_crashloop"
+    if facts.get("waiting_reason") == "CrashLoopBackOff":
+        return "crashloop"
+    if facts.get("last_terminated_reason") == "OOMKilled":
+        return "oom"
+    if facts.get("waiting_reason") in ("ImagePullBackOff", "ErrImagePull"):
+        return "image_pull"
+    if facts.get("waiting_reason") == "CreateContainerConfigError":
+        return "config_error"
+    if facts.get("event_reason") == "FailedScheduling":
+        return "failed_scheduling"
+    if (facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0
+            and not facts.get("waiting_reason")):
+        return "zero_replica"
+    return None
+
+
+def _render_knowledge(table: dict, key: str | None) -> str:
+    if key and key in table:
+        return f"{KNOWLEDGE_HEADER}\n{table[key]}"
+    return f"{KNOWLEDGE_HEADER}\n" + "\n".join(table.values())
 
 GROUNDING_RULE = """\
 GROUNDING RULE: You may ONLY assert claims directly supported by one or more of the \
@@ -81,9 +127,11 @@ REQUIRED_KEYS = {"root_cause", "dev_action", "kubectl_hint"}
 
 def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
                             facts: dict, bundle: str, memory_context: str,
-                            pod: str, knowledge_table: str = "") -> str:
+                            pod: str, knowledge_table: dict | None = None) -> str:
+    table = knowledge_table or K8S_KNOWLEDGE_TABLE
+    key   = _select_knowledge_key(facts)
     lines = [
-        knowledge_table or K8S_KNOWLEDGE_TABLE,
+        _render_knowledge(table, key),
         "",
         f"Alert: {alert_name}",
         f"Service: {service}",
@@ -286,7 +334,7 @@ def interpret(
     alert_name: str, service: str, namespace: str,
     facts: dict, bundle: str, memory_context: str,
     models: list, groq_key: str = "", openrouter_key: str = "",
-    pod: str = "", _llm=None, knowledge_table: str = "",
+    pod: str = "", _llm=None, knowledge_table: dict | None = None,
 ) -> dict:
     prompt   = _build_grounded_prompt(alert_name, service, namespace,
                                       facts, bundle, memory_context, pod,
