@@ -354,9 +354,9 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
         call_order.append("collect_diagnostics")
         return _FAKE_FACTS
 
-    def fake_memory_search(rdb, query, limit=3):
-        call_order.append("memory_search")
-        return "no relevant memory found"
+    def fake_search_memory_items(rdb, query, limit=3):
+        call_order.append("search_memory_items")
+        return []
 
     def fake_search_runbook(rdb, query, top_k=3):
         call_order.append("search_runbook")
@@ -364,7 +364,7 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
 
     with patch("app.collect_bundle",      side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", side_effect=fake_collect_diagnostics), \
-         patch("app.memory_search",       side_effect=fake_memory_search), \
+         patch("app.search_memory_items", side_effect=fake_search_memory_items), \
          patch("app.search_runbook",      side_effect=fake_search_runbook), \
          patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -373,20 +373,20 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
 
-    assert call_order.index("collect_diagnostics") < call_order.index("memory_search")
+    assert call_order.index("collect_diagnostics") < call_order.index("search_memory_items")
     assert call_order.index("collect_diagnostics") < call_order.index("search_runbook")
 
 
 def test_investigate_query_includes_waiting_reason_and_log_error(client):
     captured = {}
 
-    def fake_memory_search(rdb, query, limit=3):
+    def fake_search_memory_items(rdb, query, limit=3):
         captured["query"] = query
-        return "no relevant memory found"
+        return []
 
     with patch("app.collect_bundle",      side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
-         patch("app.memory_search",       side_effect=fake_memory_search), \
+         patch("app.search_memory_items", side_effect=fake_search_memory_items), \
          patch("app.search_runbook",      return_value=[]), \
          patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -400,8 +400,59 @@ def test_investigate_query_includes_waiting_reason_and_log_error(client):
 
 
 def test_format_memory_context_renders_runbook_score():
-    ctx = agent_app._format_memory_context("no relevant memory found", [
+    ctx = agent_app._format_memory_context([], [
         {"title": "Deployment scaled to zero", "service": "ride-service",
          "symptom": "No pods running", "fix_command": "kubectl scale ...", "score": 0.71},
     ])
     assert "(similarity: 0.71)" in ctx
+
+
+def test_format_memory_context_renders_incident_items():
+    ctx = agent_app._format_memory_context([
+        {"alert_name": "HighErrorRate", "service": "ride-service",
+         "root_cause": "dispatch consumer stale cursor",
+         "kubectl_hint": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
+         "score": 0.85},
+    ], [])
+    assert "Past incidents:" in ctx
+    assert "(similarity: 0.85)" in ctx
+    assert "dispatch consumer stale cursor" in ctx
+
+
+def test_format_memory_context_empty_when_both_empty():
+    assert agent_app._format_memory_context([], []) == ""
+
+
+def test_investigate_dedupes_incident_against_runbook_hit(client):
+    _FAKE_REDIS.flushall()
+    agent_app.store_incident(_FAKE_REDIS, {
+        "alert_name": "KubePodNotReady", "service": "ride",
+        "namespace": "vroom-dev", "symptoms": "",
+        "waiting_reason": "CrashLoopBackOff",
+        "log_error": "dial tcp postgres:5432: i/o timeout",
+        "root_cause": "dispatch consumer stale cursor",
+        "kubectl_hint": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
+        "outcome": "resolved",
+    })
+    agent_app.store_runbook_entry(_FAKE_REDIS, {
+        "title": "Stale cursor fix", "service": "ride",
+        "symptom": "CrashLoopBackOff dial tcp postgres timeout",
+        "root_cause": "Dispatch service consumer had a stale Redis cursor",
+        "fix_command": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
+        "source": "learned",
+    })
+
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate?debug=true",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+
+    body = r.get_json()
+    assert body["memory_hits"]["incidents"] == 0
+    assert body["memory_hits"]["runbook"]   == 1
+    assert "Past incidents:" not in body["debug"]["memory_context"]
+    assert "Runbook:" in body["debug"]["memory_context"]

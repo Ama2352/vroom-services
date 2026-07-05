@@ -4,6 +4,7 @@ import requests
 from flask import Flask, request, jsonify
 
 from memory import (store_incident, search_memory as memory_search,
+                    search_memory_items, dedupe_against_runbook, format_incidents,
                     connect as redis_connect, build_symptom_text,
                     store_runbook_entry, get_runbook_entries, search_runbook)
 from collector import collect_bundle
@@ -68,10 +69,10 @@ def _background_seed():
 threading.Thread(target=_background_seed, daemon=True).start()
 
 
-def _format_memory_context(mem_text: str, runbook_hits: list) -> str:
+def _format_memory_context(incident_items: list, runbook_hits: list) -> str:
     parts = []
-    if mem_text and mem_text != "no relevant memory found":
-        parts.append(f"Past incidents:\n{mem_text}")
+    if incident_items:
+        parts.append("Past incidents:\n" + format_incidents(incident_items))
     if runbook_hits:
         lines = [
             f"- (similarity: {h['score']:.2f}) {h['title']} ({h['service']}): "
@@ -551,15 +552,15 @@ def investigate():
           f"init_restarts={facts['init_restarts']} "
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
-    query        = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
-    mem_text     = memory_search(rdb, query, limit=3)
-    runbook_hits = search_runbook(rdb, query, top_k=3)
-    memory_ctx   = _format_memory_context(mem_text, runbook_hits)
+    query          = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
+    incident_items = search_memory_items(rdb, query, limit=3)
+    runbook_hits   = search_runbook(rdb, query, top_k=3)
+    deduped_items  = dedupe_against_runbook(incident_items, runbook_hits)
+    memory_ctx     = _format_memory_context(deduped_items, runbook_hits)
 
-    incident_hits = 0 if (not mem_text or mem_text == "no relevant memory found") \
-                    else len([l for l in mem_text.splitlines() if l.strip()])
-    print(f"[memory] pre-fetch: incidents={incident_hits} runbook={len(runbook_hits)} "
-          f"ctx_len={len(memory_ctx)}", flush=True)
+    incident_hits = len(deduped_items)
+    print(f"[memory] pre-fetch: incidents={len(incident_items)} deduped_to={incident_hits} "
+          f"runbook={len(runbook_hits)} ctx_len={len(memory_ctx)}", flush=True)
 
     diagnosis = interpret(
         alert_name, service, namespace,
