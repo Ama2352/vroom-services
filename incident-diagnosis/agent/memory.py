@@ -112,11 +112,6 @@ def _diversify(scored: list, top_k: int) -> list:
     return picked
 
 
-def retrieve_similar(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
-    scored = _score_all(rdb, query)
-    return [item for _, item in scored[:top_k]]
-
-
 RUNBOOK_INDEX = "runbook:index"
 
 

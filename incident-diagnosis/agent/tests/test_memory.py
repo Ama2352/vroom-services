@@ -79,24 +79,6 @@ def test_store_incident_does_not_write_embedding(rdb):
     assert rdb.hget(f"incident:{iid}", "embedding") is None
 
 
-def test_retrieve_similar_returns_top_k(rdb):
-    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service",
-                                               waiting_reason="CrashLoopBackOff"))
-    memory.store_incident(rdb, _make_incident(alert_name="PodCrash", service="dispatch-service",
-                                               waiting_reason="CrashLoopBackOff"))
-    memory.store_incident(rdb, _make_incident(alert_name="OutboxNotDraining", service="ride-service",
-                                               waiting_reason="OOMKilled"))
-
-    results = memory.retrieve_similar(rdb, "HighErrorRate CrashLoopBackOff", top_k=2)
-    assert len(results) == 2
-    assert results[0]["alert_name"] == "HighErrorRate"
-
-
-def test_retrieve_similar_empty_store(rdb):
-    results = memory.retrieve_similar(rdb, "any query", top_k=3)
-    assert results == []
-
-
 def test_score_all_returns_score_and_item_tuple(rdb):
     memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
     scored = memory._score_all(rdb, "HighErrorRate")
