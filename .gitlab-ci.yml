@@ -261,30 +261,50 @@ scan-user:
   variables:
     SERVICE_NAME: user-service
   needs: [build-user]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/user/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 scan-ride:
   extends: .trivy_template
   variables:
     SERVICE_NAME: ride-service
   needs: [build-ride]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/ride/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 scan-notification:
   extends: .trivy_template
   variables:
     SERVICE_NAME: notification-service
   needs: [build-notification]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/notification/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 scan-dispatch:
   extends: .trivy_template
   variables:
     SERVICE_NAME: dispatch-service
   needs: [build-dispatch]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/dispatch/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 scan-frontend:
   extends: .trivy_template
   variables:
     SERVICE_NAME: frontend
   needs: [build-frontend]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [services/frontend/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 # ---------------------------------------------------------------------------
 # STAGE 5: publish — load scanned tarball → push to GHCR
