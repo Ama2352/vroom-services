@@ -9,7 +9,8 @@ from memory import (search_memory as memory_search,
                     find_trusted_match, store_pending_suggestion, KNOWLEDGE_INDEX,
                     record_incident_occurrence, get_incident, list_incidents,
                     get_latest_incident, get_incident_timeline, resolve_incident,
-                    list_pending_suggestions)
+                    list_pending_suggestions, get_pending_suggestion,
+                    approve_pending_suggestion, reject_pending_suggestion)
 from collector import collect_bundle
 from diagnostics import collect_diagnostics, format_evidence
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
@@ -421,6 +422,51 @@ def resolve_incident_route(iid):
     if not resolve_incident(rdb, iid, actor):
         return jsonify({"error": "not found"}), 404
     return jsonify({"resolved": True})
+
+
+@app.route("/pending", methods=["GET"])
+def list_pending_route():
+    status = request.args.get("status", "pending")
+    return jsonify({"pending": list_pending_suggestions(rdb, status=status)})
+
+
+@app.route("/pending/<pid>", methods=["GET"])
+def pending_detail_route(pid):
+    item = get_pending_suggestion(rdb, pid)
+    if item is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"pending": item})
+
+
+@app.route("/pending/<pid>/approve", methods=["POST"])
+def approve_pending_route(pid):
+    data          = request.get_json(silent=True) or {}
+    actor         = (data.get("actor") or "").strip()
+    mode          = data.get("mode")
+    knowledge_key = (data.get("knowledge_key") or "").strip()
+    if not actor or mode not in ("existing", "new") or not knowledge_key:
+        return jsonify({"error": "actor, mode ('existing'|'new'), and knowledge_key are required"}), 400
+    hid = approve_pending_suggestion(
+        rdb, pid, actor, mode, knowledge_key,
+        data.get("symptom", ""), data.get("context_notes", ""),
+        root_cause_pattern=data.get("root_cause_pattern"),
+        fix_action=data.get("fix_action"),
+        conclusive=bool(data.get("conclusive", False)),
+    )
+    if hid is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"approved": True, "history_id": hid})
+
+
+@app.route("/pending/<pid>/reject", methods=["POST"])
+def reject_pending_route(pid):
+    data  = request.get_json(silent=True) or {}
+    actor = (data.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "actor is required"}), 400
+    if not reject_pending_suggestion(rdb, pid, actor, data.get("decision_reason")):
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"rejected": True})
 
 
 if __name__ == "__main__":

@@ -431,3 +431,81 @@ def test_reflect_and_store_writes_pending_suggestion_in_mock_mode():
     assert len(pending) == 1
     assert pending[0]["source_incident_id"] == "incident-abc"
     assert pending[0]["status"] == "pending"
+
+
+# ── /pending routes ─────────────────────────────────────────────────────────────
+
+def test_list_pending_defaults_to_pending_status(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "s", "proposed_knowledge_key": "k",
+        "is_new_knowledge_key": True, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": "inc-1",
+    })
+    r = client.get("/pending")
+    assert len(r.get_json()["pending"]) == 1
+
+
+def test_pending_detail_missing_returns_404(client):
+    assert client.get("/pending/does-not-exist").status_code == 404
+
+
+def test_approve_pending_requires_actor_mode_and_key(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    pid = memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "s", "proposed_knowledge_key": "k",
+        "is_new_knowledge_key": False, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": "inc-1",
+    })
+    r = client.post(f"/pending/{pid}/approve", data=json.dumps({}), content_type="application/json")
+    assert r.status_code == 400
+
+
+def test_approve_pending_existing_mode_creates_history(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {
+        "key": "crashloop", "root_cause_pattern": "x", "fix_action": "y",
+        "trigger_waiting_reason": "CrashLoopBackOff", "conclusive": False,
+        "source": "bootstrap", "created_by": "bootstrap",
+    })
+    pid = memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "s", "proposed_knowledge_key": "crashloop",
+        "is_new_knowledge_key": False, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": "inc-1",
+    })
+    r = client.post(f"/pending/{pid}/approve", data=json.dumps({
+        "actor": "Alice", "mode": "existing", "knowledge_key": "crashloop",
+        "symptom": "edited", "context_notes": "notes",
+    }), content_type="application/json")
+    assert r.status_code == 200
+    assert r.get_json()["approved"] is True
+    assert memory.get_pending_suggestion(_FAKE_REDIS, pid)["status"] == "approved"
+
+
+def test_reject_pending_requires_actor(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    pid = memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "s", "proposed_knowledge_key": "k",
+        "is_new_knowledge_key": True, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": "inc-1",
+    })
+    r = client.post(f"/pending/{pid}/reject", data=json.dumps({}), content_type="application/json")
+    assert r.status_code == 400
+
+
+def test_reject_pending_sets_status(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    pid = memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "s", "proposed_knowledge_key": "k",
+        "is_new_knowledge_key": True, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": "inc-1",
+    })
+    r = client.post(f"/pending/{pid}/reject",
+                    data=json.dumps({"actor": "Bob"}), content_type="application/json")
+    assert r.status_code == 200
+    assert memory.get_pending_suggestion(_FAKE_REDIS, pid)["status"] == "rejected"
