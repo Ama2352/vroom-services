@@ -2,6 +2,7 @@ import os, json, uuid, threading, time
 import redis as redis_lib
 import requests
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 from memory import (search_memory as memory_search,
                     search_memory_items, format_incidents,
@@ -10,13 +11,17 @@ from memory import (search_memory as memory_search,
                     record_incident_occurrence, get_incident, list_incidents,
                     get_latest_incident, get_incident_timeline, resolve_incident,
                     list_pending_suggestions, get_pending_suggestion,
-                    approve_pending_suggestion, reject_pending_suggestion)
+                    approve_pending_suggestion, reject_pending_suggestion,
+                    list_knowledge_entries, get_knowledge_entry, update_knowledge_entry,
+                    delete_knowledge_entry, list_history_entries_for_knowledge,
+                    get_history_entry, update_history_entry, delete_history_entry)
 from collector import collect_bundle
 from diagnostics import collect_diagnostics, format_evidence
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 
 app = Flask(__name__)
+CORS(app)  # the dashboard is a separate browser origin (its own NodePort)
 
 REDIS_URL      = os.environ.get("REDIS_URL", "redis://redis.platform.svc.cluster.local:6379")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
@@ -467,6 +472,72 @@ def reject_pending_route(pid):
     if not reject_pending_suggestion(rdb, pid, actor, data.get("decision_reason")):
         return jsonify({"error": "not found"}), 404
     return jsonify({"rejected": True})
+
+
+@app.route("/knowledge", methods=["GET"])
+def list_knowledge_route():
+    out = []
+    for e in list_knowledge_entries(rdb):
+        out.append({**e, "history_count": len(list_history_entries_for_knowledge(rdb, e["key"]))})
+    return jsonify({"knowledge": out})
+
+
+@app.route("/knowledge/<key>", methods=["GET"])
+def knowledge_detail_route(key):
+    entry = get_knowledge_entry(rdb, key)
+    if entry is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"knowledge": entry, "history": list_history_entries_for_knowledge(rdb, key)})
+
+
+@app.route("/knowledge/<key>", methods=["PUT"])
+def update_knowledge_route(key):
+    data  = request.get_json(silent=True) or {}
+    actor = (data.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "actor is required"}), 400
+    ok = update_knowledge_entry(rdb, key, {
+        "root_cause_pattern": data.get("root_cause_pattern", ""),
+        "fix_action":         data.get("fix_action", ""),
+        "conclusive":         bool(data.get("conclusive", False)),
+        "last_modified_by":   actor,
+    })
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"updated": True})
+
+
+@app.route("/knowledge/<key>", methods=["DELETE"])
+def delete_knowledge_route(key):
+    result = delete_knowledge_entry(rdb, key)
+    if result == "not_found":
+        return jsonify({"error": "not found"}), 404
+    if result == "has_history":
+        return jsonify({"error": "cannot delete: history entries reference this key"}), 409
+    return jsonify({"deleted": True})
+
+
+@app.route("/history/<hid>", methods=["PUT"])
+def update_history_route(hid):
+    data  = request.get_json(silent=True) or {}
+    actor = (data.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "actor is required"}), 400
+    ok = update_history_entry(rdb, hid, {
+        "symptom":          data.get("symptom", ""),
+        "context_notes":    data.get("context_notes", ""),
+        "last_modified_by": actor,
+    })
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"updated": True})
+
+
+@app.route("/history/<hid>", methods=["DELETE"])
+def delete_history_route(hid):
+    if not delete_history_entry(rdb, hid):
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"deleted": True})
 
 
 if __name__ == "__main__":

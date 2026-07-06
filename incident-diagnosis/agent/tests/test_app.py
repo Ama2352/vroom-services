@@ -509,3 +509,134 @@ def test_reject_pending_sets_status(client):
                     data=json.dumps({"actor": "Bob"}), content_type="application/json")
     assert r.status_code == 200
     assert memory.get_pending_suggestion(_FAKE_REDIS, pid)["status"] == "rejected"
+
+
+# ── /knowledge and /history routes ──────────────────────────────────────────────
+
+def test_list_knowledge_includes_history_count(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {
+        "key": "oom", "root_cause_pattern": "x", "fix_action": "y",
+        "trigger_waiting_reason": "OOMKilled", "conclusive": True,
+        "source": "bootstrap", "created_by": "bootstrap",
+    })
+    memory.store_history_entry(_FAKE_REDIS, {
+        "service": "ride", "knowledge_key": "oom", "symptom": "s",
+        "context_notes": "", "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.get("/knowledge")
+    body = r.get_json()["knowledge"]
+    assert body[0]["history_count"] == 1
+
+
+def test_knowledge_detail_missing_returns_404(client):
+    assert client.get("/knowledge/does-not-exist").status_code == 404
+
+
+def test_knowledge_detail_includes_history(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {
+        "key": "oom", "root_cause_pattern": "x", "fix_action": "y",
+        "trigger_waiting_reason": "OOMKilled", "conclusive": True,
+        "source": "bootstrap", "created_by": "bootstrap",
+    })
+    memory.store_history_entry(_FAKE_REDIS, {
+        "service": "ride", "knowledge_key": "oom", "symptom": "s",
+        "context_notes": "", "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.get("/knowledge/oom")
+    body = r.get_json()
+    assert body["knowledge"]["key"] == "oom"
+    assert len(body["history"]) == 1
+
+
+def test_update_knowledge_requires_actor(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {
+        "key": "oom", "root_cause_pattern": "x", "fix_action": "y",
+        "trigger_waiting_reason": "OOMKilled", "conclusive": True,
+        "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.put("/knowledge/oom", data=json.dumps({"root_cause_pattern": "z"}),
+                    content_type="application/json")
+    assert r.status_code == 400
+
+
+def test_update_knowledge_saves_fields(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {
+        "key": "oom", "root_cause_pattern": "x", "fix_action": "y",
+        "trigger_waiting_reason": "OOMKilled", "conclusive": True,
+        "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.put("/knowledge/oom", data=json.dumps({
+        "actor": "Alice", "root_cause_pattern": "updated", "fix_action": "y", "conclusive": True,
+    }), content_type="application/json")
+    assert r.status_code == 200
+    assert memory.get_knowledge_entry(_FAKE_REDIS, "oom")["root_cause_pattern"] == "updated"
+
+
+def test_delete_knowledge_refused_when_history_exists(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {
+        "key": "oom", "root_cause_pattern": "x", "fix_action": "y",
+        "trigger_waiting_reason": "OOMKilled", "conclusive": True,
+        "source": "bootstrap", "created_by": "bootstrap",
+    })
+    memory.store_history_entry(_FAKE_REDIS, {
+        "service": "ride", "knowledge_key": "oom", "symptom": "s",
+        "context_notes": "", "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.delete("/knowledge/oom")
+    assert r.status_code == 409
+
+
+def test_delete_knowledge_missing_returns_404(client):
+    assert client.delete("/knowledge/does-not-exist").status_code == 404
+
+
+def test_update_history_requires_actor(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    hid = memory.store_history_entry(_FAKE_REDIS, {
+        "service": "ride", "knowledge_key": "oom", "symptom": "s",
+        "context_notes": "", "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.put(f"/history/{hid}", data=json.dumps({"symptom": "x"}),
+                    content_type="application/json")
+    assert r.status_code == 400
+
+
+def test_update_history_saves_fields(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    hid = memory.store_history_entry(_FAKE_REDIS, {
+        "service": "ride", "knowledge_key": "oom", "symptom": "s",
+        "context_notes": "", "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.put(f"/history/{hid}", data=json.dumps({
+        "actor": "Bob", "symptom": "updated", "context_notes": "n",
+    }), content_type="application/json")
+    assert r.status_code == 200
+    assert memory.get_history_entry(_FAKE_REDIS, hid)["symptom"] == "updated"
+
+
+def test_delete_history_removes_entry(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    hid = memory.store_history_entry(_FAKE_REDIS, {
+        "service": "ride", "knowledge_key": "oom", "symptom": "s",
+        "context_notes": "", "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.delete(f"/history/{hid}")
+    assert r.status_code == 200
+    assert memory.get_history_entry(_FAKE_REDIS, hid) is None
+
+
+def test_delete_history_missing_returns_404(client):
+    assert client.delete("/history/does-not-exist").status_code == 404
