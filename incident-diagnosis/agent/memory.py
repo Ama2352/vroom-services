@@ -123,6 +123,74 @@ def delete_knowledge_entry(rdb: redis_lib.Redis, key: str) -> str:
     return "deleted"
 
 
+HISTORY_INDEX = "history:index"
+
+
+def store_history_entry(rdb: redis_lib.Redis, entry: dict) -> str:
+    hid = str(uuid.uuid4())
+    rdb.hset(f"history:entry:{hid}", mapping={
+        "service":           entry.get("service", ""),
+        "knowledge_key":     entry["knowledge_key"],
+        "symptom":           entry.get("symptom", ""),
+        "context_notes":     entry.get("context_notes", ""),
+        "source":            entry.get("source", "learned"),
+        "timestamp":         str(int(time.time())),
+        "created_by":        entry.get("created_by", ""),
+        "last_modified_by":  entry.get("last_modified_by", ""),
+        "last_modified_at":  entry.get("last_modified_at", ""),
+    })
+    rdb.sadd(HISTORY_INDEX, hid)
+    return hid
+
+
+def get_history_entry(rdb: redis_lib.Redis, hid: str) -> dict | None:
+    raw = rdb.hgetall(f"history:entry:{hid}")
+    if not raw:
+        return None
+    d = _hash_to_dict(raw)
+    d["id"] = hid
+    return d
+
+
+def list_history_entries_for_knowledge(rdb: redis_lib.Redis, knowledge_key: str) -> list:
+    return [e for e in list_all_history_entries(rdb) if e.get("knowledge_key") == knowledge_key]
+
+
+def list_all_history_entries(rdb: redis_lib.Redis) -> list:
+    ids = rdb.smembers(HISTORY_INDEX)
+    out = []
+    for i in ids:
+        i_str = i.decode() if isinstance(i, bytes) else i
+        entry = get_history_entry(rdb, i_str)
+        if entry:
+            out.append(entry)
+    return out
+
+
+def update_history_entry(rdb: redis_lib.Redis, hid: str, fields: dict) -> bool:
+    if not rdb.exists(f"history:entry:{hid}"):
+        return False
+    mapping = {}
+    if "symptom" in fields:
+        mapping["symptom"] = fields["symptom"]
+    if "context_notes" in fields:
+        mapping["context_notes"] = fields["context_notes"]
+    if "last_modified_by" in fields:
+        mapping["last_modified_by"] = fields["last_modified_by"]
+        mapping["last_modified_at"] = str(int(time.time()))
+    if mapping:
+        rdb.hset(f"history:entry:{hid}", mapping=mapping)
+    return True
+
+
+def delete_history_entry(rdb: redis_lib.Redis, hid: str) -> bool:
+    if not rdb.exists(f"history:entry:{hid}"):
+        return False
+    rdb.delete(f"history:entry:{hid}")
+    rdb.srem(HISTORY_INDEX, hid)
+    return True
+
+
 def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
     iid = str(uuid.uuid4())
     rdb.hset(f"incident:{iid}", mapping={

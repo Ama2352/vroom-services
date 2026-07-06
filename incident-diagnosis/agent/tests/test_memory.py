@@ -157,6 +157,81 @@ def test_delete_knowledge_entry_refused_when_history_exists(rdb):
     assert memory.get_knowledge_entry(rdb, "oom") is not None
 
 
+def _make_history(**kwargs):
+    base = {
+        "service": "ride-service",
+        "knowledge_key": "oom",
+        "symptom": "ride-service OOMKilled during load spike",
+        "context_notes": "happened after batch job added, limit was 256Mi",
+        "source": "learned",
+        "created_by": "Alice",
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_store_history_entry_creates_hash_and_index(rdb):
+    hid = memory.store_history_entry(rdb, _make_history())
+    assert rdb.hexists(f"history:entry:{hid}", "symptom")
+    assert rdb.sismember(memory.HISTORY_INDEX, hid)
+
+
+def test_get_history_entry_includes_id(rdb):
+    hid = memory.store_history_entry(rdb, _make_history())
+    entry = memory.get_history_entry(rdb, hid)
+    assert entry["id"] == hid
+    assert entry["knowledge_key"] == "oom"
+
+
+def test_get_history_entry_missing_returns_none(rdb):
+    assert memory.get_history_entry(rdb, "does-not-exist") is None
+
+
+def test_list_history_entries_for_knowledge_filters_by_key(rdb):
+    memory.store_history_entry(rdb, _make_history(knowledge_key="oom"))
+    memory.store_history_entry(rdb, _make_history(knowledge_key="crashloop"))
+    results = memory.list_history_entries_for_knowledge(rdb, "oom")
+    assert len(results) == 1
+    assert results[0]["knowledge_key"] == "oom"
+
+
+def test_list_history_entries_for_knowledge_empty(rdb):
+    assert memory.list_history_entries_for_knowledge(rdb, "oom") == []
+
+
+def test_list_all_history_entries_returns_everything(rdb):
+    memory.store_history_entry(rdb, _make_history(knowledge_key="oom"))
+    memory.store_history_entry(rdb, _make_history(knowledge_key="crashloop"))
+    assert len(memory.list_all_history_entries(rdb)) == 2
+
+
+def test_update_history_entry_changes_fields(rdb):
+    hid = memory.store_history_entry(rdb, _make_history())
+    ok = memory.update_history_entry(rdb, hid, {
+        "symptom": "updated symptom", "last_modified_by": "Bob",
+    })
+    assert ok is True
+    entry = memory.get_history_entry(rdb, hid)
+    assert entry["symptom"] == "updated symptom"
+    assert entry["last_modified_by"] == "Bob"
+    assert entry["last_modified_at"] != ""
+
+
+def test_update_history_entry_missing_returns_false(rdb):
+    assert memory.update_history_entry(rdb, "does-not-exist", {"symptom": "x"}) is False
+
+
+def test_delete_history_entry_removes_hash_and_index(rdb):
+    hid = memory.store_history_entry(rdb, _make_history())
+    assert memory.delete_history_entry(rdb, hid) is True
+    assert memory.get_history_entry(rdb, hid) is None
+    assert not rdb.sismember(memory.HISTORY_INDEX, hid)
+
+
+def test_delete_history_entry_missing_returns_false(rdb):
+    assert memory.delete_history_entry(rdb, "does-not-exist") is False
+
+
 def test_store_incident_creates_hash(rdb):
     iid = memory.store_incident(rdb, _make_incident())
     assert rdb.hexists(f"incident:{iid}", "alert_name")
