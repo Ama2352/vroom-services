@@ -19,7 +19,7 @@ This is a 3-repo GitOps setup, each repo with a single responsibility:
 
 ## This Repo
 
-The application layer: 4 Go microservices + a React frontend that exercise the patterns described below, plus the GitLab CI pipeline that tests, scans, and publishes them to GHCR.
+The application layer: 4 Go microservices + a React frontend that exercise the patterns described below, plus a Python-based LLM incident-diagnosis agent (`incident-diagnosis/`) and the GitLab CI pipeline that tests, scans, and publishes all of it to GHCR.
 
 ---
 
@@ -38,6 +38,7 @@ The application layer: 4 Go microservices + a React frontend that exercise the p
 | Testing | `go test`, testcontainers (real Postgres + Redis), k6 (load) |
 | CI | GitLab CI — test → integration → build → scan (Trivy) → publish (GHCR) |
 | SAST | gosec + GitLab SAST |
+| Incident agent | Python 3, Flask, rank-bm25 (BM25 runbook retrieval), Redis (semantic + episodic memory) |
 
 ---
 
