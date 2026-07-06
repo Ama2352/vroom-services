@@ -128,17 +128,100 @@ def test_investigate_trusted_match_true_omits_related_incidents(client):
     assert "memory_hits" not in body
 
 
-def test_investigate_stores_incident_in_redis(client):
+def test_investigate_stores_incident_and_returns_incident_id(client):
     _FAKE_REDIS.flushall()
     with patch("app.collect_bundle",      side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.find_trusted_match",  return_value=None), \
          patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
-        client.post("/investigate",
+        r = client.post("/investigate",
             data=json.dumps({"alert_name": "KubePodNotReady",
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
-    assert _FAKE_REDIS.scard("incidents:index") > 0
+    body = r.get_json()
+    assert "incident_id" in body and body["incident_id"]
+    assert _FAKE_REDIS.scard("incidents:index") == 1
+
+
+# ── /incidents routes ──────────────────────────────────────────────────────────
+
+def _make_fake_incident_kwargs(**overrides):
+    base = {
+        "alert_name": "A", "service": "ride", "namespace": "vroom-dev",
+        "pods_available": 0, "pods_desired": 1, "waiting_reason": "", "last_terminated_reason": "",
+        "restarts": 0, "init_waiting_reason": "", "init_last_terminated_reason": "", "init_restarts": 0,
+        "log_error": "", "event_reason": "", "event_message": "", "event_object": "",
+        "root_cause": "x", "dev_action": "y", "kubectl_hint": "z", "low_confidence": False,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_list_incidents_empty(client):
+    _FAKE_REDIS.flushall()
+    r = client.get("/incidents")
+    assert r.status_code == 200
+    assert r.get_json()["incidents"] == []
+
+
+def test_list_incidents_filters_by_status(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    iid_open = memory.record_incident_occurrence(_FAKE_REDIS, _make_fake_incident_kwargs())
+    r = client.get("/incidents?status=open")
+    body = r.get_json()
+    assert len(body["incidents"]) == 1
+    assert body["incidents"][0]["id"] == iid_open
+
+
+def test_incidents_latest_returns_none_when_empty(client):
+    _FAKE_REDIS.flushall()
+    r = client.get("/incidents/latest")
+    assert r.get_json()["incident"] is None
+
+
+def test_incident_detail_includes_timeline_and_pending_suggestion(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    iid = memory.record_incident_occurrence(_FAKE_REDIS, _make_fake_incident_kwargs())
+    memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "s", "proposed_knowledge_key": "k",
+        "is_new_knowledge_key": True, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": iid,
+    })
+    r = client.get(f"/incidents/{iid}")
+    body = r.get_json()["incident"]
+    assert len(body["timeline"]) == 1
+    assert body["pending_suggestion"]["source_incident_id"] == iid
+
+
+def test_incident_detail_missing_returns_404(client):
+    assert client.get("/incidents/does-not-exist").status_code == 404
+
+
+def test_resolve_incident_requires_actor(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    iid = memory.record_incident_occurrence(_FAKE_REDIS, _make_fake_incident_kwargs())
+    r = client.post(f"/incidents/{iid}/resolve", data=json.dumps({}), content_type="application/json")
+    assert r.status_code == 400
+
+
+def test_resolve_incident_sets_status(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    iid = memory.record_incident_occurrence(_FAKE_REDIS, _make_fake_incident_kwargs())
+    r = client.post(f"/incidents/{iid}/resolve",
+                    data=json.dumps({"actor": "Alice"}), content_type="application/json")
+    assert r.status_code == 200
+    assert memory.get_incident(_FAKE_REDIS, iid)["status"] == "resolved"
+
+
+def test_resolve_incident_missing_returns_404(client):
+    r = client.post("/incidents/does-not-exist/resolve",
+                    data=json.dumps({"actor": "Alice"}), content_type="application/json")
+    assert r.status_code == 404
 
 
 def test_investigate_no_old_fields_in_response(client):

@@ -3,10 +3,13 @@ import redis as redis_lib
 import requests
 from flask import Flask, request, jsonify
 
-from memory import (store_incident, search_memory as memory_search,
+from memory import (search_memory as memory_search,
                     search_memory_items, format_incidents,
                     connect as redis_connect, build_symptom_text,
-                    find_trusted_match, store_pending_suggestion, KNOWLEDGE_INDEX)
+                    find_trusted_match, store_pending_suggestion, KNOWLEDGE_INDEX,
+                    record_incident_occurrence, get_incident, list_incidents,
+                    get_latest_incident, get_incident_timeline, resolve_incident,
+                    list_pending_suggestions)
 from collector import collect_bundle
 from diagnostics import collect_diagnostics, format_evidence
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
@@ -332,17 +335,15 @@ def investigate():
 
     evidence = format_evidence(facts)
 
-    incident_id = store_incident(rdb, {
-        "alert_name":     alert_name,
-        "service":        service,
-        "namespace":      namespace,
-        "symptoms":       bundle,
-        "waiting_reason": facts["waiting_reason"],
-        "log_error":      facts["log_error"],
+    occurrence = {
+        "alert_name": alert_name, "service": service, "namespace": namespace,
+        **facts,
         "root_cause":     diagnosis["root_cause"],
+        "dev_action":     diagnosis["dev_action"],
         "kubectl_hint":   diagnosis["kubectl_hint"],
-        "outcome":        "acknowledged",
-    })
+        "low_confidence": diagnosis.get("low_confidence", False),
+    }
+    incident_id = record_incident_occurrence(rdb, occurrence)
 
     threading.Thread(
         target=_reflect_and_store,
@@ -359,6 +360,7 @@ def investigate():
         "service":          service,
         "alert_name":       alert_name,
         "namespace":        namespace,
+        "incident_id":      incident_id,
         "root_cause":       diagnosis["root_cause"],
         "dev_action":       diagnosis["dev_action"],
         "kubectl_hint":     diagnosis["kubectl_hint"],
@@ -373,6 +375,52 @@ def investigate():
         }} if debug else {}),
     })
 
+
+def _incident_detail_payload(iid: str, incident: dict) -> dict:
+    timeline = get_incident_timeline(rdb, iid)
+    matches  = [p for p in list_pending_suggestions(rdb) if p.get("source_incident_id") == iid]
+    return {**incident, "timeline": timeline,
+            "pending_suggestion": matches[0] if matches else None}
+
+
+@app.route("/incidents", methods=["GET"])
+def list_incidents_route():
+    status    = request.args.get("status")
+    incidents = list_incidents(rdb, status=status)
+    incidents.sort(key=lambda i: int(i.get("timestamp") or 0), reverse=True)
+    return jsonify({"incidents": [
+        {"id": i["id"], "alert_name": i["alert_name"], "service": i["service"],
+         "status": i["status"], "timestamp": int(i.get("timestamp") or 0),
+         "root_cause": i.get("root_cause", "")}
+        for i in incidents
+    ]})
+
+
+@app.route("/incidents/latest", methods=["GET"])
+def latest_incident_route():
+    incident = get_latest_incident(rdb)
+    if incident is None:
+        return jsonify({"incident": None})
+    return jsonify({"incident": _incident_detail_payload(incident["id"], incident)})
+
+
+@app.route("/incidents/<iid>", methods=["GET"])
+def incident_detail_route(iid):
+    incident = get_incident(rdb, iid)
+    if incident is None:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"incident": _incident_detail_payload(iid, incident)})
+
+
+@app.route("/incidents/<iid>/resolve", methods=["POST"])
+def resolve_incident_route(iid):
+    data  = request.get_json(silent=True) or {}
+    actor = (data.get("actor") or "").strip()
+    if not actor:
+        return jsonify({"error": "actor is required"}), 400
+    if not resolve_incident(rdb, iid, actor):
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"resolved": True})
 
 
 if __name__ == "__main__":
