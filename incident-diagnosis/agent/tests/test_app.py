@@ -95,9 +95,10 @@ def test_investigate_includes_evidence_snippet(client):
     assert "Pods:" in body["evidence_snippet"]
 
 
-def test_investigate_includes_memory_hits(client):
+def test_investigate_includes_trusted_match_field(client):
     with patch("app.collect_bundle",      side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.find_trusted_match",  return_value=None), \
          patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -105,9 +106,26 @@ def test_investigate_includes_memory_hits(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
     body = r.get_json()
-    assert "memory_hits" in body
-    assert "incidents" in body["memory_hits"]
-    assert "runbook"   in body["memory_hits"]
+    assert body["trusted_match"] is False
+    assert "related_incidents_unconfirmed" in body
+
+
+def test_investigate_trusted_match_true_omits_related_incidents(client):
+    fake_match = {"source": "knowledge", "knowledge_key": "oom",
+                  "root_cause_pattern": "OOM", "fix_action": "increase limit", "context_notes": ""}
+    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.find_trusted_match",  return_value=fake_match), \
+         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady",
+                             "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    body = r.get_json()
+    assert body["trusted_match"] is True
+    assert "related_incidents_unconfirmed" not in body
+    assert "memory_hits" not in body
 
 
 def test_investigate_stores_incident_in_redis(client):
@@ -126,6 +144,7 @@ def test_investigate_stores_incident_in_redis(client):
 def test_investigate_no_old_fields_in_response(client):
     with patch("app.collect_bundle",      side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.find_trusted_match",  return_value=None), \
          patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -139,6 +158,7 @@ def test_investigate_no_old_fields_in_response(client):
     assert "confidence"    not in body
     assert "dev_hint"      not in body
     assert "suggested_command" not in body
+    assert "memory_hits"   not in body
 
 
 def test_investigate_debug_param_returns_facts(client):
@@ -164,38 +184,15 @@ def test_remediate_endpoint_removed(client):
     assert r.status_code == 404
 
 
-def test_admin_runbook_renders_markdown(client):
-    import memory as mem_mod
-    _FAKE_REDIS.flushall()
-    mem_mod.store_runbook_entry(_FAKE_REDIS, {
-        "title":       "Deployment scaled to zero",
-        "service":     "ride-service",
-        "symptom":     "No pods running",
-        "root_cause":  "replicas=0",
-        "fix_command": "kubectl scale deployment/ride-service -n vroom-dev --replicas=1",
-        "source":      "bootstrap",
-    })
-    r = client.get("/admin/runbook")
-    assert r.status_code == 200
-    assert r.content_type.startswith("text/plain")
-    body = r.data.decode()
-    assert "Deployment scaled to zero" in body
-    assert "bootstrap" in body
+def test_admin_knowledge_routes_removed(client):
+    assert client.get("/admin/knowledge").status_code == 404
+    assert client.post("/admin/knowledge").status_code == 404
+    assert client.post("/admin/knowledge/suggest").status_code == 404
 
 
-def test_admin_reseed_clears_and_reloads(client):
-    import memory as mem_mod
-    _FAKE_REDIS.flushall()
-    mem_mod.store_runbook_entry(_FAKE_REDIS, {
-        "title": "Learned entry", "service": "ride-service",
-        "symptom": "test", "root_cause": "test",
-        "fix_command": "kubectl test", "source": "learned",
-    })
-    with patch("app.seed_if_empty", return_value=3) as mock_seed:
-        r = client.post("/admin/reseed")
-    assert r.status_code == 200
-    assert r.get_json()["seeded"] == 3
-    mock_seed.assert_called_once()
+def test_admin_runbook_routes_removed(client):
+    assert client.get("/admin/runbook").status_code == 404
+    assert client.post("/admin/reseed").status_code == 404
 
 
 def test_admin_models_hot_swap(client):
@@ -249,102 +246,13 @@ def test_investigate_forwards_pod_to_interpret(client):
     assert kwargs.get("pod") == "ride-abc123"
 
 
-def test_get_knowledge_returns_default(client):
-    _FAKE_REDIS.flushall()
-    agent_app._current_knowledge_table = agent_app._load_knowledge_table(_FAKE_REDIS)
-    r = client.get("/admin/knowledge")
-    assert r.status_code == 200
-    body = r.get_json()
-    assert "table" in body
-    assert isinstance(body["table"], dict)
-    assert "crashloop" in body["table"]
-    assert "CrashLoopBackOff" in body["table"]["crashloop"]
-
-
-def test_post_knowledge_saves_and_reloads(client):
-    new_table = {"test_entry": "- TestEntry: testing hot-reload.\n  This is conclusive."}
-    r = client.post("/admin/knowledge",
-        data=json.dumps({"table": new_table}),
-        content_type="application/json")
-    assert r.status_code == 200
-    assert r.get_json()["saved"] is True
-    assert agent_app._current_knowledge_table == new_table
-    stored = _FAKE_REDIS.get("config:knowledge_table")
-    assert stored is not None
-    decoded = stored.decode() if isinstance(stored, bytes) else stored
-    assert json.loads(decoded) == new_table
-    r2 = client.get("/admin/knowledge")
-    assert r2.get_json()["table"] == new_table
-
-
-def test_post_knowledge_rejects_non_dict_table(client):
-    r = client.post("/admin/knowledge",
-        data=json.dumps({"table": "- Not a dict: plain text."}),
-        content_type="application/json")
-    assert r.status_code == 400
-    assert "table" in r.get_json()["error"]
-
-
-def test_post_knowledge_rejects_non_string_values(client):
-    r = client.post("/admin/knowledge",
-        data=json.dumps({"table": {"bad_entry": 123}}),
-        content_type="application/json")
-    assert r.status_code == 400
-    assert "table" in r.get_json()["error"]
-
-
-def test_post_knowledge_rejects_empty_key(client):
-    r = client.post("/admin/knowledge",
-        data=json.dumps({"table": {"": "valid text but empty key"}}),
-        content_type="application/json")
-    assert r.status_code == 400
-    assert "table" in r.get_json()["error"]
-
-
-def test_suggest_knowledge_entry(client):
-    llm_output = json.dumps({"key": "image_pull_variant",
-                              "text": "- ErrImagePull: image not found."})
-    with patch("app._run_llm", return_value=llm_output):
-        r = client.post("/admin/knowledge/suggest",
-            data=json.dumps({"raw": "kubectl describe shows ErrImagePull"}),
-            content_type="application/json")
-    assert r.status_code == 200
-    body = r.get_json()
-    assert "suggestion" in body
-    assert body["suggestion"]["key"]  == "image_pull_variant"
-    assert "ErrImagePull" in body["suggestion"]["text"]
-
-
-def test_suggest_knowledge_entry_rejects_invalid_llm_json(client):
-    with patch("app._run_llm", return_value="not valid json at all"):
-        r = client.post("/admin/knowledge/suggest",
-            data=json.dumps({"raw": "kubectl describe shows ErrImagePull"}),
-            content_type="application/json")
-    assert r.status_code == 200
-    body = r.get_json()
-    assert body["suggestion"] is None
-    assert "error" in body
-
-
-def test_suggest_knowledge_entry_missing_raw(client):
-    r = client.post("/admin/knowledge/suggest",
-        data=json.dumps({}),
-        content_type="application/json")
-    assert r.status_code == 400
-    assert "raw" in r.get_json()["error"]
-
-
 def test_admin_ui_returns_html(client):
     r = client.get("/admin/ui")
     assert r.status_code == 200
     assert "text/html" in r.content_type
     body = r.data.decode()
-    assert "Knowledge" in body
-    assert "Models"    in body
-    assert "Runbook"   in body
-    assert "/admin/knowledge" in body
-    assert "/admin/models"    in body
-    assert "/admin/runbook"   in body
+    assert "Models" in body
+    assert "/admin/models" in body
 
 
 def test_investigate_collects_diagnostics_before_memory_query(client):
@@ -354,18 +262,18 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
         call_order.append("collect_diagnostics")
         return _FAKE_FACTS
 
+    def fake_find_trusted_match(rdb, facts, query):
+        call_order.append("find_trusted_match")
+        return None
+
     def fake_search_memory_items(rdb, query, limit=3):
         call_order.append("search_memory_items")
         return []
 
-    def fake_search_runbook(rdb, query, top_k=3):
-        call_order.append("search_runbook")
-        return []
-
     with patch("app.collect_bundle",      side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", side_effect=fake_collect_diagnostics), \
+         patch("app.find_trusted_match",  side_effect=fake_find_trusted_match), \
          patch("app.search_memory_items", side_effect=fake_search_memory_items), \
-         patch("app.search_runbook",      side_effect=fake_search_runbook), \
          patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         client.post("/investigate",
@@ -373,21 +281,20 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
 
-    assert call_order.index("collect_diagnostics") < call_order.index("search_memory_items")
-    assert call_order.index("collect_diagnostics") < call_order.index("search_runbook")
+    assert call_order.index("collect_diagnostics") < call_order.index("find_trusted_match")
+    assert call_order.index("find_trusted_match") < call_order.index("search_memory_items")
 
 
 def test_investigate_query_includes_waiting_reason_and_log_error(client):
     captured = {}
 
-    def fake_search_memory_items(rdb, query, limit=3):
+    def fake_find_trusted_match(rdb, facts, query):
         captured["query"] = query
-        return []
+        return None
 
     with patch("app.collect_bundle",      side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
-         patch("app.search_memory_items", side_effect=fake_search_memory_items), \
-         patch("app.search_runbook",      return_value=[]), \
+         patch("app.find_trusted_match",  side_effect=fake_find_trusted_match), \
          patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         client.post("/investigate",
@@ -399,60 +306,45 @@ def test_investigate_query_includes_waiting_reason_and_log_error(client):
     assert _FAKE_FACTS["log_error"] in captured["query"]
 
 
-def test_format_memory_context_renders_runbook_score():
-    ctx = agent_app._format_memory_context([], [
-        {"title": "Deployment scaled to zero", "service": "ride-service",
-         "symptom": "No pods running", "fix_command": "kubectl scale ...", "score": 0.71},
-    ])
-    assert "(similarity: 0.71)" in ctx
+def test_format_trusted_match_includes_root_cause_and_fix():
+    ctx = agent_app._format_trusted_match({
+        "source": "knowledge", "knowledge_key": "oom",
+        "root_cause_pattern": "Container OOMKilled", "fix_action": "increase memory limit",
+        "context_notes": "",
+    })
+    assert "Container OOMKilled" in ctx
+    assert "increase memory limit" in ctx
 
 
-def test_format_memory_context_renders_incident_items():
-    ctx = agent_app._format_memory_context([
-        {"alert_name": "HighErrorRate", "service": "ride-service",
-         "root_cause": "dispatch consumer stale cursor",
-         "kubectl_hint": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
-         "score": 0.85},
-    ], [])
-    assert "Past incidents:" in ctx
-    assert "(similarity: 0.85)" in ctx
-    assert "dispatch consumer stale cursor" in ctx
+def test_format_trusted_match_includes_context_notes_when_present():
+    ctx = agent_app._format_trusted_match({
+        "source": "history", "knowledge_key": "oom",
+        "root_cause_pattern": "Container OOMKilled", "fix_action": "increase memory limit",
+        "context_notes": "seen during load test",
+    })
+    assert "seen during load test" in ctx
 
 
-def test_format_memory_context_empty_when_both_empty():
-    assert agent_app._format_memory_context([], []) == ""
+def test_format_trusted_match_omits_context_notes_when_empty():
+    ctx = agent_app._format_trusted_match({
+        "source": "knowledge", "knowledge_key": "oom",
+        "root_cause_pattern": "Container OOMKilled", "fix_action": "increase memory limit",
+        "context_notes": "",
+    })
+    assert "Notes from a similar past occurrence" not in ctx
 
 
-def test_investigate_dedupes_incident_against_runbook_hit(client):
+def test_reflect_and_store_writes_pending_suggestion_in_mock_mode():
+    import memory
     _FAKE_REDIS.flushall()
-    agent_app.store_incident(_FAKE_REDIS, {
-        "alert_name": "KubePodNotReady", "service": "ride",
-        "namespace": "vroom-dev", "symptoms": "",
-        "waiting_reason": "CrashLoopBackOff",
-        "log_error": "dial tcp postgres:5432: i/o timeout",
-        "root_cause": "dispatch consumer stale cursor",
-        "kubectl_hint": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
-        "outcome": "resolved",
-    })
-    agent_app.store_runbook_entry(_FAKE_REDIS, {
-        "title": "Stale cursor fix", "service": "ride",
-        "symptom": "CrashLoopBackOff dial tcp postgres timeout",
-        "root_cause": "Dispatch service consumer had a stale Redis cursor",
-        "fix_command": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
-        "source": "learned",
-    })
-
-    with patch("app.collect_bundle",      side_effect=_fake_bundle), \
-         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
-         patch("app.interpret",           return_value=_FAKE_DIAGNOSIS), \
-         patch("app._reflect_and_store"):
-        r = client.post("/investigate?debug=true",
-            data=json.dumps({"alert_name": "KubePodNotReady",
-                             "service": "ride", "namespace": "vroom-dev"}),
-            content_type="application/json")
-
-    body = r.get_json()
-    assert body["memory_hits"]["incidents"] == 0
-    assert body["memory_hits"]["runbook"]   == 1
-    assert "Past incidents:" not in body["debug"]["memory_context"]
-    assert "Runbook:" in body["debug"]["memory_context"]
+    with patch.dict(os.environ, {"LLM_MOCK": "true", "LLM_MOCK_SCENARIO": "scale_to_zero"}):
+        agent_app._reflect_and_store(
+            _FAKE_REDIS,
+            {"alert_name": "KubePodNotReady", "service": "ride",
+             "root_cause": "scaled to zero", "id": "incident-abc"},
+            "kubectl scale deployment/ride -n vroom-dev --replicas=1",
+        )
+    pending = memory.list_pending_suggestions(_FAKE_REDIS)
+    assert len(pending) == 1
+    assert pending[0]["source_incident_id"] == "incident-abc"
+    assert pending[0]["status"] == "pending"

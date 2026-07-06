@@ -4,13 +4,12 @@ import requests
 from flask import Flask, request, jsonify
 
 from memory import (store_incident, search_memory as memory_search,
-                    search_memory_items, dedupe_against_runbook, format_incidents,
+                    search_memory_items, format_incidents,
                     connect as redis_connect, build_symptom_text,
-                    store_runbook_entry, get_runbook_entries, search_runbook)
+                    find_trusted_match, store_pending_suggestion, KNOWLEDGE_INDEX)
 from collector import collect_bundle
 from diagnostics import collect_diagnostics, format_evidence
-from interpreter import (interpret, _run_llm, DEFAULT_MODELS,
-                         GROQ_URL, OPENROUTER_URL, K8S_KNOWLEDGE_TABLE)
+from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 
 app = Flask(__name__)
@@ -22,7 +21,6 @@ GROQ_KEY       = os.environ.get("GROQ_API_KEY", "")
 rdb = redis_connect(REDIS_URL)
 
 _MODELS_KEY    = "config:models"
-_KNOWLEDGE_KEY = "config:knowledge_table"
 
 
 def _load_models(rdb) -> list:
@@ -41,63 +39,61 @@ def _load_models(rdb) -> list:
 _current_models: list = _load_models(rdb)
 
 
-def _load_knowledge_table(rdb) -> dict:
-    raw = rdb.get(_KNOWLEDGE_KEY)
-    if raw:
-        try:
-            data = json.loads(raw)
-            if isinstance(data, dict) and all(
-                isinstance(k, str) and isinstance(v, str) for k, v in data.items()
-            ):
-                return data
-        except json.JSONDecodeError:
-            pass
-    rdb.set(_KNOWLEDGE_KEY, json.dumps(K8S_KNOWLEDGE_TABLE))
-    return dict(K8S_KNOWLEDGE_TABLE)
-
-
-_current_knowledge_table: dict = _load_knowledge_table(rdb)
-
-
 def _background_seed():
     try:
         n = seed_if_empty(rdb)
-        print(f"[seed] seeded {n} runbook entries", flush=True)
+        print(f"[seed] seeded {n} knowledge/history entries", flush=True)
     except Exception as e:
         print(f"[seed] cold-start seed failed: {e}", flush=True)
 
 threading.Thread(target=_background_seed, daemon=True).start()
 
 
-def _format_memory_context(incident_items: list, runbook_hits: list) -> str:
-    parts = []
-    if incident_items:
-        parts.append("Past incidents:\n" + format_incidents(incident_items))
-    if runbook_hits:
-        lines = [
-            f"- (similarity: {h['score']:.2f}) {h['title']} ({h['service']}): "
-            f"{h['symptom']} → Fix: {h['fix_command']}"
-            for h in runbook_hits
-        ]
-        parts.append("Runbook:\n" + "\n".join(lines))
-    return "\n\n".join(parts) if parts else ""
+def _format_trusted_match(match: dict) -> str:
+    lines = [f"Known failure pattern: {match['root_cause_pattern']}",
+             f"Fix: {match['fix_action']}"]
+    if match.get("context_notes"):
+        lines.append(f"Notes from a similar past occurrence: {match['context_notes']}")
+    return "\n".join(lines)
 
+
+_REFLECT_PROMPT = """\
+You are analyzing a resolved incident to propose a knowledge-base update.
+Existing knowledge keys: {existing_keys}
+
+Incident:
+Alert: {alert_name} on {service}
+Root cause: {root_cause}
+Fix command: {fix_command}
+
+Output exactly this JSON (no markdown, no explanation):
+{{"symptom":"one sentence describing this occurrence",
+  "proposed_knowledge_key":"an existing key from the list above, or a new short_snake_case slug",
+  "root_cause":"one sentence canonical root cause (used only if this is a new key)",
+  "fix_action":"one sentence canonical fix (used only if this is a new key)",
+  "context_notes":"anything specific to this occurrence (dates, values) or empty string"}}"""
 
 
 def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
+    existing_keys = ", ".join(sorted(
+        k.decode() if isinstance(k, bytes) else k for k in rdb.smembers(KNOWLEDGE_INDEX)
+    )) or "(none yet)"
+
     _mock_mode = os.environ.get("LLM_MOCK", "").lower() == "true"
     if _mock_mode:
-        scenario = os.environ.get("LLM_MOCK_SCENARIO", "scale_to_zero")
-        entry = {
-            "title":       f"Mock: {incident['alert_name']} on {incident['service']}",
-            "service":     incident["service"],
-            "symptom":     f"Mock scenario: {scenario}",
-            "root_cause":  incident["root_cause"],
-            "fix_command": fix_command or "",
-            "source":      "learned",
+        proposed_key = "mock_key"
+        suggestion = {
+            "service":                incident["service"],
+            "symptom":                f"Mock scenario: {os.environ.get('LLM_MOCK_SCENARIO', 'scale_to_zero')}",
+            "proposed_knowledge_key": proposed_key,
+            "is_new_knowledge_key":   not rdb.sismember(KNOWLEDGE_INDEX, proposed_key),
+            "root_cause":             incident["root_cause"],
+            "fix_action":             fix_command or "",
+            "context_notes":          "",
+            "source_incident_id":     incident.get("id", ""),
         }
-        store_runbook_entry(rdb, entry)
-        print(f"[reflect] mock stored: {entry['title']}", flush=True)
+        store_pending_suggestion(rdb, suggestion)
+        print(f"[reflect] mock stored pending suggestion for {incident['service']}", flush=True)
         return
 
     if GROQ_KEY:
@@ -113,35 +109,33 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
     try:
         resp = requests.post(
             url,
-            headers={"Authorization": f"Bearer {key}",
-                     "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={
-                "model":       model_id,
-                "max_tokens":  200,
-                "temperature": 0.1,
-                "messages": [
-                    {"role": "system", "content": (
-                        "You are a technical writer for an SRE runbook. "
-                        "Based on this resolved incident, write ONE concise runbook entry. "
-                        "Output ONLY a valid JSON object, no markdown: "
-                        '{"title":"...","service":"...","symptom":"one sentence",'
-                        '"root_cause":"one sentence","fix_command":"exact kubectl command"}'
-                    )},
-                    {"role": "user", "content": (
-                        f"Alert: {incident['alert_name']} on {incident['service']}\n"
-                        f"Root cause: {incident['root_cause']}\n"
-                        f"Command: {fix_command}\nOutcome: resolved"
-                    )},
-                ],
+                "model": model_id, "max_tokens": 250, "temperature": 0.1,
+                "messages": [{"role": "user", "content": _REFLECT_PROMPT.format(
+                    existing_keys=existing_keys,
+                    alert_name=incident["alert_name"], service=incident["service"],
+                    root_cause=incident["root_cause"], fix_command=fix_command,
+                )}],
             },
             timeout=30,
         )
         content = resp.json()["choices"][0]["message"].get("content", "").strip()
         content = content.replace("```json", "").replace("```", "").strip()
-        entry = json.loads(content)
-        entry["source"] = "learned"
-        store_runbook_entry(rdb, entry)
-        print(f"[reflect] stored: {entry.get('title', '')}", flush=True)
+        parsed       = json.loads(content)
+        proposed_key = parsed.get("proposed_knowledge_key", "").strip()
+        suggestion = {
+            "service":                incident["service"],
+            "symptom":                parsed.get("symptom", ""),
+            "proposed_knowledge_key": proposed_key,
+            "is_new_knowledge_key":   not rdb.sismember(KNOWLEDGE_INDEX, proposed_key),
+            "root_cause":             parsed.get("root_cause", ""),
+            "fix_action":             parsed.get("fix_action", ""),
+            "context_notes":          parsed.get("context_notes", ""),
+            "source_incident_id":     incident.get("id", ""),
+        }
+        store_pending_suggestion(rdb, suggestion)
+        print(f"[reflect] stored pending suggestion: {suggestion['symptom']}", flush=True)
     except Exception as e:
         print(f"[reflect] failed (non-fatal): {e}", flush=True)
 
@@ -185,43 +179,10 @@ input { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding:
 <body>
 <h1>Incident Agent &#8212; Admin</h1>
 <div class="tabs">
-  <button class="tab active" onclick="switchTab('knowledge')">Knowledge</button>
-  <button class="tab"        onclick="switchTab('models')">Models</button>
-  <button class="tab"        onclick="switchTab('runbook')">Runbook</button>
+  <button class="tab active" onclick="switchTab('models')">Models</button>
 </div>
 
-<div id="tab-knowledge" class="panel active">
-  <div class="row">
-    <label style="flex:1;margin:0;">Knowledge Table</label>
-    <button class="btn-secondary" onclick="addEntryRow()">+ Add entry</button>
-    <button class="btn-primary" onclick="saveKnowledge()">Save</button>
-  </div>
-  <div id="kt-entries"></div>
-
-  <div class="divider">
-    <label>Suggest new entry from incident data</label>
-    <label style="margin-top:8px;">Paste kubectl describe / logs / agent output:</label>
-    <textarea id="kt-raw" rows="6" spellcheck="false"
-              placeholder="paste raw incident data here..."></textarea>
-    <div class="row" style="margin-top:6px;">
-      <button class="btn-secondary" onclick="suggestEntry()">Suggest entry</button>
-      <span id="suggest-loading" style="display:none;color:#aaa;">generating&#8230;</span>
-    </div>
-    <label style="margin-top:12px;">Draft (edit before adding):</label>
-    <div class="row">
-      <input id="kt-draft-key" style="flex:1;" placeholder="key (e.g. crashloop)" spellcheck="false">
-    </div>
-    <textarea id="kt-draft-text" rows="5" spellcheck="false"
-              placeholder="suggestion will appear here..."></textarea>
-    <div class="row">
-      <button class="btn-success" onclick="addDraftEntry()">Add as new entry &#8593;</button>
-      <small style="color:#666;">(still need to Save after adding)</small>
-    </div>
-    <div class="err-msg" id="suggest-error"></div>
-  </div>
-</div>
-
-<div id="tab-models" class="panel">
+<div id="tab-models" class="panel active">
   <div class="row">
     <label style="flex:1;margin:0;">Model Priority List (JSON array)</label>
     <button class="btn-primary" onclick="saveModels()">Save</button>
@@ -230,14 +191,9 @@ input { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding:
   <div class="err-msg" id="models-error"></div>
 </div>
 
-<div id="tab-runbook" class="panel">
-  <label>Runbook entries (read-only)</label>
-  <pre id="runbook-text">loading&#8230;</pre>
-</div>
-
 <div class="toast" id="toast"></div>
 <script>
-const TABS = ["knowledge","models","runbook"];
+const TABS = ["models"];
 function switchTab(name) {
   TABS.forEach(t => {
     document.getElementById("tab-"+t).classList.toggle("active", t===name);
@@ -245,94 +201,13 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((el,i) => {
     el.classList.toggle("active", TABS[i]===name);
   });
-  if (name==="knowledge") loadKnowledge();
-  if (name==="models")    loadModels();
-  if (name==="runbook")   loadRunbook();
+  if (name==="models") loadModels();
 }
 function showToast(msg, ok) {
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.className = "toast show " + (ok ? "ok" : "err");
   setTimeout(() => { t.className = "toast"; }, 3000);
-}
-function renderEntries(table) {
-  const container = document.getElementById("kt-entries");
-  container.innerHTML = "";
-  Object.entries(table || {}).forEach(([key, text]) => addEntryRow(key, text));
-}
-function addEntryRow(key = "", text = "") {
-  const container = document.getElementById("kt-entries");
-  const row = document.createElement("div");
-  row.className = "kt-entry";
-  row.innerHTML = `
-    <div class="row">
-      <input class="kt-key" style="flex:1;" value="${key.replace(/"/g, "&quot;")}"
-             placeholder="key (e.g. crashloop)" spellcheck="false">
-      <button class="btn-secondary" onclick="this.closest('.kt-entry').remove()">Delete</button>
-    </div>
-    <textarea class="kt-value" rows="6" spellcheck="false"></textarea>
-  `;
-  row.querySelector(".kt-value").value = text;
-  container.appendChild(row);
-}
-function collectEntries() {
-  const table = {};
-  document.querySelectorAll(".kt-entry").forEach(row => {
-    const key  = row.querySelector(".kt-key").value.trim();
-    const text = row.querySelector(".kt-value").value;
-    if (key) table[key] = text;
-  });
-  return table;
-}
-async function loadKnowledge() {
-  try {
-    const r = await fetch("/admin/knowledge");
-    const d = await r.json();
-    renderEntries(d.table);
-  } catch(e) { showToast("Failed to load knowledge table", false); }
-}
-async function saveKnowledge() {
-  const table = collectEntries();
-  try {
-    const r = await fetch("/admin/knowledge", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({table}),
-    });
-    const d = await r.json();
-    if (d.error) { showToast("Save failed: "+d.error, false); return; }
-    showToast("Knowledge table saved", true);
-  } catch(e) { showToast("Save failed: "+e.message, false); }
-}
-async function suggestEntry() {
-  const raw = document.getElementById("kt-raw").value.trim();
-  if (!raw) { showToast("Paste incident data first", false); return; }
-  document.getElementById("suggest-loading").style.display = "inline";
-  document.getElementById("suggest-error").textContent = "";
-  document.getElementById("kt-draft-key").value  = "";
-  document.getElementById("kt-draft-text").value = "";
-  try {
-    const r = await fetch("/admin/knowledge/suggest", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({raw}),
-    });
-    const d = await r.json();
-    if (d.error) { document.getElementById("suggest-error").textContent = "LLM error: "+d.error; }
-    else if (d.suggestion) {
-      document.getElementById("kt-draft-key").value  = d.suggestion.key  || "";
-      document.getElementById("kt-draft-text").value = d.suggestion.text || "";
-    }
-  } catch(e) {
-    document.getElementById("suggest-error").textContent = "Request failed: "+e.message;
-  } finally {
-    document.getElementById("suggest-loading").style.display = "none";
-  }
-}
-function addDraftEntry() {
-  const key  = document.getElementById("kt-draft-key").value.trim();
-  const text = document.getElementById("kt-draft-text").value.trim();
-  if (!key || !text) { showToast("Draft needs both a key and text", false); return; }
-  addEntryRow(key, text);
-  showToast("Added — remember to Save", true);
 }
 async function loadModels() {
   try {
@@ -359,53 +234,10 @@ async function saveModels() {
     }
   } catch(e) { showToast("Save failed: "+e.message, false); }
 }
-async function loadRunbook() {
-  try {
-    const r    = await fetch("/admin/runbook");
-    const text = await r.text();
-    document.getElementById("runbook-text").textContent = text;
-  } catch(e) { showToast("Failed to load runbook", false); }
-}
-loadKnowledge();
+loadModels();
 </script>
 </body>
 </html>"""
-
-_SUGGEST_PROMPT = """\
-You are updating a Kubernetes diagnostic knowledge table used by an incident response agent.
-Each entry is keyed by a short lowercase_snake_case identifier and a text value in this exact format:
-- <WaitingReason or pattern>: One-line description of what this means.
-  This IS / is NOT a conclusive root cause.
-  Look for: specific things to investigate.
-  Primary source: <exact kubectl command>.
-
-Here is raw incident data (kubectl output, logs, agent answer, or your notes):
-{raw}
-
-Output exactly this JSON (no markdown, no explanation):
-{{"key": "short_snake_case_id", "text": "- <bullet text in the exact format above>"}}"""
-
-
-def _parse_suggestion(text: str) -> dict | None:
-    if not text:
-        return None
-    try:
-        result = json.loads(text.strip())
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end <= start:
-            return None
-        try:
-            result = json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(result, dict):
-        return None
-    if not {"key", "text"}.issubset(result.keys()):
-        return None
-    if not all(isinstance(result[k], str) and result[k].strip() for k in ("key", "text")):
-        return None
-    return result
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
@@ -423,35 +255,6 @@ def memory_search_endpoint():
     return jsonify({"result": memory_search(rdb, query, limit=limit)})
 
 
-@app.route("/admin/runbook")
-def admin_runbook():
-    entries   = get_runbook_entries(rdb)
-    bootstrap = [e for e in entries if e.get("source") == "bootstrap"]
-    learned   = [e for e in entries if e.get("source") == "learned"]
-
-    if not entries:
-        return app.response_class(
-            "# Vroom Operations Runbook\n\n*No entries. POST /admin/reseed to bootstrap.*\n",
-            mimetype="text/plain",
-        )
-
-    lines = [
-        "# Vroom Operations Runbook\n",
-        f"*{len(entries)} entries — {len(bootstrap)} bootstrap, {len(learned)} learned.*\n",
-    ]
-    for e in entries:
-        ts       = int(e.get("timestamp", 0))
-        date_str = time.strftime("%Y-%m-%d", time.gmtime(ts)) if ts else "unknown"
-        lines.append(f"\n## {e.get('title', 'Untitled')}")
-        lines.append(f"**Service:** {e.get('service', '')}")
-        lines.append(f"**Symptom:** {e.get('symptom', '')}")
-        lines.append(f"**Root cause:** {e.get('root_cause', '')}")
-        if e.get("fix_command"):
-            lines.append(f"**Fix:** `{e['fix_command']}`")
-        lines.append(f"*Source: {e.get('source', 'unknown')} | {date_str}*")
-    return app.response_class("\n".join(lines), mimetype="text/plain")
-
-
 @app.route("/admin/ui")
 def admin_ui():
     return _ADMIN_UI_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
@@ -465,17 +268,6 @@ def admin_reset_incidents():
         rdb.delete(f"incident:{key_str}")
     rdb.delete("incidents:index")
     return jsonify({"cleared": len(keys)})
-
-
-@app.route("/admin/reseed", methods=["POST"])
-def admin_reseed():
-    keys = rdb.smembers("runbook:index")
-    for key in keys:
-        key_str = key.decode() if isinstance(key, bytes) else key
-        rdb.delete(f"runbook:entry:{key_str}")
-    rdb.delete("runbook:index")
-    n = seed_if_empty(rdb)
-    return jsonify({"seeded": n})
 
 
 @app.route("/admin/models", methods=["GET"])
@@ -495,41 +287,6 @@ def set_models():
     _current_models[:] = data
     rdb.set(_MODELS_KEY, json.dumps(data))
     return jsonify({"models": _current_models})
-
-
-@app.route("/admin/knowledge", methods=["GET"])
-def get_knowledge():
-    return jsonify({"table": _current_knowledge_table})
-
-
-@app.route("/admin/knowledge", methods=["POST"])
-def set_knowledge():
-    global _current_knowledge_table
-    data  = request.get_json(silent=True) or {}
-    table = data.get("table")
-    if not isinstance(table, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) and k.strip() and v.strip() for k, v in table.items()
-    ):
-        return jsonify({"error": 'body must be {"table": {"<key>": "<text>", ...}} '
-                                  'with non-empty string values'}), 400
-    _current_knowledge_table = table
-    rdb.set(_KNOWLEDGE_KEY, json.dumps(table))
-    return jsonify({"saved": True, "entries": len(table)})
-
-
-@app.route("/admin/knowledge/suggest", methods=["POST"])
-def suggest_knowledge_entry():
-    data = request.get_json(silent=True) or {}
-    raw  = data.get("raw", "").strip()
-    if not raw:
-        return jsonify({"error": "body must include non-empty 'raw' field"}), 400
-    messages   = [{"role": "user", "content": _SUGGEST_PROMPT.format(raw=raw)}]
-    raw_output = _run_llm(messages, None, _current_models, GROQ_KEY, OPENROUTER_KEY)
-    suggestion = _parse_suggestion(raw_output)
-    if suggestion is None:
-        return jsonify({"suggestion": None,
-                        "error": "LLM returned empty or invalid JSON — check API keys and model list"})
-    return jsonify({"suggestion": suggestion})
 
 
 @app.route("/investigate", methods=["POST"])
@@ -552,15 +309,17 @@ def investigate():
           f"init_restarts={facts['init_restarts']} "
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
-    query          = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
-    incident_items = search_memory_items(rdb, query, limit=3)
-    runbook_hits   = search_runbook(rdb, query, top_k=3)
-    deduped_items  = dedupe_against_runbook(incident_items, runbook_hits)
-    memory_ctx     = _format_memory_context(deduped_items, runbook_hits)
+    query = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
+    match = find_trusted_match(rdb, facts, query)
+    trusted_match = match is not None
+    memory_ctx    = _format_trusted_match(match) if match else ""
 
-    incident_hits = len(deduped_items)
-    print(f"[memory] pre-fetch: incidents={len(incident_items)} deduped_to={incident_hits} "
-          f"runbook={len(runbook_hits)} ctx_len={len(memory_ctx)}", flush=True)
+    related_incidents_unconfirmed = []
+    if not trusted_match:
+        related_incidents_unconfirmed = search_memory_items(rdb, query, limit=3)
+
+    print(f"[memory] trusted_match={trusted_match} "
+          f"related_incidents={len(related_incidents_unconfirmed)}", flush=True)
 
     diagnosis = interpret(
         alert_name, service, namespace,
@@ -569,12 +328,11 @@ def investigate():
         groq_key=GROQ_KEY,
         openrouter_key=OPENROUTER_KEY,
         pod=pod,
-        knowledge_table=_current_knowledge_table,
     )
 
     evidence = format_evidence(facts)
 
-    store_incident(rdb, {
+    incident_id = store_incident(rdb, {
         "alert_name":     alert_name,
         "service":        service,
         "namespace":      namespace,
@@ -592,6 +350,7 @@ def investigate():
             "alert_name": alert_name,
             "service":    service,
             "root_cause": diagnosis["root_cause"],
+            "id":         incident_id,
         }, diagnosis["kubectl_hint"]),
         daemon=True,
     ).start()
@@ -604,7 +363,8 @@ def investigate():
         "dev_action":       diagnosis["dev_action"],
         "kubectl_hint":     diagnosis["kubectl_hint"],
         "evidence_snippet": evidence,
-        "memory_hits":      {"incidents": incident_hits, "runbook": len(runbook_hits)},
+        "trusted_match":    trusted_match,
+        **({"related_incidents_unconfirmed": related_incidents_unconfirmed} if not trusted_match else {}),
         "low_confidence":   diagnosis.get("low_confidence", False),
         **({"debug": {
             "bundle":         bundle,
