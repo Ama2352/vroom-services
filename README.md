@@ -3,15 +3,55 @@
 [![pipeline status](https://gitlab.com/AmaUIT/vroom-services/badges/main/pipeline.svg)](https://gitlab.com/AmaUIT/vroom-services/-/commits/main)
 [![Go Version](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](services/user/go.mod)
 
-Go microservices backend, React frontend, and CI/CD pipeline for the **Vroom** ride-hailing platform.
+## About Vroom
 
-Part of a three-repo GitOps setup — each repo has a single responsibility:
+**Vroom** is a cloud-native MVP built to explore the full DevOps lifecycle — CI/CD, GitOps, progressive delivery, observability, and AI-assisted incident response — under a hard **12 GB RAM** budget across 3 VMs, running on **K3s** instead of full Kubernetes.
+
+The ride-hailing domain (passengers, drivers, trip matching) is a realistic placeholder application — enough business logic to justify real microservices patterns (event-driven architecture, sagas, the outbox pattern). The actual subject of this project is the platform built around it: how the app is shipped, deployed, observed, and kept alive.
+
+This is a 3-repo GitOps setup, each repo with a single responsibility:
 
 | Repo | Responsibility |
-|------|---------------|
-| **vroom-services** (this repo) | Application source code, Dockerfiles, GitLab CI pipeline |
-| [vroom-gitops](https://github.com/Ama2352/vroom-gitops) | Kustomize manifests, ArgoCD Applications, Kargo promotion CRDs |
-| [vroom-infra](https://github.com/Ama2352/vroom-infra) | Vagrant + Ansible K3s cluster provisioning |
+|---|---|
+| **vroom-services** (this repo) | Go microservices + React frontend + CI pipeline |
+| [vroom-gitops](https://github.com/Ama2352/vroom-gitops) | Kustomize + ArgoCD + Kargo — desired cluster state |
+| [vroom-infra](https://github.com/Ama2352/vroom-infra) | Vagrant + Ansible — K3s cluster bootstrap |
+
+## This Repo
+
+The application layer: 4 Go microservices + a React frontend that exercise the patterns described below, plus the GitLab CI pipeline that tests, scans, and publishes them to GHCR.
+
+---
+
+## Tech Stack
+
+| Category | Technology |
+|---|---|
+| Language | Go 1.25 |
+| Web framework | Gin |
+| Frontend | React 19, Vite 8, Axios, react-leaflet (Leaflet 1.9), Framer Motion |
+| Database | PostgreSQL 15 (schema-per-service via `search_path`) |
+| Messaging | Redis 7 Streams (consumer groups, XAUTOCLAIM, DLQ) |
+| DB codegen | SQLC |
+| Auth | JWT RS256 |
+| Tracing | OpenTelemetry → Tempo (`otelgin`, `otelsql`, `redisotel`) |
+| Testing | `go test`, testcontainers (real Postgres + Redis), k6 (load) |
+| CI | GitLab CI — test → integration → build → scan (Trivy) → publish (GHCR) |
+| SAST | gosec + GitLab SAST |
+
+---
+
+## Key Features
+
+- Domain-driven trip state machine (`REQUESTED → ACCEPTED → IN_PROGRESS → COMPLETED`)
+- Transactional Outbox — no dual-write between Postgres and Redis Streams
+- Saga choreography for driver matching — no orchestrator, compensating transactions on timeout/reject
+- Consumer groups + DLQ — at-least-once delivery, XAUTOCLAIM crash recovery, poison-message quarantine
+- JWT RS256 auth — asymmetric, only user-service holds the private key
+- Redis Geo driver matching — O(log N) radius search, 5 km waterfall
+- HPA autoscaling on `ride`/`dispatch`/`user`, verified under k6 load
+- End-to-end distributed tracing, including across async Redis Streams hops
+- LLM-assisted SRE incident-diagnosis agent (`incident-diagnosis/`)
 
 ---
 
