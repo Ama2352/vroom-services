@@ -41,6 +41,88 @@ def build_symptom_text(alert_name: str, waiting_reason: str = "", log_error: str
     return f"{alert_name} {waiting_reason} {log_error}".strip()
 
 
+KNOWLEDGE_INDEX = "knowledge:index"
+
+
+def _hash_to_dict(raw: dict) -> dict:
+    return {
+        (k.decode() if isinstance(k, bytes) else k):
+        (v.decode() if isinstance(v, bytes) else v)
+        for k, v in raw.items()
+    }
+
+
+def _to_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() == "true"
+
+
+def store_knowledge_entry(rdb: redis_lib.Redis, entry: dict) -> str:
+    key = entry["key"]
+    rdb.hset(f"knowledge:entry:{key}", mapping={
+        "key":                    key,
+        "root_cause_pattern":     entry.get("root_cause_pattern", ""),
+        "fix_action":             entry.get("fix_action", ""),
+        "trigger_waiting_reason": entry.get("trigger_waiting_reason", ""),
+        "conclusive":             "true" if entry.get("conclusive") else "false",
+        "source":                 entry.get("source", "learned"),
+        "created_by":             entry.get("created_by", ""),
+        "last_modified_by":       entry.get("last_modified_by", ""),
+        "last_modified_at":       entry.get("last_modified_at", ""),
+    })
+    rdb.sadd(KNOWLEDGE_INDEX, key)
+    return key
+
+
+def get_knowledge_entry(rdb: redis_lib.Redis, key: str) -> dict | None:
+    raw = rdb.hgetall(f"knowledge:entry:{key}")
+    if not raw:
+        return None
+    d = _hash_to_dict(raw)
+    d["conclusive"] = _to_bool(d.get("conclusive"))
+    return d
+
+
+def list_knowledge_entries(rdb: redis_lib.Redis) -> list:
+    keys = rdb.smembers(KNOWLEDGE_INDEX)
+    out = []
+    for k in keys:
+        k_str = k.decode() if isinstance(k, bytes) else k
+        entry = get_knowledge_entry(rdb, k_str)
+        if entry:
+            out.append(entry)
+    return out
+
+
+def update_knowledge_entry(rdb: redis_lib.Redis, key: str, fields: dict) -> bool:
+    if not rdb.exists(f"knowledge:entry:{key}"):
+        return False
+    mapping = {}
+    if "root_cause_pattern" in fields:
+        mapping["root_cause_pattern"] = fields["root_cause_pattern"]
+    if "fix_action" in fields:
+        mapping["fix_action"] = fields["fix_action"]
+    if "conclusive" in fields:
+        mapping["conclusive"] = "true" if fields["conclusive"] else "false"
+    if "last_modified_by" in fields:
+        mapping["last_modified_by"] = fields["last_modified_by"]
+        mapping["last_modified_at"] = str(int(time.time()))
+    if mapping:
+        rdb.hset(f"knowledge:entry:{key}", mapping=mapping)
+    return True
+
+
+def delete_knowledge_entry(rdb: redis_lib.Redis, key: str) -> str:
+    if not rdb.exists(f"knowledge:entry:{key}"):
+        return "not_found"
+    if list_history_entries_for_knowledge(rdb, key):
+        return "has_history"
+    rdb.delete(f"knowledge:entry:{key}")
+    rdb.srem(KNOWLEDGE_INDEX, key)
+    return "deleted"
+
+
 def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
     iid = str(uuid.uuid4())
     rdb.hset(f"incident:{iid}", mapping={

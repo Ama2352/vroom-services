@@ -68,6 +68,95 @@ def test_build_symptom_text_symmetry_between_storage_and_query_call_sites():
     assert stored_text == query_text
 
 
+def _make_knowledge(**kwargs):
+    base = {
+        "key": "oom",
+        "root_cause_pattern": "Container exceeded its memory limit and was OOMKilled",
+        "fix_action": "Increase the memory limit in the deployment manifest.",
+        "trigger_waiting_reason": "OOMKilled",
+        "conclusive": True,
+        "source": "bootstrap",
+        "created_by": "bootstrap",
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_store_knowledge_entry_creates_hash_and_index(rdb):
+    key = memory.store_knowledge_entry(rdb, _make_knowledge())
+    assert key == "oom"
+    assert rdb.hexists("knowledge:entry:oom", "root_cause_pattern")
+    assert rdb.sismember(memory.KNOWLEDGE_INDEX, "oom")
+
+
+def test_get_knowledge_entry_returns_dict_with_bool_conclusive(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(conclusive=True))
+    entry = memory.get_knowledge_entry(rdb, "oom")
+    assert entry["conclusive"] is True
+    assert entry["root_cause_pattern"] == "Container exceeded its memory limit and was OOMKilled"
+
+
+def test_get_knowledge_entry_missing_returns_none(rdb):
+    assert memory.get_knowledge_entry(rdb, "does_not_exist") is None
+
+
+def test_get_knowledge_entry_false_conclusive_roundtrips(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="crashloop", conclusive=False))
+    entry = memory.get_knowledge_entry(rdb, "crashloop")
+    assert entry["conclusive"] is False
+
+
+def test_list_knowledge_entries_returns_all(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="oom"))
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="crashloop", conclusive=False))
+    entries = memory.list_knowledge_entries(rdb)
+    assert {e["key"] for e in entries} == {"oom", "crashloop"}
+
+
+def test_list_knowledge_entries_empty(rdb):
+    assert memory.list_knowledge_entries(rdb) == []
+
+
+def test_update_knowledge_entry_changes_fields(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge())
+    ok = memory.update_knowledge_entry(rdb, "oom", {
+        "root_cause_pattern": "Updated pattern",
+        "last_modified_by": "Alice",
+    })
+    assert ok is True
+    entry = memory.get_knowledge_entry(rdb, "oom")
+    assert entry["root_cause_pattern"] == "Updated pattern"
+    assert entry["last_modified_by"] == "Alice"
+    assert entry["last_modified_at"] != ""
+
+
+def test_update_knowledge_entry_missing_returns_false(rdb):
+    assert memory.update_knowledge_entry(rdb, "does_not_exist", {"fix_action": "x"}) is False
+
+
+def test_delete_knowledge_entry_removes_hash_and_index(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge())
+    result = memory.delete_knowledge_entry(rdb, "oom")
+    assert result == "deleted"
+    assert memory.get_knowledge_entry(rdb, "oom") is None
+    assert not rdb.sismember(memory.KNOWLEDGE_INDEX, "oom")
+
+
+def test_delete_knowledge_entry_missing_returns_not_found(rdb):
+    assert memory.delete_knowledge_entry(rdb, "does_not_exist") == "not_found"
+
+
+def test_delete_knowledge_entry_refused_when_history_exists(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge())
+    memory.store_history_entry(rdb, {
+        "service": "ride", "knowledge_key": "oom", "symptom": "ride OOMKilled",
+        "context_notes": "", "source": "learned", "created_by": "Alice",
+    })
+    result = memory.delete_knowledge_entry(rdb, "oom")
+    assert result == "has_history"
+    assert memory.get_knowledge_entry(rdb, "oom") is not None
+
+
 def test_store_incident_creates_hash(rdb):
     iid = memory.store_incident(rdb, _make_incident())
     assert rdb.hexists(f"incident:{iid}", "alert_name")
