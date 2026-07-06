@@ -357,6 +357,133 @@ def test_find_trusted_match_empty_store_returns_none(rdb):
     assert memory.find_trusted_match(rdb, facts, "OOMKilled") is None
 
 
+def _make_pending(**kwargs):
+    base = {
+        "service": "ride-service",
+        "symptom": "ride-service pods CrashLoopBackOff, DB unreachable",
+        "proposed_knowledge_key": "crashloop",
+        "is_new_knowledge_key": False,
+        "root_cause": "",
+        "fix_action": "",
+        "context_notes": "seen during load test on 2026-07-06",
+        "source_incident_id": "incident-123",
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_store_pending_suggestion_creates_hash_with_pending_status(rdb):
+    pid = memory.store_pending_suggestion(rdb, _make_pending())
+    entry = memory.get_pending_suggestion(rdb, pid)
+    assert entry["status"] == "pending"
+    assert entry["service"] == "ride-service"
+    assert rdb.sismember(memory.PENDING_INDEX, pid)
+
+
+def test_get_pending_suggestion_missing_returns_none(rdb):
+    assert memory.get_pending_suggestion(rdb, "does-not-exist") is None
+
+
+def test_get_pending_suggestion_bool_field_roundtrips(rdb):
+    pid = memory.store_pending_suggestion(rdb, _make_pending(is_new_knowledge_key=True))
+    entry = memory.get_pending_suggestion(rdb, pid)
+    assert entry["is_new_knowledge_key"] is True
+
+
+def test_list_pending_suggestions_defaults_to_all(rdb):
+    memory.store_pending_suggestion(rdb, _make_pending())
+    memory.store_pending_suggestion(rdb, _make_pending(service="dispatch-service"))
+    assert len(memory.list_pending_suggestions(rdb)) == 2
+
+
+def test_list_pending_suggestions_filters_by_status(rdb):
+    pid1 = memory.store_pending_suggestion(rdb, _make_pending())
+    memory.store_pending_suggestion(rdb, _make_pending())
+    memory.reject_pending_suggestion(rdb, pid1, "Alice")
+    pending_only = memory.list_pending_suggestions(rdb, status="pending")
+    rejected_only = memory.list_pending_suggestions(rdb, status="rejected")
+    assert len(pending_only) == 1
+    assert len(rejected_only) == 1
+    assert rejected_only[0]["id"] == pid1
+
+
+def test_approve_pending_suggestion_existing_key_creates_only_history(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="crashloop"))
+    pid = memory.store_pending_suggestion(rdb, _make_pending())
+    hid = memory.approve_pending_suggestion(
+        rdb, pid, actor="Alice", mode="existing", knowledge_key="crashloop",
+        symptom="edited symptom text", context_notes="edited notes")
+    assert hid is not None
+    history = memory.get_history_entry(rdb, hid)
+    assert history["knowledge_key"] == "crashloop"
+    assert history["symptom"] == "edited symptom text"
+    assert history["created_by"] == "Alice"
+    assert len(memory.list_knowledge_entries(rdb)) == 1
+
+
+def test_approve_pending_suggestion_new_key_creates_knowledge_and_history(rdb):
+    pid = memory.store_pending_suggestion(rdb, _make_pending(
+        proposed_knowledge_key="outbox_stuck", is_new_knowledge_key=True))
+    hid = memory.approve_pending_suggestion(
+        rdb, pid, actor="Bob", mode="new", knowledge_key="outbox_stuck",
+        symptom="edited symptom", context_notes="edited notes",
+        root_cause_pattern="edited root cause", fix_action="edited fix", conclusive=False)
+    knowledge = memory.get_knowledge_entry(rdb, "outbox_stuck")
+    assert knowledge is not None
+    assert knowledge["root_cause_pattern"] == "edited root cause"
+    assert knowledge["created_by"] == "Bob"
+    history = memory.get_history_entry(rdb, hid)
+    assert history["knowledge_key"] == "outbox_stuck"
+
+
+def test_approve_pending_suggestion_sets_status_and_actor(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="crashloop"))
+    pid = memory.store_pending_suggestion(rdb, _make_pending())
+    memory.approve_pending_suggestion(
+        rdb, pid, actor="Alice", mode="existing", knowledge_key="crashloop",
+        symptom="x", context_notes="")
+    entry = memory.get_pending_suggestion(rdb, pid)
+    assert entry["status"] == "approved"
+    assert entry["decided_by"] == "Alice"
+    assert entry["decided_at"] != ""
+
+
+def test_approve_pending_suggestion_does_not_delete_record(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="crashloop"))
+    pid = memory.store_pending_suggestion(rdb, _make_pending())
+    memory.approve_pending_suggestion(
+        rdb, pid, actor="Alice", mode="existing", knowledge_key="crashloop",
+        symptom="x", context_notes="")
+    assert rdb.sismember(memory.PENDING_INDEX, pid)
+    assert memory.get_pending_suggestion(rdb, pid) is not None
+
+
+def test_approve_pending_suggestion_missing_returns_none(rdb):
+    assert memory.approve_pending_suggestion(
+        rdb, "does-not-exist", actor="Alice", mode="existing",
+        knowledge_key="crashloop", symptom="x", context_notes="") is None
+
+
+def test_reject_pending_suggestion_sets_status_actor_and_reason(rdb):
+    pid = memory.store_pending_suggestion(rdb, _make_pending())
+    ok = memory.reject_pending_suggestion(rdb, pid, actor="Bob", decision_reason="not applicable")
+    assert ok is True
+    entry = memory.get_pending_suggestion(rdb, pid)
+    assert entry["status"] == "rejected"
+    assert entry["decided_by"] == "Bob"
+    assert entry["decision_reason"] == "not applicable"
+
+
+def test_reject_pending_suggestion_does_not_delete_record(rdb):
+    pid = memory.store_pending_suggestion(rdb, _make_pending())
+    memory.reject_pending_suggestion(rdb, pid, actor="Bob")
+    assert rdb.sismember(memory.PENDING_INDEX, pid)
+
+
+def test_reject_pending_suggestion_missing_returns_false(rdb):
+    assert memory.reject_pending_suggestion(rdb, "does-not-exist", actor="Bob") is False
+
+
 def test_store_incident_creates_hash(rdb):
     iid = memory.store_incident(rdb, _make_incident())
     assert rdb.hexists(f"incident:{iid}", "alert_name")

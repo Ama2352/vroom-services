@@ -277,6 +277,101 @@ def find_trusted_match(rdb: redis_lib.Redis, facts: dict, query: str) -> dict | 
     }
 
 
+PENDING_INDEX = "pending:index"
+
+
+def store_pending_suggestion(rdb: redis_lib.Redis, suggestion: dict) -> str:
+    pid = str(uuid.uuid4())
+    rdb.hset(f"pending:suggestion:{pid}", mapping={
+        "service":                suggestion.get("service", ""),
+        "symptom":                suggestion.get("symptom", ""),
+        "proposed_knowledge_key": suggestion.get("proposed_knowledge_key", ""),
+        "is_new_knowledge_key":   "true" if suggestion.get("is_new_knowledge_key") else "false",
+        "root_cause":             suggestion.get("root_cause", ""),
+        "fix_action":             suggestion.get("fix_action", ""),
+        "context_notes":          suggestion.get("context_notes", ""),
+        "source_incident_id":     suggestion.get("source_incident_id", ""),
+        "created_at":             str(int(time.time())),
+        "status":                 "pending",
+        "decided_by":             "",
+        "decided_at":             "",
+        "decision_reason":        "",
+    })
+    rdb.sadd(PENDING_INDEX, pid)
+    return pid
+
+
+def get_pending_suggestion(rdb: redis_lib.Redis, pid: str) -> dict | None:
+    raw = rdb.hgetall(f"pending:suggestion:{pid}")
+    if not raw:
+        return None
+    d = _hash_to_dict(raw)
+    d["id"] = pid
+    d["is_new_knowledge_key"] = _to_bool(d.get("is_new_knowledge_key"))
+    return d
+
+
+def list_pending_suggestions(rdb: redis_lib.Redis, status: str | None = None) -> list:
+    ids = rdb.smembers(PENDING_INDEX)
+    out = []
+    for i in ids:
+        i_str = i.decode() if isinstance(i, bytes) else i
+        s = get_pending_suggestion(rdb, i_str)
+        if s and (status is None or s.get("status") == status):
+            out.append(s)
+    return out
+
+
+def approve_pending_suggestion(rdb: redis_lib.Redis, pending_id: str, actor: str, mode: str,
+                                knowledge_key: str, symptom: str, context_notes: str,
+                                root_cause_pattern: str | None = None,
+                                fix_action: str | None = None,
+                                conclusive: bool = False) -> str | None:
+    suggestion = get_pending_suggestion(rdb, pending_id)
+    if suggestion is None:
+        return None
+
+    if mode == "new":
+        store_knowledge_entry(rdb, {
+            "key":                    knowledge_key,
+            "root_cause_pattern":     root_cause_pattern or "",
+            "fix_action":             fix_action or "",
+            "trigger_waiting_reason": "",
+            "conclusive":             conclusive,
+            "source":                 "learned",
+            "created_by":             actor,
+        })
+
+    hid = store_history_entry(rdb, {
+        "service":       suggestion.get("service", ""),
+        "knowledge_key": knowledge_key,
+        "symptom":       symptom,
+        "context_notes": context_notes,
+        "source":        "learned",
+        "created_by":    actor,
+    })
+
+    rdb.hset(f"pending:suggestion:{pending_id}", mapping={
+        "status":     "approved",
+        "decided_by": actor,
+        "decided_at": str(int(time.time())),
+    })
+    return hid
+
+
+def reject_pending_suggestion(rdb: redis_lib.Redis, pending_id: str, actor: str,
+                               decision_reason: str | None = None) -> bool:
+    if not rdb.exists(f"pending:suggestion:{pending_id}"):
+        return False
+    rdb.hset(f"pending:suggestion:{pending_id}", mapping={
+        "status":          "rejected",
+        "decided_by":      actor,
+        "decided_at":      str(int(time.time())),
+        "decision_reason": decision_reason or "",
+    })
+    return True
+
+
 def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
     iid = str(uuid.uuid4())
     rdb.hset(f"incident:{iid}", mapping={
