@@ -372,22 +372,127 @@ def reject_pending_suggestion(rdb: redis_lib.Redis, pending_id: str, actor: str,
     return True
 
 
-def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
+OPEN_INDEX = "incident:open_index"
+
+_INCIDENT_EVIDENCE_FIELDS = [
+    "pods_available", "pods_desired", "waiting_reason", "last_terminated_reason",
+    "restarts", "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
+    "log_error", "event_reason", "event_message", "event_object",
+]
+
+
+def _evidence_snapshot(occurrence: dict) -> dict:
+    return {f: occurrence.get(f, "") for f in _INCIDENT_EVIDENCE_FIELDS}
+
+
+def append_incident_timeline(rdb: redis_lib.Redis, iid: str, entry: dict) -> None:
+    rdb.rpush(f"incident:{iid}:timeline", json.dumps(entry))
+
+
+def get_incident_timeline(rdb: redis_lib.Redis, iid: str) -> list:
+    raw = rdb.lrange(f"incident:{iid}:timeline", 0, -1)
+    return [json.loads(r.decode() if isinstance(r, bytes) else r) for r in raw]
+
+
+def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
+    """U2: merge into a currently-open incident for the same (service, alert_name), or
+    create a new one. Evidence fields always reflect the latest occurrence; older
+    snapshots live only in the timeline."""
+    for oid in rdb.smembers(OPEN_INDEX):
+        oid_str  = oid.decode() if isinstance(oid, bytes) else oid
+        existing = get_incident(rdb, oid_str)
+        if (existing and existing.get("service") == occurrence["service"]
+                and existing.get("alert_name") == occurrence["alert_name"]):
+            mapping = {f: occurrence.get(f, "") for f in _INCIDENT_EVIDENCE_FIELDS}
+            mapping.update({
+                "root_cause":     occurrence.get("root_cause", ""),
+                "dev_action":     occurrence.get("dev_action", ""),
+                "kubectl_hint":   occurrence.get("kubectl_hint", ""),
+                "low_confidence": "true" if occurrence.get("low_confidence") else "false",
+            })
+            rdb.hset(f"incident:{oid_str}", mapping=mapping)
+            append_incident_timeline(rdb, oid_str, {
+                "type": "fired", "timestamp": int(time.time()),
+                "evidence_snapshot": _evidence_snapshot(occurrence),
+            })
+            return oid_str
+
     iid = str(uuid.uuid4())
-    rdb.hset(f"incident:{iid}", mapping={
-        "alert_name":     incident["alert_name"],
-        "service":        incident["service"],
-        "namespace":      incident.get("namespace", ""),
-        "symptoms":       incident.get("symptoms", ""),
-        "waiting_reason": incident.get("waiting_reason", ""),
-        "log_error":      incident.get("log_error", ""),
-        "root_cause":     incident.get("root_cause", ""),
-        "kubectl_hint":   incident.get("kubectl_hint", ""),
-        "outcome":        incident.get("outcome", "acknowledged"),
-        "timestamp":      str(int(time.time())),
-    })
+    mapping = {
+        "alert_name": occurrence["alert_name"],
+        "service":    occurrence["service"],
+        "namespace":  occurrence.get("namespace", ""),
+        "timestamp":  str(int(time.time())),
+        "root_cause":     occurrence.get("root_cause", ""),
+        "dev_action":     occurrence.get("dev_action", ""),
+        "kubectl_hint":   occurrence.get("kubectl_hint", ""),
+        "low_confidence": "true" if occurrence.get("low_confidence") else "false",
+        "status":       "open",
+        "resolved_at":  "",
+        "resolved_by":  "",
+    }
+    mapping.update(_evidence_snapshot(occurrence))
+    rdb.hset(f"incident:{iid}", mapping=mapping)
     rdb.sadd(INDEX_KEY, iid)
+    rdb.sadd(OPEN_INDEX, iid)
+    append_incident_timeline(rdb, iid, {
+        "type": "fired", "timestamp": int(time.time()),
+        "evidence_snapshot": _evidence_snapshot(occurrence),
+    })
     return iid
+
+
+def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
+    raw = rdb.hgetall(f"incident:{iid}")
+    if not raw:
+        return None
+    d = _hash_to_dict(raw)
+    d["id"] = iid
+    d["low_confidence"] = _to_bool(d.get("low_confidence"))
+    for f in ("pods_available", "pods_desired", "restarts", "init_restarts"):
+        d[f] = int(d.get(f) or 0)
+    return d
+
+
+def list_incidents(rdb: redis_lib.Redis, status: str | None = None) -> list:
+    out = []
+    for i in rdb.smembers(INDEX_KEY):
+        i_str = i.decode() if isinstance(i, bytes) else i
+        entry = get_incident(rdb, i_str)
+        if entry and (status is None or entry.get("status") == status):
+            out.append(entry)
+    return out
+
+
+def get_latest_incident(rdb: redis_lib.Redis) -> dict | None:
+    incidents = list_incidents(rdb)
+    if not incidents:
+        return None
+
+    def _last_activity(inc: dict) -> tuple:
+        timeline   = get_incident_timeline(rdb, inc["id"])
+        timestamps = [int(inc.get("timestamp") or 0)] + [e.get("timestamp", 0) for e in timeline]
+        # Timeline length is a tiebreaker for same-second timestamps (int(time.time())
+        # precision) — an incident with more entries has had more recent activity even
+        # when two occurrences land in the same wall-clock second.
+        return (max(timestamps), len(timeline))
+
+    return max(incidents, key=_last_activity)
+
+
+def resolve_incident(rdb: redis_lib.Redis, iid: str, actor: str) -> bool:
+    if not rdb.exists(f"incident:{iid}"):
+        return False
+    rdb.hset(f"incident:{iid}", mapping={
+        "status":      "resolved",
+        "resolved_at": str(int(time.time())),
+        "resolved_by": actor,
+    })
+    rdb.srem(OPEN_INDEX, iid)
+    append_incident_timeline(rdb, iid, {
+        "type": "resolved", "timestamp": int(time.time()), "actor": actor,
+    })
+    return True
 
 
 def _score_all(rdb: redis_lib.Redis, query: str) -> list:

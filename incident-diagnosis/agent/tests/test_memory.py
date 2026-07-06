@@ -34,17 +34,19 @@ def test_tokenize_splits_on_whitespace_and_slashes():
     assert memory._tokenize("dial tcp i/o timeout") == ["dial", "tcp", "i", "o", "timeout"]
 
 
-def _make_incident(**kwargs):
+def _make_occurrence(**kwargs):
     base = {
-        "alert_name":     "HighErrorRate",
-        "service":        "ride-service",
-        "namespace":      "vroom-dev",
-        "symptoms":       "rps=12.4 err=8.3% p99=1.2s loki_errors=47",
-        "waiting_reason": "",
-        "log_error":      "",
-        "root_cause":     "dispatch consumer stale cursor",
-        "kubectl_hint":   "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
-        "outcome":        "resolved",
+        "alert_name": "HighErrorRate",
+        "service": "ride-service",
+        "namespace": "vroom-dev",
+        "pods_available": 0, "pods_desired": 1,
+        "waiting_reason": "", "last_terminated_reason": "", "restarts": 0,
+        "init_waiting_reason": "", "init_last_terminated_reason": "", "init_restarts": 0,
+        "log_error": "", "event_reason": "", "event_message": "", "event_object": "",
+        "root_cause": "dispatch consumer stale cursor",
+        "dev_action": "restart the dispatch consumer",
+        "kubectl_hint": "kubectl rollout restart deployment/dispatch-service -n vroom-dev",
+        "low_confidence": False,
     }
     base.update(kwargs)
     return base
@@ -484,19 +486,20 @@ def test_reject_pending_suggestion_missing_returns_false(rdb):
     assert memory.reject_pending_suggestion(rdb, "does-not-exist", actor="Bob") is False
 
 
-def test_store_incident_creates_hash(rdb):
-    iid = memory.store_incident(rdb, _make_incident())
+def test_record_incident_occurrence_creates_hash(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
     assert rdb.hexists(f"incident:{iid}", "alert_name")
     assert rdb.sismember("incidents:index", iid)
+    assert rdb.sismember(memory.OPEN_INDEX, iid)
 
 
-def test_store_incident_does_not_write_embedding(rdb):
-    iid = memory.store_incident(rdb, _make_incident())
+def test_record_incident_occurrence_does_not_write_embedding(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
     assert rdb.hget(f"incident:{iid}", "embedding") is None
 
 
 def test_score_all_returns_score_and_item_tuple(rdb):
-    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="HighErrorRate", service="ride-service"))
     scored = memory._score_all(rdb, "HighErrorRate")
     assert len(scored) == 1
     score, item = scored[0]
@@ -506,11 +509,14 @@ def test_score_all_returns_score_and_item_tuple(rdb):
 
 
 def test_score_all_normalizes_relative_to_top_match(rdb):
-    memory.store_incident(rdb, _make_incident(
-        alert_name="KubePodNotReady", waiting_reason="CrashLoopBackOff",
+    # Distinct `service` values so U2's merge-or-create logic (same service + alert_name
+    # merges into one incident) doesn't collapse these into a single record — this test
+    # is about BM25 relative scoring, independent of the merge behavior.
+    memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="KubePodNotReady", service="ride-service", waiting_reason="CrashLoopBackOff",
         log_error="postgres timeout"))
-    memory.store_incident(rdb, _make_incident(
-        alert_name="KubePodNotReady", waiting_reason="OOMKilled",
+    memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="KubePodNotReady", service="dispatch-service", waiting_reason="OOMKilled",
         log_error="memory exceeded"))
     scored = memory._score_all(rdb, "KubePodNotReady CrashLoopBackOff postgres timeout")
     assert scored[0][0] == 1.0
@@ -518,7 +524,7 @@ def test_score_all_normalizes_relative_to_top_match(rdb):
 
 
 def test_score_all_excludes_zero_overlap_candidates(rdb):
-    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="HighErrorRate"))
     scored = memory._score_all(rdb, "completely unrelated query text xyz")
     assert scored == []
 
@@ -565,7 +571,7 @@ def test_diversify_keeps_different_waiting_reasons_separate():
 
 
 def test_search_memory_items_returns_score_and_fields(rdb):
-    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="HighErrorRate", service="ride-service"))
     items = memory.search_memory_items(rdb, "HighErrorRate ride-service")
     assert len(items) == 1
     assert items[0]["alert_name"] == "HighErrorRate"
@@ -579,7 +585,7 @@ def test_search_memory_items_empty_store_returns_empty_list(rdb):
 
 def test_search_memory_items_respects_limit(rdb):
     for i in range(5):
-        memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service=f"svc-{i}"))
+        memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="HighErrorRate", service=f"svc-{i}"))
     items = memory.search_memory_items(rdb, "HighErrorRate", limit=2)
     assert len(items) == 2
 
@@ -605,7 +611,7 @@ def test_format_incidents_shows_no_action_when_kubectl_hint_missing():
 
 
 def test_search_memory_empty_query_no_crash(rdb):
-    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="HighErrorRate"))
     result = memory.search_memory(rdb, "")
     assert result == "no relevant memory found"
 
@@ -619,10 +625,10 @@ def test_service_not_part_of_scored_text(rdb):
     # design it would still match on "ride"/"service" and survive the floor,
     # making `len(scored) == 1` the assertion that actually distinguishes the two
     # designs (checking only scored[0]'s identity can degrade to a coin-flip tie).
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="Unrelated", service="ride-service",
         waiting_reason="OOMKilled", log_error="memory limit exceeded"))
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="PodNotReady", service="dispatch-service",
         waiting_reason="CrashLoopBackOff", log_error="connection refused unreachable"))
 
@@ -637,7 +643,7 @@ def test_search_memory_returns_no_match_on_empty_store(rdb):
 
 
 def test_search_memory_returns_formatted_text(rdb):
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="HighErrorRate", service="ride-service",
         root_cause="dispatch consumer stale cursor",
     ))
@@ -648,13 +654,13 @@ def test_search_memory_returns_formatted_text(rdb):
 
 def test_search_memory_returns_no_match_for_unrelated_query(rdb):
     # Store an incident about an unrelated topic
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="OOMKilled", service="notification-service",
         symptoms="node memory pressure", root_cause="connection pool leak"
     ))
     # Add a few more incidents so the store isn't trivially small
     for i in range(4):
-        memory.store_incident(rdb, _make_incident(
+        memory.record_incident_occurrence(rdb, _make_occurrence(
             alert_name=f"Alert{i}", service="ride-service",
             symptoms="test symptom", root_cause=f"root cause {i}"
         ))
@@ -671,42 +677,42 @@ def test_search_memory_excludes_zero_overlap_candidates(rdb):
     # A genuinely unrelated incident must not appear in results — there is no
     # recency/outcome blend to let it "launder" through, and BM25 excludes
     # anything with zero shared tokens by construction (the floor, D4).
-    memory.store_incident(rdb, _make_incident(
-        alert_name="Unrelated", service="unrelated-service", outcome="acknowledged"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="Unrelated", service="unrelated-service"))
     result = memory.search_memory(rdb, "completely different query text")
     assert result == "no relevant memory found"
 
 
 def test_search_memory_output_includes_similarity_score(rdb):
-    memory.store_incident(rdb, _make_incident(alert_name="HighErrorRate", service="ride-service"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="HighErrorRate", service="ride-service"))
     result = memory.search_memory(rdb, "HighErrorRate ride-service")
     assert "(similarity:" in result
 
 
 def test_search_memory_shows_kubectl_hint(rdb):
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="HighErrorRate", service="ride-service",
         kubectl_hint="kubectl rollout restart deployment/ride-service -n vroom-dev"))
     result = memory.search_memory(rdb, "HighErrorRate ride-service")
     assert "kubectl rollout restart deployment/ride-service -n vroom-dev" in result
 
 
-def test_search_memory_does_not_show_outcome(rdb):
-    memory.store_incident(rdb, _make_incident(
-        alert_name="HighErrorRate", service="ride-service", outcome="acknowledged"))
+def test_search_memory_does_not_show_status_or_actor_fields(rdb):
+    memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="HighErrorRate", service="ride-service"))
     result = memory.search_memory(rdb, "HighErrorRate ride-service")
-    assert "acknowledged" not in result
+    assert "open" not in result
     assert "resolved" not in result
 
 
 def test_search_memory_diversifies_duplicate_signature(rdb):
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="HighErrorRate", service="ride-service",
         waiting_reason="CrashLoopBackOff", log_error="postgres timeout"))
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="HighErrorRate", service="ride-service",
         waiting_reason="CrashLoopBackOff", log_error="postgres timeout"))
-    memory.store_incident(rdb, _make_incident(
+    memory.record_incident_occurrence(rdb, _make_occurrence(
         alert_name="PodCrash", service="dispatch-service",
         waiting_reason="OOMKilled", log_error="memory exceeded"))
 
@@ -723,3 +729,127 @@ def test_old_runbook_and_dedup_functions_removed():
     assert not hasattr(memory, "dedupe_against_runbook")
     assert not hasattr(memory, "_is_same_lesson")
     assert not hasattr(memory, "RUNBOOK_INDEX")
+
+
+# ── Incident lifecycle (U2 merge-or-create) ───────────────────────────────────
+
+def test_record_incident_occurrence_creates_new_when_none_open(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
+    assert rdb.sismember("incidents:index", iid)
+    assert rdb.sismember(memory.OPEN_INDEX, iid)
+
+
+def test_record_incident_occurrence_merges_into_existing_open_incident(rdb):
+    iid1 = memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="HighErrorRate", service="ride-service", waiting_reason="CrashLoopBackOff"))
+    iid2 = memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="HighErrorRate", service="ride-service", waiting_reason="OOMKilled"))
+    assert iid1 == iid2
+    assert rdb.scard(memory.OPEN_INDEX) == 1
+    updated = memory.get_incident(rdb, iid1)
+    assert updated["waiting_reason"] == "OOMKilled"
+
+
+def test_record_incident_occurrence_does_not_merge_different_service(rdb):
+    iid1 = memory.record_incident_occurrence(rdb, _make_occurrence(service="ride-service"))
+    iid2 = memory.record_incident_occurrence(rdb, _make_occurrence(service="dispatch-service"))
+    assert iid1 != iid2
+
+
+def test_record_incident_occurrence_does_not_merge_different_alert_name(rdb):
+    iid1 = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="HighErrorRate"))
+    iid2 = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="PodCrash"))
+    assert iid1 != iid2
+
+
+def test_record_incident_occurrence_appends_fired_timeline_entry(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
+    timeline = memory.get_incident_timeline(rdb, iid)
+    assert len(timeline) == 1
+    assert timeline[0]["type"] == "fired"
+    assert "timestamp" in timeline[0]
+    assert "evidence_snapshot" in timeline[0]
+
+
+def test_record_incident_occurrence_second_fire_appends_second_timeline_entry(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A", service="ride"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A", service="ride"))
+    assert len(memory.get_incident_timeline(rdb, iid)) == 2
+
+
+def test_old_store_incident_removed():
+    assert not hasattr(memory, "store_incident")
+
+
+# ── Incident read-side + resolve ──────────────────────────────────────────────
+
+def test_get_incident_returns_none_when_missing(rdb):
+    assert memory.get_incident(rdb, "does-not-exist") is None
+
+
+def test_get_incident_includes_id_and_typed_fields(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence(pods_available=0, pods_desired=3))
+    incident = memory.get_incident(rdb, iid)
+    assert incident["id"] == iid
+    assert incident["pods_available"] == 0
+    assert incident["pods_desired"] == 3
+    assert incident["low_confidence"] is False
+    assert incident["status"] == "open"
+
+
+def test_list_incidents_filters_by_status(rdb):
+    iid_open     = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A"))
+    iid_resolved = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="B"))
+    memory.resolve_incident(rdb, iid_resolved, "Alice")
+    open_only     = memory.list_incidents(rdb, status="open")
+    resolved_only = memory.list_incidents(rdb, status="resolved")
+    assert [i["id"] for i in open_only]     == [iid_open]
+    assert [i["id"] for i in resolved_only] == [iid_resolved]
+
+
+def test_list_incidents_no_filter_returns_all(rdb):
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="B"))
+    assert len(memory.list_incidents(rdb)) == 2
+
+
+def test_get_latest_incident_returns_none_when_empty(rdb):
+    assert memory.get_latest_incident(rdb) is None
+
+
+def test_get_latest_incident_picks_most_recent_activity(rdb):
+    iid_a = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A", service="ride"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="B", service="dispatch"))
+    memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A", service="ride"))
+    latest = memory.get_latest_incident(rdb)
+    assert latest["id"] == iid_a
+
+
+def test_resolve_incident_sets_status_actor_and_removes_from_open_index(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
+    ok = memory.resolve_incident(rdb, iid, "Alice")
+    assert ok is True
+    incident = memory.get_incident(rdb, iid)
+    assert incident["status"] == "resolved"
+    assert incident["resolved_by"] == "Alice"
+    assert incident["resolved_at"] != ""
+    assert not rdb.sismember(memory.OPEN_INDEX, iid)
+
+
+def test_resolve_incident_appends_resolved_timeline_entry(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
+    memory.resolve_incident(rdb, iid, "Alice")
+    timeline = memory.get_incident_timeline(rdb, iid)
+    assert timeline[-1]["type"] == "resolved"
+    assert timeline[-1]["actor"] == "Alice"
+
+
+def test_resolve_incident_missing_returns_false(rdb):
+    assert memory.resolve_incident(rdb, "does-not-exist", "Alice") is False
+
+
+def test_resolve_incident_does_not_prevent_new_incident_for_same_alert(rdb):
+    iid1 = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A", service="ride"))
+    memory.resolve_incident(rdb, iid1, "Alice")
+    iid2 = memory.record_incident_occurrence(rdb, _make_occurrence(alert_name="A", service="ride"))
+    assert iid1 != iid2
