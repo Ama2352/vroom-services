@@ -12,79 +12,6 @@ DEFAULT_MODELS = [
 
 REFINE_TEMPERATURE = 0.4
 
-KNOWLEDGE_HEADER = "Kubernetes pod waiting reasons and their diagnostic signatures:"
-
-K8S_KNOWLEDGE_TABLE = {
-    "init_oom": (
-        "- PodInitializing + init_last_exit=OOMKilled: Init container was killed by the kernel OOM.\n"
-        "  This IS a conclusive root cause — do NOT say \"Insufficient evidence\". No logs exist after an\n"
-        "  OOM kill. root_cause: \"Init container OOMKilled — memory limit too low\".\n"
-        "  dev_action: increase the init container memory limit in the deployment manifest.\n"
-        "  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section)."
-    ),
-    "init_crashloop": (
-        "- PodInitializing + init=CrashLoopBackOff (no OOMKilled): Init container crashing repeatedly.\n"
-        "  Look for: missing Secret/ConfigMap, DB/Redis unreachable during init, bad entrypoint.\n"
-        "  Primary source: kubectl logs {pod} -n {namespace} -c {init-container-name} --previous."
-    ),
-    "crashloop": (
-        "- CrashLoopBackOff: Container started but exited with non-zero exit code, repeatedly.\n"
-        "  Look for: application crash on startup, missing required env var, OOM at startup,\n"
-        "  dependency (DB, Redis) unreachable. Primary source: previous container logs (--previous)."
-    ),
-    "oom": (
-        "- OOMKilled: Container exceeded its memory limit and was killed by the kernel.\n"
-        "  This IS a conclusive root cause — do NOT say \"Insufficient evidence\". No logs exist after\n"
-        "  an OOM kill. dev_action: increase memory limit in deployment manifest.\n"
-        "  kubectl_hint: kubectl describe pod {pod} -n {namespace} (shows Limits section)."
-    ),
-    "image_pull": (
-        "- ImagePullBackOff / ErrImagePull: Registry cannot pull the container image.\n"
-        "  Look for: typo in image name/tag, private registry credentials missing, image deleted.\n"
-        "  Primary source: K8s event message (names the exact image)."
-    ),
-    "config_error": (
-        "- CreateContainerConfigError: Pod spec references a Secret or ConfigMap that does not exist.\n"
-        "  The K8s event message names the missing resource explicitly."
-    ),
-    "failed_scheduling": (
-        "- Pending with FailedScheduling event: No node can schedule the pod.\n"
-        "  Look for: node selector mismatch, insufficient CPU/memory on all nodes, PodAffinity/Taint rules."
-    ),
-    "zero_replica": (
-        "- (empty waiting_reason, available=0, desired>0): Deployment has zero running replicas.\n"
-        "  Look for: explicit scale-to-zero, HPA scale-down, manual kubectl scale."
-    ),
-}
-
-
-def _select_knowledge_key(facts: dict) -> str | None:
-    if facts.get("waiting_reason") == "PodInitializing":
-        if facts.get("init_last_terminated_reason") == "OOMKilled":
-            return "init_oom"
-        if facts.get("init_waiting_reason") == "CrashLoopBackOff":
-            return "init_crashloop"
-    if facts.get("last_terminated_reason") == "OOMKilled":
-        return "oom"
-    if facts.get("waiting_reason") == "CrashLoopBackOff":
-        return "crashloop"
-    if facts.get("waiting_reason") in ("ImagePullBackOff", "ErrImagePull"):
-        return "image_pull"
-    if facts.get("waiting_reason") == "CreateContainerConfigError":
-        return "config_error"
-    if facts.get("event_reason") == "FailedScheduling":
-        return "failed_scheduling"
-    if (facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0
-            and not facts.get("waiting_reason")):
-        return "zero_replica"
-    return None
-
-
-def _render_knowledge(table: dict, key: str | None) -> str:
-    if key and key in table:
-        return f"{KNOWLEDGE_HEADER}\n{table[key]}"
-    return f"{KNOWLEDGE_HEADER}\n" + "\n".join(table.values())
-
 GROUNDING_RULE = """\
 GROUNDING RULE: You may ONLY assert claims directly supported by one or more of the \
 evidence fields listed above. Do not invent component names, service names, port numbers, \
@@ -94,22 +21,6 @@ If the evidence is insufficient to identify a specific root cause, set root_caus
 exactly: "Insufficient evidence: need [the specific data that would clarify this]"
 
 Do not guess. An honest sparse answer is more useful than a confident hallucination."""
-
-MEMORY_USAGE_EXAMPLE = """\
-Example — how to use past-incident/runbook similarity scores:
-
-Evidence: waiting_reason=CrashLoopBackOff, log_error="connection refused: postgres:5432"
-
-  Past incident: (similarity: 0.68) CrashLoopBackOff on ride
-    -> root cause: "DB connection refused, Postgres unreachable" -> outcome: resolved
-    -> Similarity is meaningful AND the symptom matches the Evidence (both point to DB
-       connection failure) -> USE this as supporting context for your root_cause.
-
-  Past incident: (similarity: 0.22) OOMKilled on dispatch
-    -> root cause: "memory limit too low"
-    -> Similarity is low AND the symptom does not match the Evidence (no OOM signal
-       present above) -> IGNORE this entirely. Do not mention memory limits just because
-       it was the top-ranked match."""
 
 GENERIC_ROOT_CAUSE = [
     "potential issue", "possible issue", "might be", "could be",
@@ -127,12 +38,8 @@ REQUIRED_KEYS = {"root_cause", "dev_action", "kubectl_hint"}
 
 def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
                             facts: dict, bundle: str, memory_context: str,
-                            pod: str, knowledge_table: dict | None = None) -> str:
-    table = knowledge_table or K8S_KNOWLEDGE_TABLE
-    key   = _select_knowledge_key(facts)
+                            pod: str) -> str:
     lines = [
-        _render_knowledge(table, key),
-        "",
         f"Alert: {alert_name}",
         f"Service: {service}",
         f"Namespace: {namespace}",
@@ -168,14 +75,12 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
     if memory_context:
         lines += [
             "",
-            f"Past similar incidents:\n{memory_context}",
+            "Trusted match from the knowledge base (human-approved — use as your basis):",
+            memory_context,
             "",
-            "Past-incident/runbook entries are reference only, not evidence. Only let "
-            "them inform your root_cause if the similarity score is meaningful AND the "
-            "symptom is consistent with the Evidence section above. If they don't match, "
-            "ignore them — do not copy their root_cause just because it ranked highest.",
-            "",
-            MEMORY_USAGE_EXAMPLE,
+            "This is a previously confirmed failure pattern whose K8s state matches the current "
+            "evidence. Use it as the basis for your root_cause and dev_action unless the Evidence "
+            "section above clearly contradicts it.",
         ]
     lines += [
         "",
@@ -334,11 +239,10 @@ def interpret(
     alert_name: str, service: str, namespace: str,
     facts: dict, bundle: str, memory_context: str,
     models: list, groq_key: str = "", openrouter_key: str = "",
-    pod: str = "", _llm=None, knowledge_table: dict | None = None,
+    pod: str = "", _llm=None,
 ) -> dict:
     prompt   = _build_grounded_prompt(alert_name, service, namespace,
-                                      facts, bundle, memory_context, pod,
-                                      knowledge_table)
+                                      facts, bundle, memory_context, pod)
     messages = [{"role": "user", "content": prompt}]
 
     # Phase 1 — Grounded Generation

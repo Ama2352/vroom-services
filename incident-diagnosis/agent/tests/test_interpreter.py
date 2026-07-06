@@ -4,8 +4,7 @@ import pytest
 from interpreter import (
     interpret, _parse_output, _fallback, _build_grounded_prompt,
     _quality_check, _build_refine_prompt, _is_grounded,
-    _select_knowledge_key, _render_knowledge,
-    K8S_KNOWLEDGE_TABLE, KNOWLEDGE_HEADER, GROUNDING_RULE, REQUIRED_KEYS, MEMORY_USAGE_EXAMPLE
+    GROUNDING_RULE, REQUIRED_KEYS,
 )
 
 SAMPLE_FACTS = {
@@ -88,21 +87,8 @@ class TestFallback:
 
 
 class TestBuildGroundedPrompt:
-    def test_custom_knowledge_table_replaces_constant(self):
-        custom = {"custom_reason": "- CustomReason: custom entry for testing."}
-        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev",
-                                         SAMPLE_FACTS, "", "", "", custom)
-        assert "CustomReason: custom entry for testing." in prompt
-        assert "CrashLoopBackOff: Container started" not in prompt
-
-    def test_empty_knowledge_table_falls_back_to_constant(self):
-        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev",
-                                         SAMPLE_FACTS, "", "", "", {})
-        assert "CrashLoopBackOff: Container started" in prompt
-
     def test_grounding_constraint_in_prompt(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
-        assert "CrashLoopBackOff: Container started" in prompt
         assert GROUNDING_RULE in prompt
 
     def test_pod_name_in_prompt_when_provided(self):
@@ -141,92 +127,24 @@ class TestBuildGroundedPrompt:
                                         "[1] past incident → root cause: postgres unreachable", "")
         assert "past incident" in prompt
 
-    def test_includes_memory_usage_example_when_context_present(self):
+    def test_includes_trusted_match_framing_when_context_present(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
-                                        "[1] (similarity: 0.71) past incident → root cause: postgres unreachable", "")
-        assert MEMORY_USAGE_EXAMPLE in prompt
+                                        "Known failure pattern: postgres unreachable", "")
+        assert "Trusted match from the knowledge base" in prompt
 
-    def test_includes_reference_only_instruction_when_context_present(self):
+    def test_includes_trusted_match_usage_instruction_when_context_present(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
-                                        "[1] (similarity: 0.71) past incident → root cause: postgres unreachable", "")
-        assert "reference only" in prompt
+                                        "Known failure pattern: postgres unreachable", "")
+        assert "use it as the basis for your root_cause" in prompt.lower()
 
-    def test_omits_memory_usage_example_when_no_context(self):
+    def test_omits_trusted_match_framing_when_no_context(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
-        assert MEMORY_USAGE_EXAMPLE not in prompt
+        assert "Trusted match from the knowledge base" not in prompt
 
     def test_ends_with_json_instruction(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
         assert "root_cause" in prompt
         assert "kubectl_hint" in prompt
-
-
-class TestSelectKnowledgeKey:
-    def test_init_oom(self):
-        facts = {"waiting_reason": "PodInitializing", "init_last_terminated_reason": "OOMKilled"}
-        assert _select_knowledge_key(facts) == "init_oom"
-
-    def test_init_crashloop(self):
-        facts = {"waiting_reason": "PodInitializing", "init_waiting_reason": "CrashLoopBackOff"}
-        assert _select_knowledge_key(facts) == "init_crashloop"
-
-    def test_crashloop(self):
-        assert _select_knowledge_key({"waiting_reason": "CrashLoopBackOff"}) == "crashloop"
-
-    def test_oom_takes_priority_over_crashloop_when_both_present(self):
-        # Regression: a repeatedly OOM-killed container shows waiting_reason=CrashLoopBackOff
-        # AND last_terminated_reason=OOMKilled simultaneously in steady state — this is the
-        # common real-world pattern after AlertManager's `for:` window elapses. OOM must win
-        # since it's the conclusive root cause; CrashLoopBackOff alone is not.
-        facts = {"waiting_reason": "CrashLoopBackOff", "last_terminated_reason": "OOMKilled"}
-        assert _select_knowledge_key(facts) == "oom"
-
-    def test_oom(self):
-        facts = {"waiting_reason": "", "last_terminated_reason": "OOMKilled"}
-        assert _select_knowledge_key(facts) == "oom"
-
-    def test_image_pull(self):
-        assert _select_knowledge_key({"waiting_reason": "ImagePullBackOff"}) == "image_pull"
-        assert _select_knowledge_key({"waiting_reason": "ErrImagePull"})    == "image_pull"
-
-    def test_config_error(self):
-        facts = {"waiting_reason": "CreateContainerConfigError"}
-        assert _select_knowledge_key(facts) == "config_error"
-
-    def test_failed_scheduling(self):
-        facts = {"waiting_reason": "", "event_reason": "FailedScheduling"}
-        assert _select_knowledge_key(facts) == "failed_scheduling"
-
-    def test_zero_replica(self):
-        facts = {"waiting_reason": "", "pods_available": 0, "pods_desired": 3}
-        assert _select_knowledge_key(facts) == "zero_replica"
-
-    def test_returns_none_when_no_match(self):
-        facts = {"waiting_reason": "", "pods_available": 1, "pods_desired": 1}
-        assert _select_knowledge_key(facts) is None
-
-
-class TestRenderKnowledge:
-    def test_returns_single_entry_when_key_matches(self):
-        table = {"crashloop": "- CrashLoopBackOff: text.", "oom": "- OOMKilled: text."}
-        rendered = _render_knowledge(table, "crashloop")
-        assert "CrashLoopBackOff" in rendered
-        assert "OOMKilled" not in rendered
-
-    def test_returns_full_table_when_key_is_none(self):
-        table = {"crashloop": "- CrashLoopBackOff: text.", "oom": "- OOMKilled: text."}
-        rendered = _render_knowledge(table, None)
-        assert "CrashLoopBackOff" in rendered
-        assert "OOMKilled" in rendered
-
-    def test_falls_back_when_key_missing_from_custom_table(self):
-        table = {"custom_reason": "- CustomReason: text."}
-        rendered = _render_knowledge(table, "crashloop")
-        assert "CustomReason" in rendered
-
-    def test_includes_header(self):
-        rendered = _render_knowledge({"crashloop": "- CrashLoopBackOff: text."}, "crashloop")
-        assert rendered.startswith(KNOWLEDGE_HEADER)
 
 
 class TestQualityCheck:
@@ -311,18 +229,6 @@ class TestIsGrounded:
 
 
 class TestInterpret:
-    def test_custom_knowledge_table_passed_through(self):
-        captured = {}
-        def capturing_llm(msgs, key):
-            captured["prompt"] = msgs[0]["content"]
-            return VALID_JSON
-        custom = {"custom_reason": "- CustomEntry: my custom knowledge."}
-        interpret("KubePodNotReady", "ride", "vroom-dev",
-                  SAMPLE_FACTS, "", "", [], _llm=capturing_llm,
-                  knowledge_table=custom)
-        assert "CustomEntry: my custom knowledge." in captured["prompt"]
-        assert "CrashLoopBackOff: Container started" not in captured["prompt"]
-
     def test_valid_llm_output_returned(self):
         result = interpret(
             "KubePodNotReady", "ride", "vroom-dev",
