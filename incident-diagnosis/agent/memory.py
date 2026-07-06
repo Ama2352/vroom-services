@@ -443,82 +443,6 @@ def _diversify(scored: list, top_k: int) -> list:
     return picked
 
 
-RUNBOOK_INDEX = "runbook:index"
-
-
-def store_runbook_entry(rdb: redis_lib.Redis, entry: dict) -> str:
-    eid = str(uuid.uuid4())
-    rdb.hset(f"runbook:entry:{eid}", mapping={
-        "title":       entry.get("title", ""),
-        "service":     entry.get("service", ""),
-        "symptom":     entry.get("symptom", ""),
-        "root_cause":  entry.get("root_cause", ""),
-        "fix_command": entry.get("fix_command", ""),
-        "source":      entry.get("source", "learned"),
-        "timestamp":   str(int(time.time())),
-    })
-    rdb.sadd(RUNBOOK_INDEX, eid)
-    return eid
-
-
-def get_runbook_entries(rdb: redis_lib.Redis, limit: int = 100) -> list:
-    keys = list(rdb.smembers(RUNBOOK_INDEX))
-    entries = []
-    for key in keys:
-        key_str = key.decode() if isinstance(key, bytes) else key
-        raw = rdb.hgetall(f"runbook:entry:{key_str}")
-        if not raw:
-            continue
-        entries.append({
-            (k.decode() if isinstance(k, bytes) else k):
-            (v.decode() if isinstance(v, bytes) else v)
-            for k, v in raw.items()
-        })
-    entries.sort(key=lambda x: int(x.get("timestamp", 0)))
-    return entries[:limit]
-
-
-def search_runbook(rdb: redis_lib.Redis, query: str, top_k: int = 3) -> list:
-    keys = rdb.smembers(RUNBOOK_INDEX)
-    if not keys:
-        return []
-
-    items, corpus_tokens = [], []
-    for key in keys:
-        key_str = key.decode() if isinstance(key, bytes) else key
-        raw = rdb.hgetall(f"runbook:entry:{key_str}")
-        if not raw:
-            continue
-        text = f"{_get_field(raw, 'title')} {_get_field(raw, 'symptom')}"
-        corpus_tokens.append(_tokenize(text))
-        items.append({
-            "title":       _get_field(raw, "title"),
-            "service":     _get_field(raw, "service"),
-            "symptom":     _get_field(raw, "symptom"),
-            "root_cause":  _get_field(raw, "root_cause"),
-            "fix_command": _get_field(raw, "fix_command"),
-            "source":      _get_field(raw, "source"),
-        })
-
-    if not corpus_tokens:
-        return []
-
-    bm25       = _BM25(corpus_tokens)
-    raw_scores = bm25.get_scores(_tokenize(query))
-    max_score  = max(raw_scores)          # corpus_tokens non-empty here, so raw_scores is too
-    if max_score <= 0:
-        return []
-
-    scored = []
-    for s, item in zip(raw_scores, items):
-        if s <= 0:
-            continue
-        item["score"] = s / max_score
-        scored.append((item["score"], item))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [item for _, item in scored[:top_k]]
-
-
 def search_memory_items(rdb: redis_lib.Redis, query: str, limit: int = 3) -> list:
     scored = _score_all(rdb, query)
     if not scored:
@@ -545,22 +469,3 @@ def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
     return format_incidents(items)
 
 
-_ROOT_CAUSE_OVERLAP_THRESHOLD = 0.6
-
-
-def _is_same_lesson(incident_item: dict, runbook_item: dict) -> bool:
-    if incident_item.get("service", "").strip().lower() != runbook_item.get("service", "").strip().lower():
-        return False
-    tokens_a = set(_tokenize(incident_item.get("root_cause", "")))
-    tokens_b = set(_tokenize(runbook_item.get("root_cause", "")))
-    if not tokens_a or not tokens_b:
-        return False
-    overlap = len(tokens_a & tokens_b) / min(len(tokens_a), len(tokens_b))
-    return overlap >= _ROOT_CAUSE_OVERLAP_THRESHOLD
-
-
-def dedupe_against_runbook(incident_items: list, runbook_hits: list) -> list:
-    return [
-        inc for inc in incident_items
-        if not any(_is_same_lesson(inc, rb) for rb in runbook_hits)
-    ]
