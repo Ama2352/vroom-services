@@ -232,6 +232,131 @@ def test_delete_history_entry_missing_returns_false(rdb):
     assert memory.delete_history_entry(rdb, "does-not-exist") is False
 
 
+# ── D4 trusted-match algorithm ────────────────────────────────────────────────
+
+def test_derive_reason_signal_prefers_init_terminated_over_everything():
+    facts = {"waiting_reason": "CrashLoopBackOff", "init_last_terminated_reason": "OOMKilled"}
+    assert memory._derive_reason_signal(facts) == "Init:OOMKilled"
+
+
+def test_derive_reason_signal_init_waiting():
+    facts = {"waiting_reason": "PodInitializing", "init_waiting_reason": "CrashLoopBackOff"}
+    assert memory._derive_reason_signal(facts) == "Init:CrashLoopBackOff"
+
+
+def test_derive_reason_signal_last_terminated_over_waiting():
+    facts = {"waiting_reason": "CrashLoopBackOff", "last_terminated_reason": "OOMKilled"}
+    assert memory._derive_reason_signal(facts) == "OOMKilled"
+
+
+def test_derive_reason_signal_plain_waiting_reason():
+    assert memory._derive_reason_signal({"waiting_reason": "CrashLoopBackOff"}) == "CrashLoopBackOff"
+
+
+def test_derive_reason_signal_canonicalizes_err_image_pull():
+    assert memory._derive_reason_signal({"waiting_reason": "ErrImagePull"}) == "ImagePullBackOff"
+
+
+def test_derive_reason_signal_event_reason_fallback():
+    facts = {"waiting_reason": "", "event_reason": "FailedScheduling"}
+    assert memory._derive_reason_signal(facts) == "FailedScheduling"
+
+
+def test_derive_reason_signal_zero_replicas():
+    facts = {"waiting_reason": "", "pods_available": 0, "pods_desired": 3}
+    assert memory._derive_reason_signal(facts) == "ZeroReplicas"
+
+
+def test_derive_reason_signal_empty_when_nothing_matches():
+    facts = {"waiting_reason": "", "pods_available": 1, "pods_desired": 1}
+    assert memory._derive_reason_signal(facts) == ""
+
+
+def test_token_coverage_full_overlap():
+    assert memory._token_coverage("oom killed pod", "oom killed pod details") == 1.0
+
+
+def test_token_coverage_partial_overlap():
+    score = memory._token_coverage("oom killed pod", "oom something else")
+    assert 0.0 < score < 1.0
+
+
+def test_token_coverage_zero_overlap():
+    assert memory._token_coverage("oom killed pod", "completely unrelated text") == 0.0
+
+
+def test_token_coverage_empty_query_returns_zero():
+    assert memory._token_coverage("", "anything") == 0.0
+
+
+def test_find_trusted_match_conclusive_short_circuit(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(
+        key="oom", trigger_waiting_reason="OOMKilled", conclusive=True))
+    facts = {"waiting_reason": "", "last_terminated_reason": "OOMKilled",
+             "pods_available": 0, "pods_desired": 1}
+    match = memory.find_trusted_match(rdb, facts, "SomeAlert OOMKilled")
+    assert match["source"] == "knowledge"
+    assert match["knowledge_key"] == "oom"
+    assert match["context_notes"] == ""
+
+
+def test_find_trusted_match_non_conclusive_does_not_short_circuit_without_pool_survivor(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(
+        key="crashloop", trigger_waiting_reason="CrashLoopBackOff", conclusive=False,
+        root_cause_pattern="generic crashloop text unrelated to query"))
+    facts = {"waiting_reason": "CrashLoopBackOff", "pods_available": 0, "pods_desired": 1}
+    match = memory.find_trusted_match(rdb, facts, "totally different words here")
+    assert match is None
+
+
+def test_find_trusted_match_non_conclusive_knowledge_wins_pool_when_scored_high(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(
+        key="crashloop", trigger_waiting_reason="CrashLoopBackOff", conclusive=False,
+        root_cause_pattern="postgres unreachable connection refused"))
+    facts = {"waiting_reason": "CrashLoopBackOff", "pods_available": 0, "pods_desired": 1}
+    match = memory.find_trusted_match(rdb, facts, "CrashLoopBackOff postgres unreachable connection refused")
+    assert match["source"] == "knowledge"
+    assert match["knowledge_key"] == "crashloop"
+
+
+def test_find_trusted_match_history_entry_resolves_parent_knowledge(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(
+        key="crashloop", trigger_waiting_reason="CrashLoopBackOff", conclusive=False,
+        root_cause_pattern="generic crashloop", fix_action="generic fix"))
+    memory.store_history_entry(rdb, _make_history(
+        knowledge_key="crashloop", symptom="ride-service DB connection refused postgres unreachable"))
+    facts = {"waiting_reason": "CrashLoopBackOff", "pods_available": 0, "pods_desired": 1}
+    match = memory.find_trusted_match(rdb, facts, "DB connection refused postgres unreachable")
+    assert match["source"] == "history"
+    assert match["knowledge_key"] == "crashloop"
+    assert match["root_cause_pattern"] == "generic crashloop"
+    assert match["context_notes"] == "happened after batch job added, limit was 256Mi"
+
+
+def test_find_trusted_match_history_competes_even_without_signal(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="outbox_stuck", trigger_waiting_reason="",
+                                                        conclusive=False, root_cause_pattern="outbox worker stalled"))
+    memory.store_history_entry(rdb, _make_history(
+        knowledge_key="outbox_stuck", symptom="ride-service outbox events not draining redis stream"))
+    facts = {"waiting_reason": "", "pods_available": 1, "pods_desired": 1}
+    match = memory.find_trusted_match(rdb, facts, "outbox events not draining redis stream")
+    assert match is not None
+    assert match["knowledge_key"] == "outbox_stuck"
+
+
+def test_find_trusted_match_below_threshold_returns_none(rdb):
+    memory.store_history_entry(rdb, _make_history(knowledge_key="oom", symptom="one two three four five"))
+    memory.store_knowledge_entry(rdb, _make_knowledge(key="oom"))
+    facts = {"waiting_reason": "", "pods_available": 1, "pods_desired": 1}
+    match = memory.find_trusted_match(rdb, facts, "one six seven eight nine ten")
+    assert match is None
+
+
+def test_find_trusted_match_empty_store_returns_none(rdb):
+    facts = {"waiting_reason": "OOMKilled", "pods_available": 0, "pods_desired": 1}
+    assert memory.find_trusted_match(rdb, facts, "OOMKilled") is None
+
+
 def test_store_incident_creates_hash(rdb):
     iid = memory.store_incident(rdb, _make_incident())
     assert rdb.hexists(f"incident:{iid}", "alert_name")

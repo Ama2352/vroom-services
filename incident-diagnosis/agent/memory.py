@@ -191,6 +191,92 @@ def delete_history_entry(rdb: redis_lib.Redis, hid: str) -> bool:
     return True
 
 
+KNOWLEDGE_MATCH_THRESHOLD = 0.5
+
+
+def _derive_reason_signal(facts: dict) -> str:
+    """Normalize the many facts fields that can indicate a K8s failure state into one
+    comparable string. Priority order favors the most specific signal (an init-container
+    failure is more precise than the generic 'PodInitializing' state it also produces on
+    the main container). See D4 in the knowledge/history redesign spec."""
+    if facts.get("init_last_terminated_reason"):
+        return f"Init:{facts['init_last_terminated_reason']}"
+    if facts.get("init_waiting_reason"):
+        return f"Init:{facts['init_waiting_reason']}"
+    if facts.get("last_terminated_reason"):
+        return facts["last_terminated_reason"]
+    if facts.get("waiting_reason"):
+        wr = facts["waiting_reason"]
+        return "ImagePullBackOff" if wr == "ErrImagePull" else wr
+    if facts.get("event_reason"):
+        return facts["event_reason"]
+    if facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0:
+        return "ZeroReplicas"
+    return ""
+
+
+def _token_coverage(query: str, text: str) -> float:
+    q_tokens = set(_tokenize(query))
+    if not q_tokens:
+        return 0.0
+    t_tokens = set(_tokenize(text))
+    return len(q_tokens & t_tokens) / len(q_tokens)
+
+
+def find_trusted_match(rdb: redis_lib.Redis, facts: dict, query: str) -> dict | None:
+    signal            = _derive_reason_signal(facts)
+    knowledge_entries = list_knowledge_entries(rdb)
+
+    # Step 1 — deterministic short-circuit (exact-match, conclusive only)
+    if signal:
+        for entry in knowledge_entries:
+            if entry.get("trigger_waiting_reason") == signal and entry.get("conclusive"):
+                return {
+                    "source":             "knowledge",
+                    "knowledge_key":      entry["key"],
+                    "root_cause_pattern": entry["root_cause_pattern"],
+                    "fix_action":         entry["fix_action"],
+                    "context_notes":      "",
+                }
+
+    # Step 2 — combined candidate pool
+    candidates = []
+    for h in list_all_history_entries(rdb):
+        candidates.append((_token_coverage(query, h.get("symptom", "")), "history", h))
+    if signal:
+        for entry in knowledge_entries:
+            if entry.get("trigger_waiting_reason") == signal and not entry.get("conclusive"):
+                candidates.append(
+                    (_token_coverage(query, entry.get("root_cause_pattern", "")), "knowledge", entry))
+
+    # Step 3 — threshold floor
+    candidates = [c for c in candidates if c[0] >= KNOWLEDGE_MATCH_THRESHOLD]
+    if not candidates:
+        return None
+
+    # Step 4 — resolve highest scorer
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    _, kind, obj = candidates[0]
+    if kind == "history":
+        k = get_knowledge_entry(rdb, obj["knowledge_key"])
+        if not k:
+            return None
+        return {
+            "source":             "history",
+            "knowledge_key":      obj["knowledge_key"],
+            "root_cause_pattern": k["root_cause_pattern"],
+            "fix_action":         k["fix_action"],
+            "context_notes":      obj.get("context_notes", ""),
+        }
+    return {
+        "source":             "knowledge",
+        "knowledge_key":      obj["key"],
+        "root_cause_pattern": obj["root_cause_pattern"],
+        "fix_action":         obj["fix_action"],
+        "context_notes":      "",
+    }
+
+
 def store_incident(rdb: redis_lib.Redis, incident: dict) -> str:
     iid = str(uuid.uuid4())
     rdb.hset(f"incident:{iid}", mapping={
