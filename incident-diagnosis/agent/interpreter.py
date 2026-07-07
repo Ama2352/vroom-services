@@ -17,8 +17,11 @@ GROUNDING RULE: You may ONLY assert claims directly supported by one or more of 
 evidence fields listed above. Do not invent component names, service names, port numbers, \
 error messages, or failure causes that are not present in the evidence.
 
-If the evidence is insufficient to identify a specific root cause, set root_cause to \
-exactly: "Insufficient evidence: need [the specific data that would clarify this]"
+If the evidence is insufficient to identify a definitive root cause, root_cause must still \
+restate the specific observed symptom, in exactly this form: "Insufficient evidence to \
+confirm — observed: [exact detail from the evidence, e.g. hostname/port/error text]. Need \
+[specific additional data]." Never ask for information that is already present in the \
+evidence above.
 
 Do not guess. An honest sparse answer is more useful than a confident hallucination."""
 
@@ -125,8 +128,15 @@ def _quality_check(diagnosis: dict, facts: dict, pod: str, service: str) -> dict
         )
 
     if rc.startswith("insufficient evidence"):
-        # Honest low-confidence response — skip language checks, but still
-        # surface any placeholder issue found above so refine can fix it.
+        # Honest low-confidence response — skip the phrase-blacklist/dev_action
+        # checks below, but it must still cite the specific evidence it's hedging
+        # about (placeholder issue found above, if any, also still applies).
+        if not _is_grounded(rc, facts):
+            issues.append(
+                "even when uncertain, root_cause must restate the specific observed symptom "
+                "from the evidence (exact error text, hostname, or port) — do not just ask "
+                "for information that is already present in the evidence above"
+            )
         return {"passed": len(issues) == 0, "low_confidence": True, "issues": issues}
 
     if not _is_grounded(rc, facts):

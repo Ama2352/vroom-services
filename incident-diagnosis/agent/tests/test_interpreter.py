@@ -191,6 +191,25 @@ class TestQualityCheck:
         assert r["low_confidence"] is True
         assert r["issues"] == []
 
+    def test_insufficient_evidence_without_grounding_now_fails(self):
+        # Regression for the live bad-host/connection-refused cases: a hedge that
+        # shares no token with the evidence is no longer accepted as-is — it must
+        # trigger self-refine to restate the specific observed symptom.
+        d = self._clean()
+        d["root_cause"] = "Insufficient evidence: need more information"
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert r["low_confidence"] is True
+        assert any("restate the specific observed symptom" in issue for issue in r["issues"])
+
+    def test_insufficient_evidence_with_grounding_still_passes(self):
+        d = self._clean()
+        d["root_cause"] = "Insufficient evidence to confirm — observed: i/o timeout. Need init container logs."
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is True
+        assert r["low_confidence"] is True
+        assert r["issues"] == []
+
     def test_insufficient_evidence_with_placeholder_still_fails(self):
         # Bug regression: early return on "insufficient evidence" was skipping
         # the placeholder check, so <pod_name> would slip through undetected.
