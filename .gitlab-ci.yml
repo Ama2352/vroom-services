@@ -63,3 +63,13 @@ build-push-kubectl-executor:
     - if: $CI_COMMIT_BRANCH == "main"
       changes: [incident-diagnosis/kubectl-executor/**/*]
     - if: $CI_PIPELINE_SOURCE == "web"
+
+build-push-incident-dashboard:
+  extends: .build_push_template
+  variables:
+    SERVICE_NAME: incident-dashboard
+    SERVICE_PATH: incident-diagnosis/dashboard
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [incident-diagnosis/dashboard/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
