@@ -1,5 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
-import NavBar from './components/NavBar.jsx'
+import Sidebar from './components/Sidebar.jsx'
 import LivePage from './pages/LivePage.jsx'
 import IncidentsPage from './pages/IncidentsPage.jsx'
 import IncidentDetailPage from './pages/IncidentDetailPage.jsx'
@@ -10,9 +10,9 @@ import KnowledgeDetailPage from './pages/KnowledgeDetailPage.jsx'
 
 export default function App() {
   return (
-    <div className="app">
-      <NavBar />
-      <main className="content">
+    <div className="app-shell">
+      <Sidebar />
+      <main className="main-content">
         <Routes>
           <Route path="/" element={<LivePage />} />
           <Route path="/incidents" element={<IncidentsPage />} />
