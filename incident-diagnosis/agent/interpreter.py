@@ -73,6 +73,24 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
             f"  Last K8s event: {facts['event_reason']} on "
             f"{facts.get('event_object', '?')} — {facts.get('event_message', '')}"
         )
+    if facts.get("template_diff"):
+        td = facts["template_diff"]
+        if td.get("env_changed"):
+            diffs = "; ".join(
+                f"{d['key']}: {d['old_value']} → {d['new_value']}" for d in td["env_diff"]
+            )
+            lines.append(f"  Recent change: env changed — {diffs}")
+        elif td.get("image_changed"):
+            lines.append(f"  Recent change: image changed from {td['old_image']} to {td['new_image']}")
+    if facts.get("dependency"):
+        dep = facts["dependency"]
+        dep_line = (
+            f"  Dependency {dep['name']}.{dep['namespace']}: "
+            f"{dep['pods_available']}/{dep['pods_desired']} pods running"
+        )
+        if dep.get("waiting_reason"):
+            dep_line += f" ({dep['waiting_reason']})"
+        lines.append(dep_line)
     if bundle:
         lines.append(f"  Service metrics (5 min): {bundle}")
     if memory_context:
@@ -104,8 +122,19 @@ def _tokenize_for_grounding(text: str) -> set:
 
 
 def _is_grounded(root_cause: str, facts: dict) -> bool:
-    evidence_text = " ".join(s for s in (facts.get("log_error", ""), facts.get("event_message", ""))
-                              if s)
+    evidence_parts = [facts.get("log_error", ""), facts.get("event_message", "")]
+    td = facts.get("template_diff")
+    if td:
+        for d in td.get("env_diff", []):
+            evidence_parts.append(d.get("old_value", ""))
+            evidence_parts.append(d.get("new_value", ""))
+        evidence_parts.append(td.get("old_image", ""))
+        evidence_parts.append(td.get("new_image", ""))
+    dep = facts.get("dependency")
+    if dep and dep.get("name"):
+        evidence_parts.append(dep["name"])
+
+    evidence_text = " ".join(s for s in evidence_parts if s)
     if not evidence_text:
         return True
     evidence_tokens = _tokenize_for_grounding(evidence_text)

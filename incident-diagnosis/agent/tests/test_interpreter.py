@@ -146,6 +146,45 @@ class TestBuildGroundedPrompt:
         assert "root_cause" in prompt
         assert "kubectl_hint" in prompt
 
+    def test_includes_template_diff_env_change(self):
+        facts = {**SAMPLE_FACTS, "template_diff": {
+            "image_changed": False, "old_image": "", "new_image": "",
+            "env_changed": True,
+            "env_diff": [{"key": "REDIS_ADDR", "old_value": "redis:6379", "new_value": "bad-host:6379"}],
+            "changed_at": "2026-07-07T02:00:00Z",
+        }}
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", facts, "", "", "")
+        assert "REDIS_ADDR" in prompt
+        assert "bad-host:6379" in prompt
+
+    def test_includes_template_diff_image_change(self):
+        facts = {**SAMPLE_FACTS, "template_diff": {
+            "image_changed": True, "old_image": "img:v1", "new_image": "img:v2",
+            "env_changed": False, "env_diff": [], "changed_at": "2026-07-07T02:00:00Z",
+        }}
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", facts, "", "", "")
+        assert "img:v1" in prompt
+        assert "img:v2" in prompt
+
+    def test_omits_template_diff_when_absent(self):
+        facts = {**SAMPLE_FACTS, "template_diff": None}
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", facts, "", "", "")
+        assert "Recent change" not in prompt
+
+    def test_includes_dependency(self):
+        facts = {**SAMPLE_FACTS, "dependency": {
+            "name": "postgres", "namespace": "platform",
+            "pods_available": 0, "pods_desired": 1, "waiting_reason": "",
+        }}
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", facts, "", "", "")
+        assert "postgres" in prompt
+        assert "platform" in prompt
+
+    def test_omits_dependency_when_absent(self):
+        facts = {**SAMPLE_FACTS, "dependency": None}
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", facts, "", "", "")
+        assert "Dependency" not in prompt
+
 
 class TestQualityCheck:
     def _clean(self):
@@ -245,6 +284,22 @@ class TestIsGrounded:
 
     def test_passes_on_overlapping_root_cause(self):
         assert _is_grounded("Database connection timeout during startup", SAMPLE_FACTS) is True
+
+    def test_grounded_via_template_diff_env_value(self):
+        facts = {**SAMPLE_FACTS, "log_error": "", "event_message": "", "template_diff": {
+            "image_changed": False, "old_image": "", "new_image": "",
+            "env_changed": True,
+            "env_diff": [{"key": "REDIS_ADDR", "old_value": "redis:6379", "new_value": "bad-host:6379"}],
+            "changed_at": "2026-07-07T02:00:00Z",
+        }}
+        assert _is_grounded("REDIS_ADDR was changed to bad-host:6379", facts) is True
+
+    def test_grounded_via_dependency_name(self):
+        facts = {**SAMPLE_FACTS, "log_error": "", "event_message": "", "dependency": {
+            "name": "postgres", "namespace": "platform",
+            "pods_available": 0, "pods_desired": 1, "waiting_reason": "",
+        }}
+        assert _is_grounded("postgres is unreachable", facts) is True
 
 
 class TestInterpret:
