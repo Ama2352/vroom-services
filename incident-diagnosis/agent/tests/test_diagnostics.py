@@ -2,7 +2,8 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from unittest.mock import patch, MagicMock
-from diagnostics import collect_diagnostics, format_evidence, collect_change_evidence
+from diagnostics import (collect_diagnostics, format_evidence,
+                          collect_change_evidence, resolve_dependency)
 
 
 def _prom_scalar(value):
@@ -109,6 +110,66 @@ class TestCollectChangeEvidence:
     def test_returns_none_on_exception(self, mock_get):
         mock_get.side_effect = Exception("connection refused")
         assert collect_change_evidence("ride", "vroom-dev") is None
+
+
+class TestResolveDependency:
+    def test_returns_none_when_no_ip_in_text(self):
+        assert resolve_dependency("dial tcp: lookup bad-host: no such host", "") is None
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_when_ip_present_but_unresolved(self, mock_get):
+        def side(url, **kw):
+            if "resolve-service" in url:
+                return MagicMock(ok=True, json=lambda: {})
+            return MagicMock(ok=False)
+        mock_get.side_effect = side
+        result = resolve_dependency("dial tcp 10.43.68.150:5432: connect: connection refused", "")
+        assert result is None
+
+    @patch("diagnostics.http_requests.get")
+    def test_resolves_and_checks_health(self, mock_get):
+        def side(url, **kw):
+            if "resolve-service" in url:
+                assert kw["params"]["ip"] == "10.43.68.150"
+                return MagicMock(ok=True, json=lambda: {"namespace": "platform", "name": "postgres"})
+            q = kw.get("params", {}).get("query", "")
+            if "replicas_available" in q:
+                return MagicMock(ok=True, json=lambda: {
+                    "data": {"result": [{"value": ["t", "0"], "metric": {}}]}})
+            if "spec_replicas" in q:
+                return MagicMock(ok=True, json=lambda: {
+                    "data": {"result": [{"value": ["t", "1"], "metric": {}}]}})
+            return MagicMock(ok=True, json=lambda: {"data": {"result": []}})
+        mock_get.side_effect = side
+        result = resolve_dependency("dial tcp 10.43.68.150:5432: connect: connection refused", "")
+        assert result == {
+            "name": "postgres", "namespace": "platform",
+            "pods_available": 0, "pods_desired": 1, "waiting_reason": "",
+        }
+
+    @patch("diagnostics.http_requests.get")
+    def test_extracts_ip_from_event_message_when_log_error_empty(self, mock_get):
+        captured = {}
+        def side(url, **kw):
+            if "resolve-service" in url:
+                captured["ip"] = kw["params"]["ip"]
+                return MagicMock(ok=True, json=lambda: {"namespace": "platform", "name": "postgres"})
+            return MagicMock(ok=True, json=lambda: {"data": {"result": []}})
+        mock_get.side_effect = side
+        resolve_dependency("", "connect to 10.43.68.150:5432 failed")
+        assert captured["ip"] == "10.43.68.150"
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_on_resolve_http_error(self, mock_get):
+        mock_get.return_value = MagicMock(ok=False)
+        result = resolve_dependency("dial tcp 10.43.68.150:5432: connect: connection refused", "")
+        assert result is None
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_on_exception(self, mock_get):
+        mock_get.side_effect = Exception("connection refused")
+        result = resolve_dependency("dial tcp 10.43.68.150:5432: connect: connection refused", "")
+        assert result is None
 
 
 class TestCollectDiagnostics:

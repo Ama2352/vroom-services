@@ -1,4 +1,4 @@
-import os, time
+import os, re, time
 import requests as http_requests
 
 PROMETHEUS_URL = os.environ.get(
@@ -12,6 +12,8 @@ LOKI_URL = os.environ.get(
 EXECUTOR_URL   = os.environ.get("KUBECTL_EXECUTOR_URL",
                                 "http://kubectl-executor.monitoring.svc.cluster.local:5001")
 EXECUTOR_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
+
+_IP_PORT_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)\b")
 
 
 def _prom_scalar(query: str) -> float:
@@ -124,6 +126,49 @@ def collect_change_evidence(service: str, namespace: str) -> dict | None:
         "image_changed": image_changed, "old_image": old_image, "new_image": new_image,
         "env_changed": env_changed, "env_diff": env_diff,
         "changed_at": newest.get("metadata", {}).get("creationTimestamp", ""),
+    }
+
+
+def resolve_dependency(log_error: str, event_message: str) -> dict | None:
+    """If log_error/event_message names an IP:port, resolve it to the K8s Service that
+    owns that ClusterIP and report that Service's own pod health. Returns None if no
+    IP is present or it doesn't resolve to a known Service (e.g. a DNS-name failure
+    like 'bad-host' — that case is already covered by collect_change_evidence)."""
+    m = _IP_PORT_RE.search(f"{log_error} {event_message}")
+    if not m:
+        return None
+    ip = m.group(1)
+
+    try:
+        r = http_requests.get(
+            f"{EXECUTOR_URL}/tools/resolve-service",
+            params={"ip": ip},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        if not r.ok:
+            return None
+        svc = r.json()
+    except Exception:
+        return None
+
+    if not svc.get("name"):
+        return None
+
+    dep_available = int(_prom_scalar(
+        f'kube_deployment_status_replicas_available{{deployment="{svc["name"]}",namespace="{svc["namespace"]}"}}'
+    ))
+    dep_desired = int(_prom_scalar(
+        f'kube_deployment_spec_replicas{{deployment="{svc["name"]}",namespace="{svc["namespace"]}"}}'
+    ))
+    dep_waiting = _prom_active_label(
+        f'kube_pod_container_status_waiting_reason{{namespace="{svc["namespace"]}",pod=~"{svc["name"]}-.*"}}',
+        label="reason",
+    )
+    return {
+        "name": svc["name"], "namespace": svc["namespace"],
+        "pods_available": dep_available, "pods_desired": dep_desired,
+        "waiting_reason": dep_waiting,
     }
 
 
