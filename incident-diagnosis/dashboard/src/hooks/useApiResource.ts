@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export function useApiResource(fetchFn, deps = [], pollMs = null) {
-  const [data, setData] = useState(undefined)
-  const [error, setError] = useState(null)
+interface UseApiResourceResult<T> {
+  data: T | undefined
+  loading: boolean
+  error: string | null
+  reload: () => void
+}
+
+export function useApiResource<T>(
+  fetchFn: () => Promise<T>,
+  deps: unknown[] = [],
+  pollMs: number | null = null,
+): UseApiResourceResult<T> {
+  const [data, setData] = useState<T | undefined>(undefined)
+  const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchOnce = useCallback((showLoading) => {
+  const fetchOnce = useCallback((showLoading: boolean) => {
     if (showLoading) setLoading(true)
     setError(null)
     fetchFn()
