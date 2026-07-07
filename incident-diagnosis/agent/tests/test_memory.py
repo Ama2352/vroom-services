@@ -777,6 +777,51 @@ def test_record_incident_occurrence_second_fire_appends_second_timeline_entry(rd
     assert len(memory.get_incident_timeline(rdb, iid)) == 2
 
 
+def test_get_incident_includes_template_diff_when_present(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence(template_diff={
+        "image_changed": False, "old_image": "", "new_image": "",
+        "env_changed": True,
+        "env_diff": [{"key": "REDIS_ADDR", "old_value": "redis:6379", "new_value": "bad-host:6379"}],
+        "changed_at": "2026-07-07T00:00:00Z",
+    }))
+    incident = memory.get_incident(rdb, iid)
+    assert incident["template_diff"]["env_diff"][0]["key"] == "REDIS_ADDR"
+
+
+def test_get_incident_template_diff_none_when_absent(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
+    incident = memory.get_incident(rdb, iid)
+    assert incident["template_diff"] is None
+
+
+def test_get_incident_includes_dependency_when_present(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence(dependency={
+        "name": "postgres", "namespace": "vroom-dev",
+        "pods_available": 0, "pods_desired": 1, "waiting_reason": "CrashLoopBackOff",
+    }))
+    incident = memory.get_incident(rdb, iid)
+    assert incident["dependency"]["name"] == "postgres"
+
+
+def test_get_incident_dependency_none_when_absent(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
+    incident = memory.get_incident(rdb, iid)
+    assert incident["dependency"] is None
+
+
+def test_record_incident_occurrence_merge_updates_template_diff(rdb):
+    iid1 = memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="A", service="ride", template_diff=None))
+    iid2 = memory.record_incident_occurrence(rdb, _make_occurrence(
+        alert_name="A", service="ride", template_diff={
+            "image_changed": True, "old_image": "v1", "new_image": "v2",
+            "env_changed": False, "env_diff": [], "changed_at": "now",
+        }))
+    assert iid1 == iid2
+    updated = memory.get_incident(rdb, iid1)
+    assert updated["template_diff"]["new_image"] == "v2"
+
+
 def test_old_store_incident_removed():
     assert not hasattr(memory, "store_incident")
 

@@ -409,6 +409,8 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
                 "dev_action":     occurrence.get("dev_action", ""),
                 "kubectl_hint":   occurrence.get("kubectl_hint", ""),
                 "low_confidence": "true" if occurrence.get("low_confidence") else "false",
+                "template_diff":  json.dumps(occurrence.get("template_diff")),
+                "dependency":     json.dumps(occurrence.get("dependency")),
             })
             rdb.hset(f"incident:{oid_str}", mapping=mapping)
             append_incident_timeline(rdb, oid_str, {
@@ -427,6 +429,8 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         "dev_action":     occurrence.get("dev_action", ""),
         "kubectl_hint":   occurrence.get("kubectl_hint", ""),
         "low_confidence": "true" if occurrence.get("low_confidence") else "false",
+        "template_diff":  json.dumps(occurrence.get("template_diff")),
+        "dependency":     json.dumps(occurrence.get("dependency")),
         "status":       "open",
         "resolved_at":  "",
         "resolved_by":  "",
@@ -451,6 +455,8 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
     d["low_confidence"] = _to_bool(d.get("low_confidence"))
     for f in ("pods_available", "pods_desired", "restarts", "init_restarts"):
         d[f] = int(d.get(f) or 0)
+    d["template_diff"] = json.loads(d["template_diff"]) if "template_diff" in d else None
+    d["dependency"] = json.loads(d["dependency"]) if "dependency" in d else None
     return d
 
 
