@@ -137,7 +137,12 @@ def resolve_dependency(log_error: str, event_message: str) -> dict | None:
     m = _IP_PORT_RE.search(f"{log_error} {event_message}")
     if not m:
         return None
-    ip = m.group(1)
+    ip, port = m.group(1), m.group(2)
+    if port == "53":
+        # Port 53 is always the cluster DNS resolver (CoreDNS/kube-dns), never an app
+        # dependency in this project — Go's net package prints this address on every
+        # "no such host" lookup failure regardless of cause, so it's not causal signal.
+        return None
 
     try:
         r = http_requests.get(
