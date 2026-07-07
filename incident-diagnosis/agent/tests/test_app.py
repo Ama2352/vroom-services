@@ -556,6 +556,24 @@ def test_approve_pending_existing_mode_creates_history(client):
     assert memory.get_pending_suggestion(_FAKE_REDIS, pid)["status"] == "approved"
 
 
+def test_approve_pending_new_mode_saves_trigger_waiting_reason(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    pid = memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "s", "proposed_knowledge_key": "bad_dependency_address",
+        "is_new_knowledge_key": True, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": "inc-1",
+    })
+    r = client.post(f"/pending/{pid}/approve", data=json.dumps({
+        "actor": "Alice", "mode": "new", "knowledge_key": "bad_dependency_address",
+        "symptom": "s", "context_notes": "notes", "root_cause_pattern": "rc",
+        "fix_action": "fix", "conclusive": True, "trigger_waiting_reason": "CrashLoopBackOff",
+    }), content_type="application/json")
+    assert r.status_code == 200
+    entry = memory.get_knowledge_entry(_FAKE_REDIS, "bad_dependency_address")
+    assert entry["trigger_waiting_reason"] == "CrashLoopBackOff"
+
+
 def test_reject_pending_requires_actor(client):
     import memory
     _FAKE_REDIS.flushall()
@@ -649,6 +667,22 @@ def test_update_knowledge_saves_fields(client):
     }), content_type="application/json")
     assert r.status_code == 200
     assert memory.get_knowledge_entry(_FAKE_REDIS, "oom")["root_cause_pattern"] == "updated"
+
+
+def test_update_knowledge_saves_trigger_waiting_reason(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {
+        "key": "oom", "root_cause_pattern": "x", "fix_action": "y",
+        "trigger_waiting_reason": "", "conclusive": True,
+        "source": "bootstrap", "created_by": "bootstrap",
+    })
+    r = client.put("/knowledge/oom", data=json.dumps({
+        "actor": "Alice", "root_cause_pattern": "x", "fix_action": "y",
+        "conclusive": True, "trigger_waiting_reason": "OOMKilled",
+    }), content_type="application/json")
+    assert r.status_code == 200
+    assert memory.get_knowledge_entry(_FAKE_REDIS, "oom")["trigger_waiting_reason"] == "OOMKilled"
 
 
 def test_delete_knowledge_refused_when_history_exists(client):

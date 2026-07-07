@@ -103,6 +103,8 @@ def update_knowledge_entry(rdb: redis_lib.Redis, key: str, fields: dict) -> bool
         mapping["root_cause_pattern"] = fields["root_cause_pattern"]
     if "fix_action" in fields:
         mapping["fix_action"] = fields["fix_action"]
+    if "trigger_waiting_reason" in fields:
+        mapping["trigger_waiting_reason"] = fields["trigger_waiting_reason"]
     if "conclusive" in fields:
         mapping["conclusive"] = "true" if fields["conclusive"] else "false"
     if "last_modified_by" in fields:
@@ -330,7 +332,8 @@ def approve_pending_suggestion(rdb: redis_lib.Redis, pending_id: str, actor: str
                                 knowledge_key: str, symptom: str, context_notes: str,
                                 root_cause_pattern: str | None = None,
                                 fix_action: str | None = None,
-                                conclusive: bool = False) -> str | None:
+                                conclusive: bool = False,
+                                trigger_waiting_reason: str = "") -> str | None:
     suggestion = get_pending_suggestion(rdb, pending_id)
     if suggestion is None:
         return None
@@ -340,7 +343,7 @@ def approve_pending_suggestion(rdb: redis_lib.Redis, pending_id: str, actor: str
             "key":                    knowledge_key,
             "root_cause_pattern":     root_cause_pattern or "",
             "fix_action":             fix_action or "",
-            "trigger_waiting_reason": "",
+            "trigger_waiting_reason": trigger_waiting_reason,
             "conclusive":             conclusive,
             "source":                 "learned",
             "created_by":             actor,

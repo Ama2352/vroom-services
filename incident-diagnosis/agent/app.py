@@ -497,6 +497,7 @@ def approve_pending_route(pid):
         root_cause_pattern=data.get("root_cause_pattern"),
         fix_action=data.get("fix_action"),
         conclusive=bool(data.get("conclusive", False)),
+        trigger_waiting_reason=data.get("trigger_waiting_reason", ""),
     )
     if hid is None:
         return jsonify({"error": "not found"}), 404
@@ -536,12 +537,15 @@ def update_knowledge_route(key):
     actor = (data.get("actor") or "").strip()
     if not actor:
         return jsonify({"error": "actor is required"}), 400
-    ok = update_knowledge_entry(rdb, key, {
+    fields = {
         "root_cause_pattern": data.get("root_cause_pattern", ""),
         "fix_action":         data.get("fix_action", ""),
         "conclusive":         bool(data.get("conclusive", False)),
         "last_modified_by":   actor,
-    })
+    }
+    if "trigger_waiting_reason" in data:
+        fields["trigger_waiting_reason"] = data["trigger_waiting_reason"]
+    ok = update_knowledge_entry(rdb, key, fields)
     if not ok:
         return jsonify({"error": "not found"}), 404
     return jsonify({"updated": True})

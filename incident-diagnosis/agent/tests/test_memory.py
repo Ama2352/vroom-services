@@ -136,6 +136,14 @@ def test_update_knowledge_entry_missing_returns_false(rdb):
     assert memory.update_knowledge_entry(rdb, "does_not_exist", {"fix_action": "x"}) is False
 
 
+def test_update_knowledge_entry_sets_trigger_waiting_reason(rdb):
+    memory.store_knowledge_entry(rdb, _make_knowledge(trigger_waiting_reason=""))
+    ok = memory.update_knowledge_entry(rdb, "oom", {"trigger_waiting_reason": "OOMKilled"})
+    assert ok is True
+    entry = memory.get_knowledge_entry(rdb, "oom")
+    assert entry["trigger_waiting_reason"] == "OOMKilled"
+
+
 def test_delete_knowledge_entry_removes_hash_and_index(rdb):
     memory.store_knowledge_entry(rdb, _make_knowledge())
     result = memory.delete_knowledge_entry(rdb, "oom")
@@ -446,6 +454,28 @@ def test_approve_pending_suggestion_new_key_creates_knowledge_and_history(rdb):
     assert knowledge["created_by"] == "Bob"
     history = memory.get_history_entry(rdb, hid)
     assert history["knowledge_key"] == "outbox_stuck"
+
+
+def test_approve_pending_suggestion_new_key_sets_trigger_waiting_reason(rdb):
+    pid = memory.store_pending_suggestion(rdb, _make_pending(
+        proposed_knowledge_key="bad_dependency_address", is_new_knowledge_key=True))
+    memory.approve_pending_suggestion(
+        rdb, pid, actor="Alice", mode="new", knowledge_key="bad_dependency_address",
+        symptom="s", context_notes="", root_cause_pattern="rc", fix_action="fix",
+        conclusive=True, trigger_waiting_reason="CrashLoopBackOff")
+    knowledge = memory.get_knowledge_entry(rdb, "bad_dependency_address")
+    assert knowledge["trigger_waiting_reason"] == "CrashLoopBackOff"
+
+
+def test_approve_pending_suggestion_defaults_trigger_waiting_reason_to_empty(rdb):
+    pid = memory.store_pending_suggestion(rdb, _make_pending(
+        proposed_knowledge_key="outbox_stuck2", is_new_knowledge_key=True))
+    memory.approve_pending_suggestion(
+        rdb, pid, actor="Bob", mode="new", knowledge_key="outbox_stuck2",
+        symptom="s", context_notes="", root_cause_pattern="rc", fix_action="fix",
+        conclusive=False)
+    knowledge = memory.get_knowledge_entry(rdb, "outbox_stuck2")
+    assert knowledge["trigger_waiting_reason"] == ""
 
 
 def test_approve_pending_suggestion_sets_status_and_actor(rdb):
