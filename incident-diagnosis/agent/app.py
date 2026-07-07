@@ -9,14 +9,15 @@ from memory import (search_memory as memory_search,
                     connect as redis_connect, build_symptom_text,
                     find_trusted_match, store_pending_suggestion, KNOWLEDGE_INDEX,
                     record_incident_occurrence, get_incident, list_incidents,
-                    get_latest_incident, get_incident_timeline, resolve_incident,
+                    get_latest_incident, get_incident_timeline, append_incident_timeline, resolve_incident,
                     list_pending_suggestions, get_pending_suggestion,
                     approve_pending_suggestion, reject_pending_suggestion,
                     list_knowledge_entries, get_knowledge_entry, update_knowledge_entry,
                     delete_knowledge_entry, list_history_entries_for_knowledge,
                     get_history_entry, update_history_entry, delete_history_entry)
 from collector import collect_bundle
-from diagnostics import collect_diagnostics, format_evidence
+from diagnostics import (collect_diagnostics, format_evidence,
+                         collect_change_evidence, resolve_dependency)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 
@@ -309,8 +310,36 @@ def investigate():
 
     seed_if_empty(rdb)
 
+    steps = []
+
+    def _step(name: str, started_at: float, finished_at: float, **metadata) -> None:
+        steps.append({
+            "type": "step", "name": name,
+            "started_at": started_at, "finished_at": finished_at,
+            "duration_ms": int((finished_at - started_at) * 1000),
+            "metadata": metadata,
+        })
+
+    t0     = time.time()
     bundle = collect_bundle(service, namespace)
     facts  = collect_diagnostics(service, namespace)
+    t1     = time.time()
+    _step("collect_diagnostics", t0, t1,
+          pods_available=facts["pods_available"], pods_desired=facts["pods_desired"],
+          waiting_reason=facts["waiting_reason"])
+
+    t1a           = time.time()
+    template_diff = collect_change_evidence(service, namespace)
+    t1b           = time.time()
+    _step("replicaset_diff", t1a, t1b, found=template_diff is not None)
+
+    t1c        = time.time()
+    dependency = resolve_dependency(facts["log_error"], facts["event_message"])
+    t1d        = time.time()
+    _step("dependency_chase", t1c, t1d, found=dependency is not None)
+
+    facts = {**facts, "template_diff": template_diff, "dependency": dependency}
+
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
           f"reason={facts['waiting_reason']!r} last_exit={facts['last_terminated_reason']!r} "
           f"restarts={facts['restarts']} "
@@ -319,9 +348,13 @@ def investigate():
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
     query = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
-    match = find_trusted_match(rdb, facts, query)
+
+    t2            = time.time()
+    match         = find_trusted_match(rdb, facts, query)
     trusted_match = match is not None
     memory_ctx    = _format_trusted_match(match) if match else ""
+    t3            = time.time()
+    _step("trusted_match_check", t2, t3, trusted_match=trusted_match)
 
     related_incidents_unconfirmed = []
     if not trusted_match:
@@ -338,6 +371,7 @@ def investigate():
         openrouter_key=OPENROUTER_KEY,
         pod=pod,
     )
+    steps.extend(diagnosis.pop("_step_log", []))
 
     evidence = format_evidence(facts)
 
@@ -349,7 +383,13 @@ def investigate():
         "kubectl_hint":   diagnosis["kubectl_hint"],
         "low_confidence": diagnosis.get("low_confidence", False),
     }
+    t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
+    t7          = time.time()
+    _step("record_incident", t6, t7, incident_id=incident_id)
+
+    for s in steps:
+        append_incident_timeline(rdb, incident_id, s)
 
     threading.Thread(
         target=_reflect_and_store,
