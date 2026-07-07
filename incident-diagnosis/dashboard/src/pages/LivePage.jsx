@@ -24,14 +24,16 @@ export default function LivePage() {
   if (incident === null) return <EmptyState message="No incidents yet." Icon={Activity} />
 
   return (
-    <div>
-      <h2>
-        {incident.alert_name} — {incident.service}{' '}
-        <StatusBadge status={incident.status} />
-      </h2>
-      <EvidenceCard incident={incident} />
-      <RootCauseCard incident={incident} />
-      <SuggestionSummary suggestion={incident.pending_suggestion} />
+    <div className="detail-layout">
+      <div className="content-column">
+        <h2>
+          {incident.alert_name} — {incident.service}{' '}
+          <StatusBadge status={incident.status} />
+        </h2>
+        <EvidenceCard incident={incident} />
+        <RootCauseCard incident={incident} />
+        <SuggestionSummary suggestion={incident.pending_suggestion} />
+      </div>
       <Timeline entries={incident.timeline} />
     </div>
   )

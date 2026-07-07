@@ -30,20 +30,22 @@ export default function IncidentDetailPage() {
   if (loading) return <SkeletonCard lines={4} />
 
   return (
-    <div>
-      <h2>
-        {incident.alert_name} — {incident.service}{' '}
-        <StatusBadge status={incident.status} />
-      </h2>
-      <EvidenceCard incident={incident} />
-      <RootCauseCard incident={incident} />
-      <SuggestionSummary suggestion={incident.pending_suggestion} />
+    <div className="detail-layout">
+      <div className="content-column">
+        <h2>
+          {incident.alert_name} — {incident.service}{' '}
+          <StatusBadge status={incident.status} />
+        </h2>
+        <EvidenceCard incident={incident} />
+        <RootCauseCard incident={incident} />
+        <SuggestionSummary suggestion={incident.pending_suggestion} />
+        {incident.status === 'open' && (
+          <button className="button" onClick={resolve} disabled={resolving}>
+            {resolving ? 'Resolving…' : 'Resolve Incident'}
+          </button>
+        )}
+      </div>
       <Timeline entries={incident.timeline} />
-      {incident.status === 'open' && (
-        <button className="button" onClick={resolve} disabled={resolving}>
-          {resolving ? 'Resolving…' : 'Resolve Incident'}
-        </button>
-      )}
     </div>
   )
 }
