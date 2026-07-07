@@ -241,6 +241,16 @@ def test_derive_reason_signal_prefers_init_terminated_over_everything():
     assert memory._derive_reason_signal(facts) == "Init:OOMKilled"
 
 
+def test_derive_reason_signal_treats_unknown_last_terminated_as_no_signal():
+    facts = {"waiting_reason": "CrashLoopBackOff", "last_terminated_reason": "Unknown"}
+    assert memory._derive_reason_signal(facts) == "CrashLoopBackOff"
+
+
+def test_derive_reason_signal_treats_unknown_init_terminated_as_no_signal():
+    facts = {"init_waiting_reason": "CrashLoopBackOff", "init_last_terminated_reason": "Unknown"}
+    assert memory._derive_reason_signal(facts) == "Init:CrashLoopBackOff"
+
+
 def test_derive_reason_signal_init_waiting():
     facts = {"waiting_reason": "PodInitializing", "init_waiting_reason": "CrashLoopBackOff"}
     assert memory._derive_reason_signal(facts) == "Init:CrashLoopBackOff"

@@ -198,12 +198,16 @@ def _derive_reason_signal(facts: dict) -> str:
     """Normalize the many facts fields that can indicate a K8s failure state into one
     comparable string. Priority order favors the most specific signal (an init-container
     failure is more precise than the generic 'PodInitializing' state it also produces on
-    the main container). See D4 in the knowledge/history redesign spec."""
-    if facts.get("init_last_terminated_reason"):
+    the main container). See D4 in the knowledge/history redesign spec.
+
+    "Unknown" is a genuine kube-state-metrics enum value for last_terminated_reason —
+    it means the container runtime couldn't classify the exit reason, not a real signal —
+    so it's treated the same as empty and falls through to the next check."""
+    if facts.get("init_last_terminated_reason") and facts["init_last_terminated_reason"] != "Unknown":
         return f"Init:{facts['init_last_terminated_reason']}"
     if facts.get("init_waiting_reason"):
         return f"Init:{facts['init_waiting_reason']}"
-    if facts.get("last_terminated_reason"):
+    if facts.get("last_terminated_reason") and facts["last_terminated_reason"] != "Unknown":
         return facts["last_terminated_reason"]
     if facts.get("waiting_reason"):
         wr = facts["waiting_reason"]
