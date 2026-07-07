@@ -51,3 +51,18 @@ export function groupTimeline(entries) {
   flushPhase()
   return items
 }
+
+export function splitOccurrences(entries) {
+  const occurrences = []
+  let current = []
+  for (const entry of entries) {
+    if (entry.type === 'fired') {
+      if (current.length) occurrences.push(current)
+      current = [entry]
+    } else {
+      current.push(entry)
+    }
+  }
+  if (current.length) occurrences.push(current)
+  return occurrences
+}

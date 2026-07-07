@@ -34,7 +34,7 @@ export default function LivePage() {
         <RootCauseCard incident={incident} />
         <SuggestionSummary incident={incident} suggestion={incident.pending_suggestion} />
       </div>
-      <Timeline entries={incident.timeline} />
+      <Timeline entries={incident.timeline} mode="latest" />
     </div>
   )
 }

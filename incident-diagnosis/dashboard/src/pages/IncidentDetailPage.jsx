@@ -45,7 +45,7 @@ export default function IncidentDetailPage() {
           </button>
         )}
       </div>
-      <Timeline entries={incident.timeline} />
+      <Timeline entries={incident.timeline} mode="full" />
     </div>
   )
 }

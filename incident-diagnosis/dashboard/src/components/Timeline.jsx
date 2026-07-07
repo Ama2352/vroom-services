@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
-import { groupTimeline } from '../utils/groupTimeline.js'
+import { groupTimeline, splitOccurrences } from '../utils/groupTimeline.js'
 
 function formatDuration(ms) {
   if (ms == null) return ''
@@ -82,18 +82,41 @@ function PhaseGroup({ phase }) {
   )
 }
 
-export default function Timeline({ entries }) {
+function OccurrenceGroup({ entries, label }) {
   const items = groupTimeline(entries)
   return (
+    <>
+      {label && <div className="occurrence-divider">{label}</div>}
+      {items.map((item, i) => {
+        if (item.kind === 'fired') return <FiredCard key={i} entry={item.entry} />
+        if (item.kind === 'resolved') return <ResolvedCard key={i} entry={item.entry} />
+        if (item.kind === 'phase') return <PhaseGroup key={i} phase={item} />
+        return null
+      })}
+    </>
+  )
+}
+
+export default function Timeline({ entries, mode = 'full' }) {
+  const occurrences = splitOccurrences(entries)
+  const total = occurrences.length
+  const shown = mode === 'latest' ? occurrences.slice(-1) : occurrences
+  return (
     <div className="timeline-sidebar">
-      <div className="card-title">Timeline</div>
+      <div className="card-title">
+        Timeline
+        {mode === 'latest' && total > 1 && (
+          <span className="timeline-occurrence-note">latest of {total}</span>
+        )}
+      </div>
       <div className="timeline-rail">
-        {items.map((item, i) => {
-          if (item.kind === 'fired') return <FiredCard key={i} entry={item.entry} />
-          if (item.kind === 'resolved') return <ResolvedCard key={i} entry={item.entry} />
-          if (item.kind === 'phase') return <PhaseGroup key={i} phase={item} />
-          return null
-        })}
+        {shown.map((occ, i) => (
+          <OccurrenceGroup
+            key={i}
+            entries={occ}
+            label={mode === 'full' && total > 1 ? `Occurrence ${i + 1} of ${total}` : null}
+          />
+        ))}
       </div>
     </div>
   )
