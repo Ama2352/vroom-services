@@ -75,6 +75,58 @@ def _k8s_latest_warning(service: str, namespace: str) -> dict:
         return {}
 
 
+def collect_change_evidence(service: str, namespace: str) -> dict | None:
+    """Diff the 2 most recently created ReplicaSets for `service` — reveals a manual
+    env-var hotfix (kubectl set env) or a new image tag shipped through the pipeline.
+    Returns None if fewer than 2 ReplicaSets exist or neither image nor env differs."""
+    try:
+        r = http_requests.get(
+            f"{EXECUTOR_URL}/tools/replicasets",
+            params={"service": service, "namespace": namespace},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        if not r.ok:
+            return None
+        items = r.json().get("items", [])
+    except Exception:
+        return None
+
+    if len(items) < 2:
+        return None
+
+    items = sorted(items, key=lambda rs: rs.get("metadata", {}).get("creationTimestamp", ""))
+    previous, newest = items[-2], items[-1]
+
+    def _container(rs):
+        containers = rs.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        return containers[0] if containers else {}
+
+    def _env_map(container):
+        return {e.get("name"): e.get("value", "") for e in container.get("env", [])}
+
+    new_c, old_c = _container(newest), _container(previous)
+    new_image, old_image = new_c.get("image", ""), old_c.get("image", "")
+    new_env,   old_env   = _env_map(new_c),        _env_map(old_c)
+
+    image_changed = bool(new_image) and bool(old_image) and new_image != old_image
+    env_diff = [
+        {"key": k, "old_value": old_env.get(k, ""), "new_value": v}
+        for k, v in new_env.items()
+        if old_env.get(k, "") != v
+    ]
+    env_changed = bool(env_diff)
+
+    if not image_changed and not env_changed:
+        return None
+
+    return {
+        "image_changed": image_changed, "old_image": old_image, "new_image": new_image,
+        "env_changed": env_changed, "env_diff": env_diff,
+        "changed_at": newest.get("metadata", {}).get("creationTimestamp", ""),
+    }
+
+
 def collect_diagnostics(service: str, namespace: str) -> dict:
     """Fetch structured pod diagnostics from Prometheus, Loki, and K8s Events API.
 

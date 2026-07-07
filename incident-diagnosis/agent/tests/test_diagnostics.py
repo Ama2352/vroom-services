@@ -2,7 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from unittest.mock import patch, MagicMock
-from diagnostics import collect_diagnostics, format_evidence
+from diagnostics import collect_diagnostics, format_evidence, collect_change_evidence
 
 
 def _prom_scalar(value):
@@ -33,6 +33,82 @@ def _events_ok(events):
 
 def _fail():
     return MagicMock(ok=False)
+
+
+def _rs(created, image, env):
+    return {
+        "metadata": {"creationTimestamp": created},
+        "spec": {"template": {"spec": {"containers": [
+            {"image": image, "env": [{"name": k, "value": v} for k, v in env.items()]}
+        ]}}},
+    }
+
+
+class TestCollectChangeEvidence:
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_when_fewer_than_2_replicasets(self, mock_get):
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {"items": [
+            _rs("2026-07-07T01:00:00Z", "img:v1", {}),
+        ]})
+        assert collect_change_evidence("ride", "vroom-dev") is None
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_when_no_diff(self, mock_get):
+        same = _rs("2026-07-07T01:00:00Z", "img:v1", {"REDIS_ADDR": "redis:6379"})
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {"items": [
+            same, {**same, "metadata": {"creationTimestamp": "2026-07-07T02:00:00Z"}},
+        ]})
+        assert collect_change_evidence("ride", "vroom-dev") is None
+
+    @patch("diagnostics.http_requests.get")
+    def test_detects_env_change(self, mock_get):
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {"items": [
+            _rs("2026-07-07T01:00:00Z", "img:v1", {"REDIS_ADDR": "redis.platform.svc.cluster.local:6379"}),
+            _rs("2026-07-07T02:00:00Z", "img:v1", {"REDIS_ADDR": "bad-host:6379"}),
+        ]})
+        result = collect_change_evidence("ride", "vroom-dev")
+        assert result["env_changed"] is True
+        assert result["image_changed"] is False
+        assert result["env_diff"] == [{
+            "key": "REDIS_ADDR",
+            "old_value": "redis.platform.svc.cluster.local:6379",
+            "new_value": "bad-host:6379",
+        }]
+        assert result["changed_at"] == "2026-07-07T02:00:00Z"
+
+    @patch("diagnostics.http_requests.get")
+    def test_detects_image_change(self, mock_get):
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {"items": [
+            _rs("2026-07-07T01:00:00Z", "ghcr.io/x/ride:build.77-abc1234", {}),
+            _rs("2026-07-07T02:00:00Z", "ghcr.io/x/ride:build.78-621d9c3", {}),
+        ]})
+        result = collect_change_evidence("ride", "vroom-dev")
+        assert result["image_changed"] is True
+        assert result["old_image"] == "ghcr.io/x/ride:build.77-abc1234"
+        assert result["new_image"] == "ghcr.io/x/ride:build.78-621d9c3"
+        assert result["env_changed"] is False
+
+    @patch("diagnostics.http_requests.get")
+    def test_uses_newest_two_regardless_of_response_order(self, mock_get):
+        # Route returns oldest-first; function must not assume a particular order.
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {"items": [
+            _rs("2026-07-07T00:00:00Z", "img:v0", {}),
+            _rs("2026-07-07T01:00:00Z", "img:v1", {}),
+            _rs("2026-07-07T02:00:00Z", "img:v2", {}),
+        ]})
+        result = collect_change_evidence("ride", "vroom-dev")
+        assert result["old_image"] == "img:v1"
+        assert result["new_image"] == "img:v2"
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_on_http_error(self, mock_get):
+        mock_get.return_value = MagicMock(ok=False)
+        assert collect_change_evidence("ride", "vroom-dev") is None
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_on_exception(self, mock_get):
+        mock_get.side_effect = Exception("connection refused")
+        assert collect_change_evidence("ride", "vroom-dev") is None
 
 
 class TestCollectDiagnostics:
