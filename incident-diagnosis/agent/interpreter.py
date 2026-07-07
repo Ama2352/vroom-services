@@ -166,6 +166,12 @@ def _quality_check(diagnosis: dict, facts: dict, pod: str, service: str) -> dict
                 "from the evidence (exact error text, hostname, or port) — do not just ask "
                 "for information that is already present in the evidence above"
             )
+        if facts.get("template_diff") or facts.get("dependency"):
+            issues.append(
+                "a specific change (template_diff) or dependency signal is available in the "
+                "evidence — weigh in on whether it explains the failure instead of only citing "
+                "the symptom"
+            )
         return {"passed": len(issues) == 0, "low_confidence": True, "issues": issues}
 
     if not _is_grounded(rc, facts):

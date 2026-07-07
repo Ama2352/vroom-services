@@ -249,6 +249,42 @@ class TestQualityCheck:
         assert r["low_confidence"] is True
         assert r["issues"] == []
 
+    def test_insufficient_evidence_with_template_diff_now_fails(self):
+        # Regression for the live ride-service redis-address case: the LLM hedged
+        # with "Insufficient evidence" even though a template_diff (env change)
+        # pointed at a clear causal candidate — quality_check must push back so
+        # self-refine gets a chance to weigh in on it.
+        d = self._clean()
+        d["root_cause"] = "Insufficient evidence to confirm — observed: i/o timeout. Need init container logs."
+        facts = {**SAMPLE_FACTS, "template_diff": {
+            "env_changed": True,
+            "env_diff": [{"key": "DB_HOST", "old_value": "postgres-primary", "new_value": "bad-host"}],
+            "image_changed": False,
+        }}
+        r = _quality_check(d, facts, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert r["low_confidence"] is True
+        assert any("template_diff" in issue or "dependency" in issue for issue in r["issues"])
+
+    def test_insufficient_evidence_with_dependency_now_fails(self):
+        d = self._clean()
+        d["root_cause"] = "Insufficient evidence to confirm — observed: i/o timeout. Need init container logs."
+        facts = {**SAMPLE_FACTS, "dependency": {
+            "name": "postgres", "namespace": "vroom-dev",
+            "pods_available": 0, "pods_desired": 1, "waiting_reason": "CrashLoopBackOff",
+        }}
+        r = _quality_check(d, facts, "ride-abc123", "ride")
+        assert r["passed"] is False
+        assert r["low_confidence"] is True
+
+    def test_insufficient_evidence_without_template_diff_or_dependency_still_passes(self):
+        # No stronger evidence available at all — the honest hedge is still accepted.
+        d = self._clean()
+        d["root_cause"] = "Insufficient evidence to confirm — observed: i/o timeout. Need init container logs."
+        r = _quality_check(d, SAMPLE_FACTS, "ride-abc123", "ride")
+        assert r["passed"] is True
+        assert r["issues"] == []
+
     def test_insufficient_evidence_with_placeholder_still_fails(self):
         # Bug regression: early return on "insufficient evidence" was skipping
         # the placeholder check, so <pod_name> would slip through undetected.
