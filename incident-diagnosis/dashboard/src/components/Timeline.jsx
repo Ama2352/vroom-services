@@ -1,4 +1,6 @@
-import { AlertTriangle, Zap, CheckCircle2 } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
+import { groupTimeline } from '../utils/groupTimeline.js'
 
 function formatDuration(ms) {
   if (ms == null) return ''
@@ -27,27 +29,6 @@ function FiredCard({ entry }) {
   )
 }
 
-function StepCard({ entry }) {
-  const metaEntries = Object.entries(entry.metadata || {})
-  return (
-    <div className="timeline-card timeline-card--step">
-      <div className="timeline-icon"><Zap size={12} /></div>
-      <div className="timeline-header">
-        <span className="timeline-name">{entry.name}</span>
-        <span className="duration-badge">{formatDuration(entry.duration_ms)}</span>
-        <span className="timeline-timestamp">{formatTimestamp(entry.started_at)}</span>
-      </div>
-      {metaEntries.length > 0 && (
-        <div className="timeline-meta">
-          {metaEntries.map(([k, v]) => (
-            <span key={k} className="timeline-meta-chip">{k}: {String(v)}</span>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function ResolvedCard({ entry }) {
   return (
     <div className="timeline-card timeline-card--resolved">
@@ -65,15 +46,52 @@ function ResolvedCard({ entry }) {
   )
 }
 
-export default function Timeline({ entries }) {
+function PhaseGroup({ phase }) {
+  const [expanded, setExpanded] = useState(false)
+  const Icon = phase.Icon
   return (
-    <div className="card">
+    <div className="timeline-card timeline-card--phase">
+      <div className="timeline-icon"><Icon size={12} /></div>
+      <button className="phase-header" onClick={() => setExpanded(!expanded)}>
+        <span className={`phase-status-dot phase-status-dot--${phase.status}`} />
+        <span className="timeline-name">{phase.name}</span>
+        <span className="duration-badge">{formatDuration(phase.durationMs)}</span>
+        {expanded ? <ChevronDown size={14} className="phase-chevron" /> : <ChevronRight size={14} className="phase-chevron" />}
+      </button>
+      {expanded && (
+        <div className="phase-children">
+          {phase.steps.map((s, i) => {
+            const metaEntries = Object.entries(s.metadata || {})
+            return (
+              <div key={i} className="phase-child-step">
+                <span className="phase-child-name">{s.name}</span>
+                <span className="duration-badge">{formatDuration(s.duration_ms)}</span>
+                {metaEntries.length > 0 && (
+                  <div className="timeline-meta">
+                    {metaEntries.map(([k, v]) => (
+                      <span key={k} className="timeline-meta-chip">{k}: {String(v)}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function Timeline({ entries }) {
+  const items = groupTimeline(entries)
+  return (
+    <div className="timeline-sidebar">
       <div className="card-title">Timeline</div>
       <div className="timeline-rail">
-        {entries.map((e, i) => {
-          if (e.type === 'fired') return <FiredCard key={i} entry={e} />
-          if (e.type === 'step') return <StepCard key={i} entry={e} />
-          if (e.type === 'resolved') return <ResolvedCard key={i} entry={e} />
+        {items.map((item, i) => {
+          if (item.kind === 'fired') return <FiredCard key={i} entry={item.entry} />
+          if (item.kind === 'resolved') return <ResolvedCard key={i} entry={item.entry} />
+          if (item.kind === 'phase') return <PhaseGroup key={i} phase={item} />
           return null
         })}
       </div>
