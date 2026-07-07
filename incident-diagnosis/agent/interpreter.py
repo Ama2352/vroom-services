@@ -1,4 +1,4 @@
-import re, json
+import re, json, time
 import requests as http_requests
 
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
@@ -283,32 +283,54 @@ def interpret(
     prompt   = _build_grounded_prompt(alert_name, service, namespace,
                                       facts, bundle, memory_context, pod)
     messages = [{"role": "user", "content": prompt}]
+    step_log = []
+
+    def _log_step(name: str, started_at: float, finished_at: float, **metadata) -> None:
+        step_log.append({
+            "type": "step", "name": name,
+            "started_at": started_at, "finished_at": finished_at,
+            "duration_ms": int((finished_at - started_at) * 1000),
+            "metadata": metadata,
+        })
 
     # Phase 1 — Grounded Generation
+    t0     = time.time()
     raw    = _run_llm(messages, _llm, models, groq_key, openrouter_key)
     phase1 = _parse_output(raw)
+    t1     = time.time()
+    _log_step("llm_phase1", t0, t1, parsed=phase1 is not None)
     if phase1 is None:
         print(f"[interpreter] parse failed — using fallback. raw={raw[:600]!r}", flush=True)
         result = _fallback(service, namespace, facts)
         result["low_confidence"] = False
+        result["_step_log"] = step_log
         return result
 
     # Phase 2 — Deterministic Quality Check
+    t2 = time.time()
     qc = _quality_check(phase1, facts, pod, service)
+    t3 = time.time()
+    _log_step("quality_check", t2, t3, passed=qc["passed"], low_confidence=qc["low_confidence"])
     if qc["passed"]:
         phase1["low_confidence"] = qc["low_confidence"]
+        phase1["_step_log"] = step_log
         return phase1
 
     # Phase 3 — Targeted Self-Refine
     print(f"[interpreter] quality issues detected: {qc['issues']}", flush=True)
     refine_prompt   = _build_refine_prompt(prompt, phase1, qc["issues"])
     refine_messages = [{"role": "user", "content": refine_prompt}]
+    t4      = time.time()
     raw2    = _run_llm(refine_messages, _llm, models, groq_key, openrouter_key,
                        temperature=REFINE_TEMPERATURE)
     refined = _parse_output(raw2)
+    t5      = time.time()
+    _log_step("llm_refine", t4, t5, parsed=refined is not None)
     if refined is None:
         print(f"[interpreter] refine parse failed — returning phase1 output", flush=True)
         phase1["low_confidence"] = False
+        phase1["_step_log"] = step_log
         return phase1
     refined["low_confidence"] = False
+    refined["_step_log"] = step_log
     return refined

@@ -442,3 +442,34 @@ class TestRefineTemperature:
         second_temp = mock_post.call_args_list[1].kwargs["json"]["temperature"]
         assert first_temp  == 0.1
         assert second_temp == 0.4
+
+
+class TestStepLog:
+    def test_step_log_present_when_phase1_passes(self):
+        result = interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                            pod="ride-abc123", _llm=lambda msgs, key: _SPECIFIC_JSON)
+        names = [s["name"] for s in result["_step_log"]]
+        assert names == ["llm_phase1", "quality_check"]
+
+    def test_step_log_includes_refine_when_triggered(self):
+        from unittest.mock import Mock
+        mock_llm = Mock(side_effect=[_GENERIC_JSON, _SPECIFIC_JSON])
+        result = interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                            pod="ride-abc123", _llm=mock_llm)
+        names = [s["name"] for s in result["_step_log"]]
+        assert names == ["llm_phase1", "quality_check", "llm_refine"]
+
+    def test_step_log_only_phase1_when_parse_fails(self):
+        result = interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                            _llm=lambda msgs, key: "not valid json at all")
+        names = [s["name"] for s in result["_step_log"]]
+        assert names == ["llm_phase1"]
+
+    def test_step_entries_have_timing_and_metadata_fields(self):
+        result = interpret("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", [],
+                            pod="ride-abc123", _llm=lambda msgs, key: _SPECIFIC_JSON)
+        for s in result["_step_log"]:
+            assert s["type"] == "step"
+            assert "started_at" in s and "finished_at" in s
+            assert isinstance(s["duration_ms"], int)
+            assert "metadata" in s
