@@ -334,15 +334,76 @@ class TestFormatEvidence:
     def test_event_omitted_when_reason_empty(self):
         assert "Event:" not in format_evidence(self.BASE)
 
-    def test_at_most_three_lines(self):
+    def test_at_most_six_lines_with_all_facts_present(self):
         facts = {
             "pods_available": 0, "pods_desired": 1,
             "waiting_reason": "CrashLoopBackOff", "restarts": 3,
+            "init_waiting_reason": "CrashLoopBackOff", "init_restarts": 1,
             "log_error": "connection refused",
             "event_reason": "BackOff", "event_message": "failed", "event_object": "ride-abc",
+            "template_diff": {
+                "image_changed": False, "old_image": "", "new_image": "",
+                "env_changed": True,
+                "env_diff": [{"key": "REDIS_ADDR", "old_value": "redis:6379", "new_value": "bad-host:6379"}],
+                "changed_at": "2026-07-07T02:00:00Z",
+            },
+            "dependency": {
+                "name": "postgres", "namespace": "platform",
+                "pods_available": 0, "pods_desired": 1, "waiting_reason": "",
+            },
         }
         lines = [l for l in format_evidence(facts).split("\n") if l.strip()]
-        assert len(lines) <= 3
+        assert len(lines) <= 6
+
+    def test_template_diff_env_change_included(self):
+        facts = {**self.BASE, "template_diff": {
+            "image_changed": False, "old_image": "", "new_image": "",
+            "env_changed": True,
+            "env_diff": [{"key": "REDIS_ADDR", "old_value": "redis:6379", "new_value": "bad-host:6379"}],
+            "changed_at": "2026-07-07T02:00:00Z",
+        }}
+        ev = format_evidence(facts)
+        assert "REDIS_ADDR" in ev
+        assert "bad-host:6379" in ev
+
+    def test_template_diff_image_change_included(self):
+        facts = {**self.BASE, "template_diff": {
+            "image_changed": True, "old_image": "img:v1", "new_image": "img:v2",
+            "env_changed": False, "env_diff": [], "changed_at": "2026-07-07T02:00:00Z",
+        }}
+        ev = format_evidence(facts)
+        assert "img:v1" in ev
+        assert "img:v2" in ev
+
+    def test_template_diff_omitted_when_none(self):
+        facts = {**self.BASE, "template_diff": None}
+        assert "Recent change" not in format_evidence(facts)
+
+    def test_template_diff_omitted_when_absent(self):
+        assert "Recent change" not in format_evidence(self.BASE)
+
+    def test_dependency_included(self):
+        facts = {**self.BASE, "dependency": {
+            "name": "postgres", "namespace": "platform",
+            "pods_available": 0, "pods_desired": 1, "waiting_reason": "",
+        }}
+        ev = format_evidence(facts)
+        assert "postgres" in ev
+        assert "0/1" in ev
+
+    def test_dependency_includes_waiting_reason_when_present(self):
+        facts = {**self.BASE, "dependency": {
+            "name": "postgres", "namespace": "platform",
+            "pods_available": 0, "pods_desired": 1, "waiting_reason": "CrashLoopBackOff",
+        }}
+        assert "CrashLoopBackOff" in format_evidence(facts)
+
+    def test_dependency_omitted_when_none(self):
+        facts = {**self.BASE, "dependency": None}
+        assert "Dependency" not in format_evidence(facts)
+
+    def test_dependency_omitted_when_absent(self):
+        assert "Dependency" not in format_evidence(self.BASE)
 
     def test_fallback_message_when_all_empty(self):
         empty = {**self.BASE, "pods_available": 0, "pods_desired": 0}

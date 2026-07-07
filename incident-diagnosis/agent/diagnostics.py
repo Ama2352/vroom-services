@@ -228,7 +228,9 @@ def collect_diagnostics(service: str, namespace: str) -> dict:
 
 
 def format_evidence(facts: dict) -> str:
-    """Build a max-3-line human-readable evidence snippet from structured facts.
+    """Build a human-readable evidence snippet from structured facts — up to 6 lines
+    when pod, init-container, log, event, template-diff, and dependency facts are all
+    present at once (typically far fewer).
 
     Pure dict access — no regex, no text parsing.
     """
@@ -262,5 +264,23 @@ def format_evidence(facts: dict) -> str:
         if facts.get("event_message"):
             parts.append(f"— {facts['event_message'][:80]}")
         lines.append(" ".join(parts))
+
+    if facts.get("template_diff"):
+        td = facts["template_diff"]
+        if td.get("env_changed"):
+            first = td["env_diff"][0]
+            lines.append(
+                f"Recent change: env {first['key']} changed from "
+                f"{first['old_value']} to {first['new_value']}"
+            )
+        elif td.get("image_changed"):
+            lines.append(f"Recent change: image changed from {td['old_image']} to {td['new_image']}")
+
+    if facts.get("dependency"):
+        dep = facts["dependency"]
+        dep_line = f"Dependency {dep['name']}: {dep['pods_available']}/{dep['pods_desired']} pods running"
+        if dep.get("waiting_reason"):
+            dep_line += f" ({dep['waiting_reason']})"
+        lines.append(dep_line)
 
     return "\n".join(lines) if lines else "No diagnostic data available"
