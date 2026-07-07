@@ -380,14 +380,14 @@ code, pre, .mono { font-family: var(--font-mono); }
    Evidence grid
    ============================================================ */
 .evidence-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  grid-auto-rows: min-content;
-  align-items: start;
-  gap: var(--space-4);
+  column-width: 340px;
+  column-gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
-.evidence-grid .card { margin-bottom: 0; }
+.evidence-grid .card {
+  break-inside: avoid;
+  margin-bottom: var(--space-4);
+}
 
 /* ============================================================
    Phase group (Timeline)
@@ -424,6 +424,27 @@ code, pre, .mono { font-family: var(--font-mono); }
 .phase-child-name { color: var(--text-secondary); }
 
 /* ============================================================
+   Timeline occurrence grouping (Live = latest, Detail = full)
+   ============================================================ */
+.timeline-occurrence-note {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+.occurrence-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin: var(--space-3) 0;
+}
+.occurrence-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border-subtle); }
+
+/* ============================================================
    Diff block (Recent Change)
    ============================================================ */
 .diff-header {
@@ -445,6 +466,23 @@ code, pre, .mono { font-family: var(--font-mono); }
 .diff-row { padding: var(--space-1) var(--space-3); white-space: pre-wrap; word-break: break-word; }
 .diff-row--removed { background: var(--status-critical-soft); color: var(--status-critical); }
 .diff-row--added   { background: var(--status-healthy-soft); color: var(--status-healthy); }
+
+/* ============================================================
+   Suggestion card (dev action + KB suggestion sub-section)
+   ============================================================ */
+.suggestion-divider { border-top: 1px solid var(--border-subtle); margin: var(--space-4) 0; }
+.suggestion-approved { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.suggestion-key {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  padding: 2px 8px;
+  word-break: break-word;
+  min-width: 0;
+}
 
 /* ============================================================
    Forms
@@ -501,3 +539,39 @@ textarea:focus, input:focus, select:focus {
 .button.secondary { background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--border-strong); }
 .button.secondary:hover { border-color: var(--accent); }
 .button.danger { background: var(--status-critical-soft); color: var(--status-critical); }
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 1100px) {
+  .detail-layout { flex-direction: column; }
+  .timeline-sidebar { width: 100%; position: static; max-height: none; }
+}
+
+@media (max-width: 720px) {
+  .app-shell { flex-direction: column; }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .sidebar-brand { display: none; }
+  .sidebar-nav { flex-direction: row; flex: none; padding: var(--space-2); }
+  .sidebar-nav-item { white-space: nowrap; }
+  .sidebar-footer {
+    border-top: none;
+    flex-shrink: 0;
+    padding: var(--space-2);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .sidebar-footer-label { display: none; }
+  .sidebar-actor-select { width: auto; }
+  .main-content { padding: var(--space-4); }
+}
