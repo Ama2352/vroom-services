@@ -1,21 +1,19 @@
 import { Link } from 'react-router-dom'
+import StatusBadge from './StatusBadge.jsx'
 
 export default function SuggestionSummary({ suggestion }) {
   if (!suggestion) return null
 
-  const statusLabel = {
-    pending: 'Pending review',
-    approved: `Approved into ${suggestion.proposed_knowledge_key}`,
-    rejected: 'Rejected',
-  }[suggestion.status] || suggestion.status
-
   return (
     <div className="card">
-      <h3>Suggestion</h3>
+      <div className="card-title">Suggestion</div>
       <p>{suggestion.symptom}</p>
-      <p><strong>Status:</strong> {statusLabel}</p>
+      <StatusBadge
+        status={suggestion.status}
+        label={suggestion.status === 'approved' ? `Approved into ${suggestion.proposed_knowledge_key}` : undefined}
+      />
       {suggestion.status === 'pending' && (
-        <Link to={`/pending/${suggestion.id}`} className="button">Review &amp; Decide</Link>
+        <p><Link to={`/pending/${suggestion.id}`} className="button secondary">Review &amp; Decide</Link></p>
       )}
     </div>
   )
