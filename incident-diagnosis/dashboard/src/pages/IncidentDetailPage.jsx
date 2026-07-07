@@ -38,7 +38,7 @@ export default function IncidentDetailPage() {
         </h2>
         <EvidenceCard incident={incident} />
         <RootCauseCard incident={incident} />
-        <SuggestionSummary suggestion={incident.pending_suggestion} />
+        <SuggestionSummary incident={incident} suggestion={incident.pending_suggestion} />
         {incident.status === 'open' && (
           <button className="button" onClick={resolve} disabled={resolving}>
             {resolving ? 'Resolving…' : 'Resolve Incident'}

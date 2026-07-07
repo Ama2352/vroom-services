@@ -32,7 +32,7 @@ export default function LivePage() {
         </h2>
         <EvidenceCard incident={incident} />
         <RootCauseCard incident={incident} />
-        <SuggestionSummary suggestion={incident.pending_suggestion} />
+        <SuggestionSummary incident={incident} suggestion={incident.pending_suggestion} />
       </div>
       <Timeline entries={incident.timeline} />
     </div>
