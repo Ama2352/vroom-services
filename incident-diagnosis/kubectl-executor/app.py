@@ -24,6 +24,7 @@ _NS_RE    = re.compile(r'^[\w][\w-]*$')
 _POD_RE   = re.compile(r'^[\w][\w.\-]*$')
 _INT_RE   = re.compile(r'^\d+$')
 _LABEL_RE = re.compile(r'^[\w][\w./-]*=[\w][\w.-]*$')
+_IP_RE    = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
 
 
 def _auth(req):
@@ -246,6 +247,30 @@ def tool_replicasets():
         return jsonify({"items": items[-2:]})
     except (json.JSONDecodeError, KeyError):
         return jsonify({"items": [], "error": "Failed to parse kubectl output"})
+
+
+@app.route("/tools/resolve-service")
+def tool_resolve_service():
+    if not _auth(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    ip = request.args.get("ip", "").strip()
+    if not _IP_RE.match(ip):
+        return jsonify({"error": "Invalid ip"}), 400
+
+    body, _ = _run_json(["kubectl", "get", "svc", "-A", "-o", "json"])
+    if body.get("returncode", 0) != 0:
+        return jsonify({"error": body.get("stderr", "")[:200]})
+    try:
+        raw = json.loads(body.get("stdout", "{}"))
+        for item in raw.get("items", []):
+            if item.get("spec", {}).get("clusterIP") == ip:
+                return jsonify({
+                    "namespace": item.get("metadata", {}).get("namespace", ""),
+                    "name":      item.get("metadata", {}).get("name", ""),
+                })
+        return jsonify({})
+    except (json.JSONDecodeError, KeyError):
+        return jsonify({"error": "Failed to parse kubectl output"})
 
 
 @app.route("/tools/describe")
