@@ -46,6 +46,22 @@ def _run(cmd: list[str]) -> tuple[dict, int]:
         return {"error": str(e), "stdout": "", "returncode": -1}, 500
 
 
+def _run_json(cmd: list[str]) -> tuple[dict, int]:
+    """Like _run(), but never truncates stdout. Only for routes that immediately
+    json.loads() the result — a truncated JSON payload raises instead of silently
+    returning a corrupted partial structure."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return {"stdout": result.stdout, "stderr": result.stderr[:500],
+                "returncode": result.returncode}, 200
+    except subprocess.TimeoutExpired:
+        return {"error": "kubectl timed out after 30s", "stdout": "", "returncode": -1}, 500
+    except FileNotFoundError as e:
+        return {"error": f"Executable not found: {e}", "stdout": "", "returncode": -1}, 500
+    except Exception as e:
+        return {"error": str(e), "stdout": "", "returncode": -1}, 500
+
+
 # ── Legacy /exec endpoint (kept for backward compatibility) ──────────────────
 
 def is_allowed(command: str) -> bool:
@@ -181,7 +197,7 @@ def tool_events_json():
     if not _NS_RE.match(ns) or not _NS_RE.match(service):
         return jsonify({"error": "Invalid namespace or service"}), 400
 
-    body, _ = _run([
+    body, _ = _run_json([
         "kubectl", "get", "events", "-n", ns,
         "-o", "json", "--sort-by=.lastTimestamp",
     ])

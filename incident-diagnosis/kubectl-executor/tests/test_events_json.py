@@ -117,3 +117,26 @@ def test_events_json_response_has_required_fields(client):
     events = r.get_json()["events"]
     if events:
         assert {"reason", "message", "object", "last_seen"}.issubset(events[0].keys())
+
+
+def test_events_json_survives_long_kubectl_output(client):
+    # Regression: _run() truncates stdout at 2000 chars, which can cut a large
+    # `kubectl get events -o json` payload mid-object and break json.loads().
+    # This event list is padded so the raw JSON exceeds 2000 chars.
+    padded = {"items": [
+        {
+            "type": "Warning", "reason": "BackOff",
+            "message": "x" * 500,  # pads payload well past 2000 chars total
+            "involvedObject": {"name": "ride-abc-xyz"},
+            "lastTimestamp": "2026-06-29T10:00:00Z",
+        }
+        for _ in range(6)
+    ]}
+    raw = json.dumps(padded)
+    assert len(raw) > 2000
+    with patch("subprocess.run", return_value=_mk(raw)):
+        r = client.get("/tools/events-json?namespace=vroom-dev&service=ride", headers=AUTH)
+    assert r.status_code == 200
+    events = r.get_json()["events"]
+    assert len(events) == 3  # route already caps to last 3
+    assert events[0]["reason"] == "BackOff"
