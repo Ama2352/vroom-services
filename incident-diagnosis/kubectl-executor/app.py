@@ -225,6 +225,29 @@ def tool_events_json():
         return jsonify({"events": [], "error": "Failed to parse kubectl output"})
 
 
+@app.route("/tools/replicasets")
+def tool_replicasets():
+    if not _auth(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    service = request.args.get("service", "").strip()
+    ns      = request.args.get("namespace", "").strip()
+    if not _NS_RE.match(service) or not _NS_RE.match(ns):
+        return jsonify({"error": "Invalid service or namespace"}), 400
+
+    body, _ = _run_json([
+        "kubectl", "get", "replicasets", "-n", ns, "-l", f"app={service}",
+        "--sort-by=.metadata.creationTimestamp", "-o", "json",
+    ])
+    if body.get("returncode", 0) != 0:
+        return jsonify({"items": [], "error": body.get("stderr", "")[:200]})
+    try:
+        raw   = json.loads(body.get("stdout", "{}"))
+        items = raw.get("items", [])
+        return jsonify({"items": items[-2:]})
+    except (json.JSONDecodeError, KeyError):
+        return jsonify({"items": [], "error": "Failed to parse kubectl output"})
+
+
 @app.route("/tools/describe")
 def tool_describe():
     if not _auth(request):
