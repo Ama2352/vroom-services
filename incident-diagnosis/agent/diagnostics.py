@@ -218,18 +218,25 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None)
             headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
             timeout=10,
         )
-        sync_status = r.json().get("sync_status", "Unknown") if r.ok else "Unknown"
+        data = r.json() if r.ok else {}
+        sync_status = data.get("sync_status", "Unknown")
+        raw_app = data.get("raw", {})
+        synced_sha = raw_app.get("status", {}).get("sync", {}).get("revision", "")
     except Exception:
         sync_status = "Unknown"
+        synced_sha = ""
 
     if sync_status != "Synced":
         return {"classification": "hotfix", "changed_at": template_diff.get("changed_at", "")}
+
+    if not synced_sha:
+        return {"classification": "gitops-commit", "commit": None, "pr": None}
 
     file_path = _gitops_file_path(service, namespace, template_diff)
     try:
         r = http_requests.get(
             f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits",
-            params={"path": file_path, "until": template_diff.get("changed_at", ""), "per_page": 1},
+            params={"path": file_path, "sha": synced_sha, "per_page": 1},
             headers=_github_headers(),
             timeout=10,
         )

@@ -39,14 +39,14 @@ def test_argocd_sync_returns_synced(client):
     with patch("subprocess.run", return_value=_mk(_SYNCED_APP_JSON)):
         r = client.get("/tools/argocd-sync?app=vroom-dev-ride", headers=AUTH)
     assert r.status_code == 200
-    assert r.get_json() == {"sync_status": "Synced"}
+    assert r.get_json() == {"sync_status": "Synced", "raw": json.loads(_SYNCED_APP_JSON)}
 
 
 def test_argocd_sync_returns_out_of_sync(client):
     with patch("subprocess.run", return_value=_mk(_OUT_OF_SYNC_APP_JSON)):
         r = client.get("/tools/argocd-sync?app=vroom-dev-ride", headers=AUTH)
     assert r.status_code == 200
-    assert r.get_json() == {"sync_status": "OutOfSync"}
+    assert r.get_json() == {"sync_status": "OutOfSync", "raw": json.loads(_OUT_OF_SYNC_APP_JSON)}
 
 
 def test_argocd_sync_unknown_when_app_not_found(client):

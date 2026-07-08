@@ -438,7 +438,10 @@ class TestCollectProvenance:
     def test_gitops_commit_found_for_env_change(self, mock_get):
         def side(url, **kw):
             if "argocd-sync" in url:
-                return MagicMock(ok=True, json=lambda: {"sync_status": "Synced"})
+                return MagicMock(ok=True, json=lambda: {
+                    "sync_status": "Synced",
+                    "raw": {"status": {"sync": {"revision": "abc1234567890"}}}
+                })
             if url.endswith("/commits"):
                 assert kw["params"]["path"] == "apps/ride/base/deployment.yaml"
                 return MagicMock(ok=True, json=lambda: [{"sha": "abc1234567890"}])
@@ -466,7 +469,10 @@ class TestCollectProvenance:
         captured = {}
         def side(url, **kw):
             if "argocd-sync" in url:
-                return MagicMock(ok=True, json=lambda: {"sync_status": "Synced"})
+                return MagicMock(ok=True, json=lambda: {
+                    "sync_status": "Synced",
+                    "raw": {"status": {"sync": {"revision": "abc1234567890"}}}
+                })
             if url.endswith("/commits"):
                 captured["path"] = kw["params"]["path"]
                 return MagicMock(ok=True, json=lambda: [])
@@ -479,7 +485,10 @@ class TestCollectProvenance:
     def test_gitops_commit_not_found_returns_null_commit(self, mock_get):
         def side(url, **kw):
             if "argocd-sync" in url:
-                return MagicMock(ok=True, json=lambda: {"sync_status": "Synced"})
+                return MagicMock(ok=True, json=lambda: {
+                    "sync_status": "Synced",
+                    "raw": {"status": {"sync": {"revision": "abc1234567890"}}}
+                })
             if url.endswith("/commits"):
                 return MagicMock(ok=True, json=lambda: [])
             raise AssertionError(f"unexpected call to {url}")
@@ -492,3 +501,54 @@ class TestCollectProvenance:
         mock_get.side_effect = Exception("network down")
         result = collect_provenance("ride-service", "vroom-dev", {"changed_at": "t", "env_changed": True})
         assert result["classification"] == "hotfix"
+
+    @patch("diagnostics.http_requests.get")
+    def test_gitops_commit_uses_synced_sha_from_argocd(self, mock_get):
+        import diagnostics
+        app_response = {
+            "sync_status": "Synced",
+            "raw": {
+                "status": {
+                    "sync": {
+                        "revision": "test_synced_sha_123"
+                    }
+                }
+            }
+        }
+        
+        def _mock_response(data, ok=True):
+            r = MagicMock()
+            r.ok = ok
+            r.json = lambda: data
+            return r
+
+        mock_get.side_effect = [
+            _mock_response(app_response),
+            _mock_response([{"sha": "test_commit_sha_xyz"}]),
+            _mock_response({
+                "sha": "test_commit_sha_xyz",
+                "commit": {"message": "hello", "author": {"name": "Sang"}},
+                "html_url": "https://github.com/x/commit/xyz",
+                "files": [{"filename": "apps/ride/base/deployment.yaml", "patch": "-old\n+new"}]
+            }),
+            _mock_response([])
+        ]
+        
+        res = collect_provenance("ride-service", "vroom-dev", {"changed_at": "2026-07-08T10:00:00Z", "env_changed": True})
+        
+        mock_get.assert_any_call(
+            f"{diagnostics.EXECUTOR_URL}/tools/argocd-sync",
+            params={"app": "vroom-dev-ride"},
+            headers={"Authorization": f"Bearer {diagnostics.EXECUTOR_TOKEN}"},
+            timeout=10
+        )
+        
+        mock_get.assert_any_call(
+            f"{diagnostics.GITHUB_API_URL}/repos/{diagnostics.GITHUB_GITOPS_REPO}/commits",
+            params={"path": "apps/ride/base/deployment.yaml", "sha": "test_synced_sha_123", "per_page": 1},
+            headers={"Authorization": f"Bearer {diagnostics.GITHUB_TOKEN}", "Accept": "application/vnd.github+json"},
+            timeout=10
+        )
+        
+        assert res["classification"] == "gitops-commit"
+        assert res["commit"]["sha"] == "test_co"
