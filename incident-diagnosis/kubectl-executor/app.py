@@ -273,6 +273,25 @@ def tool_resolve_service():
         return jsonify({"error": "Failed to parse kubectl output"})
 
 
+@app.route("/tools/argocd-sync")
+def tool_argocd_sync():
+    if not _auth(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    name = request.args.get("app", "").strip()
+    if not _NS_RE.match(name):
+        return jsonify({"error": "Invalid app"}), 400
+
+    body, _ = _run_json(["kubectl", "get", "application", name, "-n", "argocd", "-o", "json"])
+    if body.get("returncode", 0) != 0:
+        return jsonify({"sync_status": "Unknown"})
+    try:
+        raw = json.loads(body.get("stdout", "{}"))
+        status = raw.get("status", {}).get("sync", {}).get("status", "Unknown")
+        return jsonify({"sync_status": status})
+    except (json.JSONDecodeError, KeyError):
+        return jsonify({"sync_status": "Unknown"})
+
+
 @app.route("/tools/describe")
 def tool_describe():
     if not _auth(request):
