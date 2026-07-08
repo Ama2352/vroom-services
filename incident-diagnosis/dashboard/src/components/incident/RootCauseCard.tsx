@@ -6,7 +6,7 @@ export function RootCauseCard({ incident }: { incident: Incident }) {
       <div className="mb-1.5 flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-wide text-root-cause-label">
         Root Cause
         {incident.low_confidence && (
-          <span className="rounded-full bg-white px-1.5 py-0.5 text-[9.5px] font-bold normal-case tracking-normal text-root-cause-label">
+          <span className="rounded-full bg-surface px-1.5 py-0.5 text-[9.5px] font-bold normal-case tracking-normal text-root-cause-label">
             Low confidence
           </span>
         )}

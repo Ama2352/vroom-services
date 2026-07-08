@@ -7,7 +7,7 @@ import { SkeletonCard } from '../components/ui/Skeleton'
 import { Button } from '../components/ui/Button'
 import type { PendingDetail } from '../types/pending'
 
-const inputClasses = 'w-full rounded-md border border-border bg-white px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft'
+const inputClasses = 'w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft'
 const labelClasses = 'mb-1 block text-sm font-medium text-ink-soft'
 
 export function PendingDetailPage() {
@@ -65,7 +65,7 @@ export function PendingDetailPage() {
   if (pending === undefined) return <SkeletonCard lines={6} />
 
   return (
-    <div className="max-w-2xl rounded-[10px] border border-border bg-white p-4">
+    <div className="max-w-2xl rounded-[10px] border border-border bg-surface p-4">
       <h2 className="mb-4 text-base font-bold text-ink">Review Suggestion — {pending.service}</h2>
 
       <div className="mb-2 flex items-center gap-2 text-sm text-ink-soft">

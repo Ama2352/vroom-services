@@ -6,7 +6,7 @@ interface TabsProps<T extends string> {
 
 export function Tabs<T extends string>({ value, options, onChange }: TabsProps<T>) {
   return (
-    <div className="mb-4 inline-flex gap-1 rounded-lg border border-border bg-white p-1">
+    <div className="mb-4 inline-flex gap-1 rounded-lg border border-border bg-surface p-1">
       {options.map((opt) => (
         <button
           key={opt.value}
@@ -14,7 +14,7 @@ export function Tabs<T extends string>({ value, options, onChange }: TabsProps<T
           className={
             opt.value === value
               ? 'rounded-md bg-accent-soft px-3 py-1.5 text-sm font-semibold text-accent'
-              : 'rounded-md px-3 py-1.5 text-sm font-medium text-ink-soft hover:bg-slate-50'
+              : 'rounded-md px-3 py-1.5 text-sm font-medium text-ink-soft hover:bg-white/5'
           }
         >
           {opt.label}

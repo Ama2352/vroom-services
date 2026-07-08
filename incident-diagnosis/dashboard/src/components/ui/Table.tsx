@@ -3,7 +3,7 @@ import { cn } from '../../lib/cn'
 
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-[10px] border border-border bg-white">
+    <div className="overflow-hidden rounded-[10px] border border-border bg-surface">
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   )
@@ -28,5 +28,5 @@ export function Td({ className, ...props }: TdHTMLAttributes<HTMLTableCellElemen
 }
 
 export function Tr({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
-  return <tr className={cn('hover:bg-slate-50', className)} {...props} />
+  return <tr className={cn('hover:bg-white/5', className)} {...props} />
 }

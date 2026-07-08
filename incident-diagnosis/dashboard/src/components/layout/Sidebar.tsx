@@ -28,7 +28,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[200px] shrink-0 flex-col border-r border-border bg-white max-[720px]:static max-[720px]:h-auto max-[720px]:w-full max-[720px]:flex-row max-[720px]:items-center max-[720px]:overflow-x-auto max-[720px]:border-b max-[720px]:border-r-0">
+    <aside className="sticky top-0 flex h-screen w-[200px] shrink-0 flex-col border-r border-border bg-surface max-[720px]:static max-[720px]:h-auto max-[720px]:w-full max-[720px]:flex-row max-[720px]:items-center max-[720px]:overflow-x-auto max-[720px]:border-b max-[720px]:border-r-0">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3.5 text-sm font-bold text-ink max-[720px]:hidden">
         <span className="h-2 w-2 rounded-sm bg-accent" />
         Incident Agent
@@ -41,7 +41,7 @@ export function Sidebar() {
             end={end}
             className={({ isActive }) =>
               cn(
-                'flex items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-[13px] font-medium text-ink-soft hover:bg-slate-50',
+                'flex items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-2 text-[13px] font-medium text-ink-soft hover:bg-white/5',
                 isActive && 'bg-accent-soft text-accent hover:bg-accent-soft',
               )
             }
@@ -59,7 +59,7 @@ export function Sidebar() {
       <div className="border-t border-border p-2.5 max-[720px]:flex max-[720px]:shrink-0 max-[720px]:items-center max-[720px]:gap-2 max-[720px]:border-t-0 max-[720px]:border-l max-[720px]:p-2">
         <div className="mb-1 text-[11px] text-ink-faint max-[720px]:hidden">Signed in as</div>
         <select
-          className="w-full rounded-md border border-border bg-white px-2 py-1.5 text-[12.5px] text-ink max-[720px]:w-auto"
+          className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-[12.5px] text-ink max-[720px]:w-auto"
           value={actor}
           onChange={onActorChange}
         >

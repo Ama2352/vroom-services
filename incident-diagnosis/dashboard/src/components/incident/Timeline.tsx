@@ -62,7 +62,7 @@ export function Timeline({ entries, mode = 'full' }: { entries: TimelineEntry[];
   const total = occurrences.length
   const shown = mode === 'latest' ? occurrences.slice(-1) : occurrences
   return (
-    <div className="w-[280px] shrink-0 self-start rounded-[10px] border border-border bg-white p-3 sticky top-6 max-[1100px]:static max-[1100px]:w-full">
+    <div className="w-[280px] shrink-0 self-start rounded-[10px] border border-border bg-surface p-3 sticky top-6 max-[1100px]:static max-[1100px]:w-full">
       <div className="mb-3 flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wide text-ink-soft">
         Timeline
         {mode === 'latest' && total > 1 && (

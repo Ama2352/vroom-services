@@ -17,7 +17,7 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
   }
 
   return (
-    <div className={cn('relative rounded-lg bg-ink px-3 py-2.5 font-mono text-[12px] text-slate-200', className)}>
+    <div className={cn('relative rounded-lg bg-slate-900 px-3 py-2.5 font-mono text-[12px] text-slate-200', className)}>
       <button
         onClick={copy}
         className="absolute right-2 top-2 flex items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:border-accent"
