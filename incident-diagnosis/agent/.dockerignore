@@ -5,3 +5,5 @@ __pycache__
 tests/
 .git
 .gitignore
+.pytest_cache
+TESTING.html
