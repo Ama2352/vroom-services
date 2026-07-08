@@ -156,7 +156,14 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
               )}
             </>
           )}
-          <Row label="Changed at" value={formatChangedAt(td.changed_at)} />
+          <Row
+            label="Changed at"
+            value={formatChangedAt(
+              (incident.provenance?.classification === 'gitops-commit' && incident.provenance.commit?.date)
+                ? incident.provenance.commit.date
+                : td.changed_at
+            )}
+          />
           {incident.provenance && <ProvenanceNote provenance={incident.provenance} />}
         </Card>
       )}

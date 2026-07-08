@@ -450,7 +450,10 @@ class TestCollectProvenance:
                     {"number": 45, "title": "Fix env", "html_url": "https://github.com/x/pull/45"}])
             if "/commits/abc1234567890" in url:
                 return MagicMock(ok=True, json=lambda: {
-                    "commit": {"author": {"name": "Alice"}, "message": "fix redis addr"},
+                    "commit": {
+                        "author": {"name": "Alice", "date": "2026-06-30T14:00:47Z"},
+                        "message": "fix redis addr"
+                    },
                     "html_url": "https://github.com/x/commit/abc1234567890",
                     "files": [{"filename": "apps/ride/base/deployment.yaml", "patch": "-old\n+new"}],
                 })
@@ -461,6 +464,7 @@ class TestCollectProvenance:
         assert result["classification"] == "gitops-commit"
         assert result["commit"]["sha"] == "abc1234"
         assert result["commit"]["author"] == "Alice"
+        assert result["commit"]["date"] == "2026-06-30T14:00:47Z"
         assert result["commit"]["diff_snippet"] == "-old\n+new"
         assert result["pr"] == {"number": 45, "title": "Fix env", "url": "https://github.com/x/pull/45"}
 
@@ -527,7 +531,10 @@ class TestCollectProvenance:
             _mock_response([{"sha": "test_commit_sha_xyz"}]),
             _mock_response({
                 "sha": "test_commit_sha_xyz",
-                "commit": {"message": "hello", "author": {"name": "Sang"}},
+                "commit": {
+                    "message": "hello",
+                    "author": {"name": "Sang", "date": "2026-07-08T10:58:26Z"}
+                },
                 "html_url": "https://github.com/x/commit/xyz",
                 "files": [{"filename": "apps/ride/base/deployment.yaml", "patch": "-old\n+new"}]
             }),
@@ -552,3 +559,4 @@ class TestCollectProvenance:
         
         assert res["classification"] == "gitops-commit"
         assert res["commit"]["sha"] == "test_co"
+        assert res["commit"]["date"] == "2026-07-08T10:58:26Z"

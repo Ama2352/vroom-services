@@ -265,8 +265,9 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None)
 
     commit_info = {
         "sha":          sha[:7],
-        "author":       detail.get("commit", {}).get("author", {}).get("name", ""),
-        "message":      detail.get("commit", {}).get("message", ""),
+        "author":       (detail.get("commit") or {}).get("author", {}).get("name", ""),
+        "message":      (detail.get("commit") or {}).get("message", ""),
+        "date":         (detail.get("commit") or {}).get("author", {}).get("date", ""),
         "url":          detail.get("html_url", ""),
         "diff_snippet": diff_snippet,
     }

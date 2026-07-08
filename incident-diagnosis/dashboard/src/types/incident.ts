@@ -27,7 +27,7 @@ export type Provenance =
   | { classification: 'hotfix'; changed_at: string }
   | {
       classification: 'gitops-commit'
-      commit: { sha: string; author: string; message: string; url: string; diff_snippet: string } | null
+      commit: { sha: string; author: string; message: string; url: string; diff_snippet: string; date?: string } | null
       pr: { number: number; title: string; url: string } | null
     }
 
