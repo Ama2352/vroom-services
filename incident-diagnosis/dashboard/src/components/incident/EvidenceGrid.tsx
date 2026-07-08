@@ -24,11 +24,22 @@ function DiffBlock({ header, oldValue, newValue }: { header: string; oldValue?: 
   )
 }
 
+function formatChangedAt(isoStr: string | null | undefined): string {
+  if (!isoStr) return ''
+  try {
+    const d = new Date(isoStr)
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString()
+    }
+  } catch {}
+  return isoStr
+}
+
 function ProvenanceNote({ provenance }: { provenance: Provenance }) {
   if (provenance.classification === 'hotfix') {
     return (
       <div className="mt-2 rounded-md border border-root-cause bg-root-cause-soft px-2.5 py-2 text-xs text-root-cause-label">
-        Manual change (not GitOps) — detected at {provenance.changed_at}
+        Manual change (not GitOps) — detected at {formatChangedAt(provenance.changed_at)}
       </div>
     )
   }
@@ -124,7 +135,7 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
           {td.image_changed && (
             <DiffBlock header={`${incident.service} · image`} oldValue={td.old_image} newValue={td.new_image} />
           )}
-          <Row label="Changed at" value={td.changed_at} />
+          <Row label="Changed at" value={formatChangedAt(td.changed_at)} />
           {incident.provenance && <ProvenanceNote provenance={incident.provenance} />}
         </Card>
       )}
