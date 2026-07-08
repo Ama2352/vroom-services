@@ -135,8 +135,8 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
           <Card>
             <CardTitle><RefreshCw size={14} /> Init Container</CardTitle>
             <dl className="m-0">
-              <Row label="Init waiting reason" value={incident.init_waiting_reason} />
-              <Row label="Init last terminated reason" value={incident.init_last_terminated_reason} />
+              <Row label="Init waiting reason" value={incident.init_waiting_reason || "None"} />
+              <Row label="Init last terminated reason" value={incident.init_last_terminated_reason || "None"} />
               {incident.init_restarts > 0 && <Row label="Init restarts" value={incident.init_restarts} />}
             </dl>
           </Card>
