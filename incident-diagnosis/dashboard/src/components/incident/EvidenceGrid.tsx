@@ -35,6 +35,27 @@ function formatChangedAt(isoStr: string | null | undefined): string {
   return isoStr
 }
 
+function ColoredDiffSnippet({ diff }: { diff: string }) {
+  const lines = diff.split('\n')
+  return (
+    <pre className="overflow-x-auto rounded-md border border-border bg-canvas p-2.5 font-mono text-[11px] leading-relaxed">
+      {lines.map((line, idx) => {
+        let lineClass = 'text-ink-soft'
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+          lineClass = 'text-healthy bg-healthy-soft px-1 rounded-sm'
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+          lineClass = 'text-critical bg-critical-soft px-1 rounded-sm'
+        }
+        return (
+          <div key={idx} className={lineClass}>
+            {line}
+          </div>
+        )
+      })}
+    </pre>
+  )
+}
+
 function ProvenanceNote({ provenance }: { provenance: Provenance }) {
   if (provenance.classification === 'hotfix') {
     return (
@@ -66,11 +87,7 @@ function ProvenanceNote({ provenance }: { provenance: Provenance }) {
           </a>
         )}
       </div>
-      {commit.diff_snippet && (
-        <pre className="overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-2 font-mono text-[11px] text-ink-soft">
-          {commit.diff_snippet}
-        </pre>
-      )}
+      {commit.diff_snippet && <ColoredDiffSnippet diff={commit.diff_snippet} />}
     </div>
   )
 }
@@ -129,11 +146,15 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
       {td && (
         <Card>
           <CardTitle><History size={14} /> Recent Change</CardTitle>
-          {td.env_changed && td.env_diff.map((d, i) => (
-            <DiffBlock key={i} header={`${incident.service} · env.${d.key}`} oldValue={d.old_value} newValue={d.new_value} />
-          ))}
-          {td.image_changed && (
-            <DiffBlock header={`${incident.service} · image`} oldValue={td.old_image} newValue={td.new_image} />
+          {(!incident.provenance || incident.provenance.classification === 'hotfix') && (
+            <>
+              {td.env_changed && td.env_diff.map((d, i) => (
+                <DiffBlock key={i} header={`${incident.service} · env.${d.key}`} oldValue={d.old_value} newValue={d.new_value} />
+              ))}
+              {td.image_changed && (
+                <DiffBlock header={`${incident.service} · image`} oldValue={td.old_image} newValue={td.new_image} />
+              )}
+            </>
           )}
           <Row label="Changed at" value={formatChangedAt(td.changed_at)} />
           {incident.provenance && <ProvenanceNote provenance={incident.provenance} />}
