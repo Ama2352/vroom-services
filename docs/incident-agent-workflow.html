@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Incident Diagnosis Agent: Quy trình & Tình huống Vận hành</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        canvas: '#0b0f19',
+                        surface: '#131926',
+                        border: '#202a42',
+                        accent: '#0ea5e9',
+                        'accent-hover': '#0284c7',
+                        'root-cause': '#f59e0b',
+                        critical: '#f43f5e',
+                        healthy: '#10b981',
+                        info: '#3b82f6',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts: Inter & Fira Code -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Mermaid.js -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                background: '#131926',
+                primaryColor: '#0ea5e9',
+                primaryTextColor: '#f8fafc',
+                lineColor: '#202a42'
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        pre, code {
+            font-family: 'Fira Code', monospace;
+        }
+    </style>
+</head>
+<body class="bg-canvas text-slate-200 min-h-screen">
+
+    <div class="max-w-6xl mx-auto px-4 py-8 md:py-12">
+        <!-- Header -->
+        <header class="border-b border-border pb-6 mb-8">
+            <div class="flex items-center gap-3 mb-2">
+                <span class="bg-accent/10 text-accent text-xs font-semibold px-2.5 py-1 rounded-full uppercase tracking-wider">
+                    SRE / Ops Reference Guide
+                </span>
+            </div>
+            <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-white mb-3">
+                Incident Diagnosis Agent: Quy trình & Tình huống Vận hành
+            </h1>
+            <p class="text-slate-400 text-base max-w-3xl">
+                Tài liệu mô tả chi tiết kiến trúc, quy trình thu thập dữ liệu tự động, cơ chế đối khớp tri thức, lập luận LLM và quy trình học máy tự động (Human-in-the-loop) thuộc hệ thống Vroom.
+            </p>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="flex flex-wrap gap-2 border-b border-border pb-4 mb-8">
+            <button onclick="switchTab('overview')" id="tab-overview" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg bg-accent text-white transition-all">
+                Tổng quan & Kiến trúc
+            </button>
+            <button onclick="switchTab('pipeline')" id="tab-pipeline" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
+                Quy trình Chi tiết (Pipeline)
+            </button>
+            <button onclick="switchTab('use-cases')" id="tab-use-cases" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
+                Tình huống Thực tế (Use Cases)
+            </button>
+            <button onclick="switchTab('human-loop')" id="tab-human-loop" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
+                Duyệt Tri thức (SRE Loop)
+            </button>
+        </div>
+
+        <!-- Section: Overview & Architecture -->
+        <section id="content-overview" class="tab-content space-y-12">
+            <!-- Architecture Card -->
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    1. Kiến trúc Hệ thống (Architecture Overview)
+                </h2>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                    <div class="space-y-4 text-slate-300 text-sm leading-relaxed">
+                        <p>
+                            Incident Diagnosis Agent hoạt động như một hệ thống chẩn đoán tự động cho Kubernetes cluster. Thay vì để LLM tự thực hiện các lệnh shell hoặc truy vấn trực tiếp (dễ gây lỗi bảo mật hoặc ảo giác cú pháp), hệ thống chia làm hai lớp rõ rệt:
+                        </p>
+                        <ul class="list-disc pl-5 space-y-2">
+                            <li>
+                                <strong class="text-white">Lớp Thu thập Dữ liệu (Python Engines):</strong> Thực hiện truy vấn Kubernetes APIs, Prometheus, Loki và Tempo để thu thập thông tin có cấu trúc sạch.
+                            </li>
+                            <li>
+                                <strong class="text-white">Lớp Lập luận (LLM Reasoning with Self-Refinement):</strong> Nhận dữ liệu chuẩn hóa, đối khớp tri thức lịch sử và thực hiện suy luận có kiểm chứng (grounding check) để rút ra chẩn đoán lỗi kèm câu lệnh khắc phục.
+                            </li>
+                        </ul>
+                        <div class="p-4 bg-accent/5 border border-accent/20 rounded-lg text-accent">
+                            <strong>Lợi ích cốt lõi:</strong> Ngăn chặn hoàn toàn lỗi phân tích cú pháp bảng biểu thô ở các mô hình LLM nhỏ, đồng thời tăng tính an toàn hệ thống do loại bỏ khả năng LLM tự ý sinh lệnh phá hoại cluster.
+                        </div>
+                    </div>
+                    <!-- Mermaid Diagram Container -->
+                    <div class="bg-canvas border border-border rounded-xl p-4 overflow-x-auto">
+                        <div class="mermaid">
+                            graph TD
+                                AM[AlertManager] -- Webhook --> n8n[n8n Workflow]
+                                n8n -- POST /investigate --> Agent[Incident Agent Flask API]
+                                Agent --> Coll[Collector: RPS/Err%/p99/Tempo]
+                                Agent --> Diag[Diagnostics: Pods/Events/Loki Logs]
+                                Agent --> Diff[ReplicaSet Diff Engine]
+                                Agent --> Dep[Dependency Resolver]
+                                Agent --> Prov[Provenance: ArgoCD & GitOps Commit]
+                                Agent --> Matcher{Two-layer Matcher}
+                                Matcher -- Khớp tri thức --> LLM[LLM Interpreter with Self-Refine]
+                                Matcher -- Không khớp --> LLM
+                                LLM --> Decision{Tạo Chẩn đoán}
+                                Decision --> DB[Lưu Incident & Timeline]
+                                Decision --> BG[Reflect & Propose Suggestion]
+                                Decision --> n8n
+                                n8n --> Slack[Slack Block Kit]
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Key Components Card -->
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    2. Các Thành phần Công nghệ (Technology Stack)
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+                    <div class="p-4 bg-canvas/50 border border-border rounded-lg space-y-2">
+                        <h3 class="font-semibold text-white">Flask API (Python)</h3>
+                        <p class="text-slate-400 text-xs">
+                            Cung cấp các endpoint vận hành chính bao gồm <code class="text-accent">/investigate</code>, <code class="text-accent">/incidents</code>, <code class="text-accent">/pending</code>, và <code class="text-accent">/knowledge</code>.
+                        </p>
+                    </div>
+                    <div class="p-4 bg-canvas/50 border border-border rounded-lg space-y-2">
+                        <h3 class="font-semibold text-white">Redis Database</h3>
+                        <p class="text-slate-400 text-xs">
+                            Lưu trữ cơ sở tri thức (Knowledge), lịch sử phê duyệt sự cố (History), các sự cố đang mở (Open Incidents), timeline của từng sự cố và các đề xuất đang chờ duyệt (Pending Suggestions).
+                        </p>
+                    </div>
+                    <div class="p-4 bg-canvas/50 border border-border rounded-lg space-y-2">
+                        <h3 class="font-semibold text-white">LLM Provider (Groq / OpenRouter)</h3>
+                        <p class="text-slate-400 text-xs">
+                            Sử dụng các mô hình ngôn ngữ lớn (mặc định là Llama 3.3 70B và Llama 3.1 8B) để lập luận và tổng hợp đề xuất cập nhật tri thức.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Pipeline Workflow -->
+        <section id="content-pipeline" class="tab-content hidden space-y-12">
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    Quy trình Pipeline chẩn đoán sự cố chi tiết
+                </h2>
+
+                <div class="relative pl-6 border-l-2 border-border space-y-12">
+                    <!-- Step 1 -->
+                    <div class="relative">
+                        <span class="absolute -left-[33px] top-0 bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                        <h3 class="text-base font-semibold text-white mb-2">Kích hoạt & Tiếp nhận (Trigger & Ingestion)</h3>
+                        <p class="text-slate-400 text-sm mb-3">
+                            Khi AlertManager phát hiện lỗi (ví dụ: <code class="text-accent">ServiceDown</code>), nó gửi webhook cảnh báo đến workflow n8n với payload chứa danh sách cảnh báo. Ví dụ:
+                        </p>
+                        <pre class="bg-canvas border border-border rounded-lg p-3 text-xs text-slate-400 overflow-x-auto mb-3">
+// Webhook từ Alertmanager gửi đến n8n
+{
+  "status": "firing",
+  "commonLabels": {
+    "alertname": "ServiceDown",
+    "service": "ride-service",
+    "namespace": "vroom-dev"
+  }
+}</pre>
+                        <p class="text-slate-400 text-sm mb-3">
+                            Hệ thống n8n phân tách và chuẩn hóa payload này thành các trường tương ứng để gọi endpoint <code class="text-accent">POST /investigate</code> của Incident Agent:
+                        </p>
+                        <pre class="bg-canvas border border-border rounded-lg p-3 text-xs text-accent overflow-x-auto">POST /investigate
+{
+  "alert_name": "ServiceDown",
+  "service": "ride-service",
+  "namespace": "vroom-dev"
+}</pre>
+                    </div>
+
+                    <!-- Step 2 -->
+                    <div class="relative">
+                        <span class="absolute -left-[33px] top-0 bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                        <h3 class="text-base font-semibold text-white mb-2">Thu thập Dữ liệu Phụ trợ (Structured Ingestion)</h3>
+                        <p class="text-slate-400 text-sm mb-4">
+                            Agent thực thi song song các tiến trình thu thập thông tin để tạo bức tranh toàn cảnh:
+                        </p>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                            <div class="p-4 bg-canvas/60 border border-border rounded-lg space-y-2">
+                                <span class="text-accent font-semibold">1. Metrics Bundle (collector.py)</span>
+                                <p class="text-slate-400">Thu thập các thông số vận hành cơ bản trong 5 phút gần nhất:</p>
+                                <ul class="list-disc pl-4 space-y-1 text-slate-400">
+                                    <li><strong class="text-white">RPS:</strong> Tốc độ request trung bình.</li>
+                                    <li><strong class="text-white">Error Rate:</strong> Tỷ lệ request lỗi 5xx.</li>
+                                    <li><strong class="text-white">Latency p99:</strong> Độ trễ phân vị thứ 99.</li>
+                                    <li><strong class="text-white">Loki Errors Count:</strong> Số lỗi tìm thấy trong logs.</li>
+                                    <li><strong class="text-white">Tempo Traces:</strong> Phát hiện vết trace bị lỗi.</li>
+                                </ul>
+                            </div>
+                            <div class="p-4 bg-canvas/60 border border-border rounded-lg space-y-2">
+                                <span class="text-accent font-semibold">2. Kubernetes Diagnostics (diagnostics.py)</span>
+                                <p class="text-slate-400">Lấy trạng thái thực tế của tài nguyên trong namespace:</p>
+                                <ul class="list-disc pl-4 space-y-1 text-slate-400">
+                                    <li>Replicas thực tế so với cấu hình mong muốn (Available vs Desired).</li>
+                                    <li>Trạng thái Container (Waiting reason: OOMKilled, CrashLoopBackOff, v.v.).</li>
+                                    <li>Trạng thái Init Container (lý do thoát, số lần restart).</li>
+                                    <li>Logs lỗi mẫu từ Loki & Sự kiện Warning từ K8s Events API.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3 -->
+                    <div class="relative">
+                        <span class="absolute -left-[33px] top-0 bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">3</span>
+                        <h3 class="text-base font-semibold text-white mb-2">Phân tích Khác biệt & Liên kết (Diff & Dependency Chase)</h3>
+                        <p class="text-slate-400 text-sm mb-4">
+                            Agent chạy các giải thuật phụ trợ để làm rõ nguyên nhân sâu xa:
+                        </p>
+                        <div class="space-y-3 text-xs">
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <strong class="text-white block mb-1">ReplicaSet Diff Engine:</strong>
+                                So sánh cấu hình (image tag, biến môi trường) của 2 ReplicaSet gần nhất. Nếu phát hiện thay đổi, trích xuất mốc thời gian cập nhật của Deployment để làm cơ sở đối sánh.
+                            </div>
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <strong class="text-white block mb-1">Dependency Resolver:</strong>
+                                Trích xuất IP:port từ log lỗi hoặc event message (ví dụ: <code class="text-accent">10.43.68.150:5432</code>). Phân giải IP này sang Kubernetes Service tương ứng (ví dụ: <code class="text-accent">postgres</code>) và kiểm tra sức khỏe hiện tại của service phụ thuộc đó.
+                            </div>
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <strong class="text-white block mb-1">Provenance Tracker (GitOps vs Manual Hotfix):</strong>
+                                Truy vấn ArgoCD sync status. Nếu ứng dụng ở trạng thái <code class="text-amber-500">OutOfSync</code>, sự cố được gán nhãn là <code class="text-amber-500">hotfix</code> (chỉnh sửa thủ công trực tiếp trên cluster). Nếu <code class="text-healthy">Synced</code>, Agent gọi GitHub API để truy vết commit GitOps gần nhất thay đổi file cấu hình, kèm theo thông tin tác giả, nội dung commit, và Pull Request liên quan.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 4 -->
+                    <div class="relative">
+                        <span class="absolute -left-[33px] top-0 bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">4</span>
+                        <h3 class="text-base font-semibold text-white mb-2">Đối khớp Tri thức Đáng tin cậy (Two-layer Trusted Matching)</h3>
+                        <p class="text-slate-400 text-sm mb-3">
+                            Để tăng tốc chẩn đoán và loại bỏ ảo giác của LLM, Agent thực hiện đối khớp tri thức trong Redis:
+                        </p>
+                        <div class="space-y-2 text-xs">
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <span class="bg-healthy/10 text-healthy text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider mr-2">Layer 1</span>
+                                <strong class="text-white">Exact-match Short-circuit:</strong> Đối với các lỗi conclusive (chắc chắn do một nguyên nhân, ví dụ: <code class="text-accent">OOMKilled</code>, <code class="text-accent">CreateContainerConfigError</code>), Agent lập tức ánh xạ trực tiếp đến giải pháp định sẵn mà không cần chạy suy luận LLM phức tạp.
+                            </div>
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <span class="bg-info/10 text-info text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider mr-2">Layer 2</span>
+                                <strong class="text-white">Token-coverage Matching:</strong> Đối với các lỗi không conclusive (ví dụ: <code class="text-accent">CrashLoopBackOff</code> do lỗi kết nối), Agent tính toán độ trùng khớp từ khóa giữa triệu chứng hiện tại với các bản ghi sự cố lịch sử đã phê duyệt (history entries):
+                                <code class="block mt-1 text-slate-400">Score = |tokens(query) ∩ tokens(symptom)| / |tokens(query)|</code>
+                                Nếu điểm số cao nhất vượt ngưỡng <code class="text-accent">0.5</code>, Agent trích xuất tri thức đã lưu làm cơ sở lập luận đáng tin cậy cho bước tiếp theo.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 5 -->
+                    <div class="relative">
+                        <span class="absolute -left-[33px] top-0 bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">5</span>
+                        <h3 class="text-base font-semibold text-white mb-2">Lập luận có Kiểm chứng & Tự sửa lỗi (LLM Reasoning & Self-Refine)</h3>
+                        <p class="text-slate-400 text-sm mb-3">
+                            Khi không có short-circuit ở Layer 1, thông tin dữ liệu thô kèm ngữ cảnh đối khớp (nếu có) được gửi vào LLM Interpreter thông qua ba giai đoạn:
+                        </p>
+                        <div class="space-y-2 text-xs">
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <strong class="text-white">Giai đoạn 1: Grounded Generation</strong>
+                                LLM sinh ra phân tích lỗi thô dựa trên quy tắc: chỉ khẳng định các luận điểm được hỗ trợ trực tiếp bởi bằng chứng kỹ thuật.
+                            </div>
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <strong class="text-white">Giai đoạn 2: Deterministic Quality Check</strong>
+                                Bộ kiểm định Python quét đầu ra của LLM:
+                                <ul class="list-disc pl-4 mt-1 space-y-1 text-slate-400">
+                                    <li>Kiểm tra cấu trúc JSON hợp lệ và các trường bắt buộc (<code class="text-accent">root_cause</code>, <code class="text-accent">dev_action</code>, <code class="text-accent">kubectl_hint</code>).</li>
+                                    <li>Phát hiện và thay thế các placeholder (dạng <code class="text-accent">&lt;pod&gt;</code>) bằng tên pod thực tế hoặc nhãn nhắm mục tiêu.</li>
+                                    <li>Xác thực tính xác thực (Grounding check): Từ khóa chính trong nguyên nhân cốt lõi phải xuất hiện trong log lỗi hoặc event message thực tế.</li>
+                                    <li>Lọc bỏ các mô tả chung chung vô nghĩa (nằm trong danh sách blacklist như "potential issue", "check the logs").</li>
+                                </ul>
+                            </div>
+                            <div class="p-3 bg-canvas border border-border rounded-lg">
+                                <strong class="text-white">Giai đoạn 3: Targeted Self-Refine</strong>
+                                Nếu phát hiện vi phạm ở Giai đoạn 2, Agent lập tức thực hiện truy vấn LLM lần 2, truyền vào lỗi cũ kèm danh sách các điểm vi phạm cụ thể để LLM tự sửa đổi cấu trúc. Nếu vẫn thất bại, Agent áp dụng cơ chế fallback an toàn là sử dụng template chẩn đoán chuẩn.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 6 -->
+                    <div class="relative">
+                        <span class="absolute -left-[33px] top-0 bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">6</span>
+                        <h3 class="text-base font-semibold text-white mb-2">Lưu trữ sự cố & Khởi chạy Vòng lặp Học máy (Persistence & Learning Loop)</h3>
+                        <p class="text-slate-400 text-sm">
+                            Agent lưu thông tin sự cố vào Redis. Nếu phát hiện sự cố trùng lặp trên cùng một service và alert, Agent tự động gộp vào sự cố hiện có và cập nhật dòng sự kiện (incident timeline). 
+                        </p>
+                        <p class="text-slate-400 text-sm mt-2">
+                            Đồng thời, một luồng xử lý nền (<code class="text-accent">_reflect_and_store</code>) được kích hoạt để phân tích sự cố đã giải quyết, đề xuất một khóa tri thức nháp ở dạng <code class="text-accent">pending:suggestion</code> để SRE kiểm duyệt trên dashboard.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Use Cases -->
+        <section id="content-use-cases" class="tab-content hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Case 1 -->
+                <div class="bg-surface border border-border rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <div class="flex justify-between items-start mb-4">
+                            <h3 class="text-lg font-bold text-white">Use Case 1: Cập nhật sai biến môi trường</h3>
+                            <span class="bg-critical/10 text-critical text-xs px-2 py-0.5 rounded font-semibold uppercase tracking-wider">Critical</span>
+                        </div>
+                        <p class="text-sm text-slate-300 mb-4">
+                            <strong>Kịch bản:</strong> Nhà phát triển chạy nhầm lệnh cập nhật biến môi trường cho Redis trên cluster: <br>
+                            <code class="block bg-canvas text-slate-400 p-2 rounded text-xs mt-1 border border-border">kubectl set env deployment/ride-service REDIS_ADDR=bad-host:6379</code>
+                        </p>
+                        <div class="text-xs space-y-2 text-slate-400 bg-canvas/50 p-4 border border-border rounded-lg">
+                            <span class="text-white font-medium block">Luồng chẩn đoán của Agent:</span>
+                            <div class="space-y-1">
+                                <p>1. Pod lỗi khởi động lại, Loki logs ghi nhận lỗi kết nối: <code class="text-critical">dial tcp: lookup bad-host</code>.</p>
+                                <p>2. Bộ kiểm tra <strong class="text-white">ReplicaSet Diff</strong> so sánh cấu hình, phát hiện biến <code class="text-white">REDIS_ADDR</code> bị đổi từ giá trị cũ sang <code class="text-accent">bad-host:6379</code>.</p>
+                                <p>3. Do thay đổi này trực tiếp làm lệch cấu hình ArgoCD, bộ xác định nguồn gốc <strong class="text-white">Provenance</strong> đánh dấu đây là một chỉnh sửa thủ công trực tiếp (<code class="text-amber-500">hotfix</code>).</p>
+                                <p>4. LLM xác định chính xác nguyên nhân lỗi do sửa cấu hình đột ngột và đề xuất khôi phục lại biến môi trường.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Case 2 -->
+                <div class="bg-surface border border-border rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <div class="flex justify-between items-start mb-4">
+                            <h3 class="text-lg font-bold text-white">Use Case 2: Dịch vụ phụ thuộc bị tắt</h3>
+                            <span class="bg-amber-500/10 text-amber-500 text-xs px-2 py-0.5 rounded font-semibold uppercase tracking-wider">High</span>
+                        </div>
+                        <p class="text-sm text-slate-300 mb-4">
+                            <strong>Kịch bản:</strong> Cơ sở dữ liệu PostgreSQL ở namespace platform bị scale về 0 pod do cấu hình sai: <br>
+                            <code class="block bg-canvas text-slate-400 p-2 rounded text-xs mt-1 border border-border">kubectl scale deployment/postgres -n platform --replicas=0</code>
+                        </p>
+                        <div class="text-xs space-y-2 text-slate-400 bg-canvas/50 p-4 border border-border rounded-lg">
+                            <span class="text-white font-medium block">Luồng chẩn đoán của Agent:</span>
+                            <div class="space-y-1">
+                                <p>1. Dịch vụ <code class="text-white">ride-service</code> báo lỗi kết nối: <code class="text-critical">dial tcp 10.43.68.150:5432: connect: connection refused</code>.</p>
+                                <p>2. Bộ phân giải <strong class="text-white">Dependency Resolver</strong> trích xuất IP lỗi, ánh xạ sang Service tên <code class="text-white">postgres</code>.</p>
+                                <p>3. Kiểm tra thông số Prometheus của postgres-service phát hiện số lượng pod hoạt động là <code class="text-critical">0/0 running</code>.</p>
+                                <p>4. LLM chẩn đoán lỗi xảy ra do cơ sở dữ liệu phụ thuộc bị tắt, hướng dẫn Operator scale deployment postgres trở lại.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Case 3 -->
+                <div class="bg-surface border border-border rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <div class="flex justify-between items-start mb-4">
+                            <h3 class="text-lg font-bold text-white">Use Case 3: Pod tràn bộ nhớ (OOMKilled)</h3>
+                            <span class="bg-info/10 text-info text-xs px-2 py-0.5 rounded font-semibold uppercase tracking-wider">Medium</span>
+                        </div>
+                        <p class="text-sm text-slate-300 mb-4">
+                            <strong>Kịch bản:</strong> Dịch vụ bị rò rỉ bộ nhớ hoặc tải tăng đột biến vượt quá giới hạn cgroup được cấp phép trên node.
+                        </p>
+                        <div class="text-xs space-y-2 text-slate-400 bg-canvas/50 p-4 border border-border rounded-lg">
+                            <span class="text-white font-medium block">Luồng chẩn đoán của Agent:</span>
+                            <div class="space-y-1">
+                                <p>1. Prometheus ghi nhận trạng thái thoát gần nhất của pod là <code class="text-critical">OOMKilled</code>.</p>
+                                <p>2. Bộ lọc <strong class="text-white">Exact-match Short-circuit</strong> phát hiện lỗi conclusive này và kích hoạt ngay tri thức đã lưu sẵn cho khóa <code class="text-accent">oom</code>.</p>
+                                <p>3. Agent bỏ qua bước chạy LLM, trả về kết quả chẩn đoán và khuyến nghị tăng bộ nhớ giới hạn trong manifest ngay lập tức để tiết kiệm chi phí tính toán.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Case 4 -->
+                <div class="bg-surface border border-border rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <div class="flex justify-between items-start mb-4">
+                            <h3 class="text-lg font-bold text-white">Use Case 4: Lỗi kéo ảnh (ImagePullBackOff)</h3>
+                            <span class="bg-info/10 text-info text-xs px-2 py-0.5 rounded font-semibold uppercase tracking-wider">Medium</span>
+                        </div>
+                        <p class="text-sm text-slate-300 mb-4">
+                            <strong>Kịch bản:</strong> Quy trình deploy tự động ghi nhầm tag Docker image hoặc node không có quyền xác thực với registry bí mật.
+                        </p>
+                        <div class="text-xs space-y-2 text-slate-400 bg-canvas/50 p-4 border border-border rounded-lg">
+                            <span class="text-white font-medium block">Luồng chẩn đoán của Agent:</span>
+                            <div class="space-y-1">
+                                <p>1. Prometheus trả về trạng thái container là <code class="text-accent">waiting_reason: ImagePullBackOff</code>.</p>
+                                <p>2. Kubernetes Events API ghi nhận Warning event: <code class="text-critical">Failed to pull image</code>.</p>
+                                <p>3. LLM kết luận do lỗi tag ảnh hoặc chứng thư Registry và gợi ý kiểm tra lại tên Docker image và quyền của ImagePullSecrets.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Human-in-the-loop -->
+        <section id="content-human-loop" class="tab-content hidden space-y-12">
+            <!-- Flow Detail Card -->
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    Cơ chế Học máy Vận hành (SRE Feedback Loop)
+                </h2>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                    <div class="lg:col-span-3 space-y-4 text-slate-300 text-sm leading-relaxed">
+                        <p>
+                            Quy trình duyệt tri thức được thiết kế để đảm bảo dữ liệu lưu trữ luôn có chất lượng cao nhất, tránh nhiễu do AI tự tạo ra:
+                        </p>
+                        
+                        <div class="space-y-4 mt-6">
+                            <div class="flex gap-4">
+                                <span class="flex-shrink-0 w-8 h-8 rounded-full bg-accent/10 border border-accent/20 text-accent flex items-center justify-center font-bold">A</span>
+                                <div>
+                                    <h4 class="text-white font-semibold mb-1">Gắn sự cố vào khóa tri thức hiện có (Attach to existing key)</h4>
+                                    <p class="text-slate-400 text-xs">
+                                        Nếu lỗi hiện tại thuộc lớp lỗi đã biết, SRE gắn nó vào khóa tri thức có sẵn. Thao tác này lưu lại một bản ghi lịch sử mới (`history:entry`), ghi nhận thêm thông tin thực tế của ca lỗi (`context_notes`) mà không làm thay đổi mô tả lỗi chung (`root_cause_pattern`).
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="flex gap-4">
+                                <span class="flex-shrink-0 w-8 h-8 rounded-full bg-accent/10 border border-accent/20 text-accent flex items-center justify-center font-bold">B</span>
+                                <div>
+                                    <h4 class="text-white font-semibold mb-1">Tạo khóa tri thức mới (Create a new key)</h4>
+                                    <p class="text-slate-400 text-xs">
+                                        If là lỗi đặc thù mới hoàn toàn, SRE có thể tạo một định danh mới (`knowledge_key` dạng snake_case), mô tả nguyên nhân cốt lõi (`root_cause_pattern`), câu lệnh khắc phục (`fix_action`) và thiết lập cờ `conclusive` nếu cần.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p class="text-slate-400 text-xs mt-6 italic">
+                            * Mọi hành động duyệt tri thức đều được lưu tên người thực hiện (Actor) và mốc thời gian để phục vụ công tác đối soát (audit trail).
+                        </p>
+                    </div>
+
+                    <!-- Sequence Diagram Container -->
+                    <div class="lg:col-span-2 bg-canvas border border-border rounded-xl p-4 overflow-x-auto">
+                        <div class="mermaid">
+                            sequenceDiagram
+                                participant S as SRE (Human)
+                                participant U as React Dashboard
+                                participant R as Redis DB
+                                participant L as LLM
+                                L->>R: Lưu đề xuất (pending)
+                                R->>U: Hiển thị badge báo đề xuất
+                                S->>U: Xem /pending/:id
+                                S->>U: Điều chỉnh & lưu tri thức
+                                S->>R: Nhấn Approve
+                                R->>R: Ghi nhận history / knowledge
+                                Note over S, L: Lần tiếp theo lỗi tương tự xảy ra
+                                L->>R: Tra cứu tri thức đã duyệt
+                                R-->>L: Trả về trusted_match
+                                L->>S: Chẩn đoán chính xác 100%
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Model Management & Admin Card -->
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    Cấu hình Mô hình & Quản trị hệ thống
+                </h2>
+                <p class="text-slate-300 text-sm mb-4">
+                    Agent cung cấp một bảng quản trị tối giản cho phép cấu hình thứ tự ưu tiên của các mô hình LLM thông qua API hoặc Admin UI.
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-slate-400">
+                    <div class="p-4 bg-canvas border border-border rounded-lg space-y-2">
+                        <span class="text-white font-semibold">Cơ chế Dự phòng (Model Fallback Priority)</span>
+                        <p>
+                            Khi gửi yêu cầu lập luận, Agent sẽ thử danh sách mô hình được cấu hình trong Redis theo thứ tự. Nếu mô hình đứng trước gặp lỗi (ví dụ: hết hạn mức API), hệ thống tự động thử mô hình tiếp theo trong danh sách.
+                        </p>
+                    </div>
+                    <div class="p-4 bg-canvas border border-border rounded-lg space-y-2">
+                        <span class="text-white font-semibold">Endpoint Quản trị Mô hình</span>
+                        <p>
+                            Sử dụng phương thức GET/POST trên endpoint <code class="text-accent">/admin/models</code> để lấy hoặc cập nhật cấu hình danh sách các mô hình sử dụng:
+                        </p>
+                        <pre class="bg-canvas/50 text-accent p-2 rounded border border-border mt-1">
+POST /admin/models
+[
+  {"id": "llama-3.3-70b-versatile", "provider": "groq"},
+  {"id": "meta-llama/llama-3.3-70b-instruct:free", "provider": "openrouter"}
+]</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Javascript logic for Tab switching -->
+    <script>
+        function switchTab(tabId) {
+            // Hide all tab contents
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            // Show target content
+            const targetContent = document.getElementById('content-' + tabId);
+            if (targetContent) {
+                targetContent.classList.remove('hidden');
+            }
+
+            // Reset tab button styles
+            const buttons = document.querySelectorAll('.tab-btn');
+            buttons.forEach(btn => {
+                btn.classList.remove('bg-accent', 'text-white');
+                btn.classList.add('text-slate-400', 'hover:text-white');
+            });
+
+            // Set active button style
+            const activeBtn = document.getElementById('tab-' + tabId);
+            if (activeBtn) {
+                activeBtn.classList.add('bg-accent', 'text-white');
+                activeBtn.classList.remove('text-slate-400', 'hover:text-white');
+            }
+        }
+    </script>
+</body>
+</html>
