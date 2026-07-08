@@ -90,6 +90,28 @@ class TestCollectChangeEvidence:
         assert result["env_changed"] is False
 
     @patch("diagnostics.http_requests.get")
+    def test_uses_deployment_last_update_time_if_available(self, mock_get):
+        def side(url, **kw):
+            if "replicasets" in url:
+                return MagicMock(ok=True, json=lambda: {"items": [
+                    _rs("2026-07-07T01:00:00Z", "img:v1", {"REDIS_ADDR": "redis.platform.svc.cluster.local:6379"}),
+                    _rs("2026-07-07T02:00:00Z", "img:v1", {"REDIS_ADDR": "bad-host:6379"}),
+                ]})
+            if "deployment" in url:
+                return MagicMock(ok=True, json=lambda: {"deployment": {
+                    "status": {
+                        "conditions": [
+                            {"type": "Progressing", "lastUpdateTime": "2026-07-07T02:15:00Z"}
+                        ]
+                    }
+                }})
+            return MagicMock(ok=False)
+        mock_get.side_effect = side
+
+        result = collect_change_evidence("ride", "vroom-dev")
+        assert result["changed_at"] == "2026-07-07T02:15:00Z"
+
+    @patch("diagnostics.http_requests.get")
     def test_uses_newest_two_regardless_of_response_order(self, mock_get):
         # Route returns oldest-first; function must not assume a particular order.
         mock_get.return_value = MagicMock(ok=True, json=lambda: {"items": [

@@ -292,6 +292,25 @@ def tool_argocd_sync():
         return jsonify({"sync_status": "Unknown"})
 
 
+@app.route("/tools/deployment")
+def tool_deployment():
+    if not _auth(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    name = request.args.get("service", "").strip()
+    ns   = request.args.get("namespace", "").strip()
+    if not _NS_RE.match(name) or not _NS_RE.match(ns):
+        return jsonify({"error": "Invalid service or namespace"}), 400
+
+    body, _ = _run_json(["kubectl", "get", "deployment", name, "-n", ns, "-o", "json"])
+    if body.get("returncode", 0) != 0:
+        return jsonify({"error": body.get("stderr", "")[:200]}), 500
+    try:
+        raw = json.loads(body.get("stdout", "{}"))
+        return jsonify({"deployment": raw})
+    except (json.JSONDecodeError, KeyError):
+        return jsonify({"error": "Failed to parse kubectl output"}), 500
+
+
 @app.route("/tools/describe")
 def tool_describe():
     if not _auth(request):

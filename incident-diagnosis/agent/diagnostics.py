@@ -125,10 +125,27 @@ def collect_change_evidence(service: str, namespace: str) -> dict | None:
     if not image_changed and not env_changed:
         return None
 
+    changed_at = newest.get("metadata", {}).get("creationTimestamp", "")
+    try:
+        r_dep = http_requests.get(
+            f"{EXECUTOR_URL}/tools/deployment",
+            params={"service": service, "namespace": namespace},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        if r_dep.ok:
+            conditions = r_dep.json().get("deployment", {}).get("status", {}).get("conditions", [])
+            for cond in conditions:
+                if cond.get("type") == "Progressing" and cond.get("lastUpdateTime"):
+                    changed_at = cond["lastUpdateTime"]
+                    break
+    except Exception:
+        pass
+
     return {
         "image_changed": image_changed, "old_image": old_image, "new_image": new_image,
         "env_changed": env_changed, "env_diff": env_diff,
-        "changed_at": newest.get("metadata", {}).get("creationTimestamp", ""),
+        "changed_at": changed_at,
     }
 
 
