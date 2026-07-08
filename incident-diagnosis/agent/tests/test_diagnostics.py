@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from unittest.mock import patch, MagicMock
 from diagnostics import (collect_diagnostics, format_evidence,
-                          collect_change_evidence, resolve_dependency)
+                          collect_change_evidence, resolve_dependency, collect_provenance)
 
 
 def _prom_scalar(value):
@@ -409,3 +409,86 @@ class TestFormatEvidence:
         empty = {**self.BASE, "pods_available": 0, "pods_desired": 0}
         result = format_evidence(empty)
         assert result  # non-empty string
+
+
+class TestCollectProvenance:
+    def test_returns_none_when_no_template_diff(self):
+        assert collect_provenance("ride-service", "vroom-dev", None) is None
+
+    @patch("diagnostics.http_requests.get")
+    def test_hotfix_when_out_of_sync(self, mock_get):
+        def side(url, **kw):
+            if "argocd-sync" in url:
+                assert kw["params"]["app"] == "vroom-dev-ride"
+                return MagicMock(ok=True, json=lambda: {"sync_status": "OutOfSync"})
+            raise AssertionError(f"unexpected call to {url}")
+        mock_get.side_effect = side
+        result = collect_provenance("ride-service", "vroom-dev",
+                                     {"changed_at": "2026-06-30T14:00:47Z", "env_changed": True})
+        assert result == {"classification": "hotfix", "changed_at": "2026-06-30T14:00:47Z"}
+
+    @patch("diagnostics.http_requests.get")
+    def test_hotfix_when_app_not_found(self, mock_get):
+        mock_get.return_value = MagicMock(ok=False)
+        result = collect_provenance("ride-service", "vroom-dev",
+                                     {"changed_at": "t", "env_changed": True})
+        assert result["classification"] == "hotfix"
+
+    @patch("diagnostics.http_requests.get")
+    def test_gitops_commit_found_for_env_change(self, mock_get):
+        def side(url, **kw):
+            if "argocd-sync" in url:
+                return MagicMock(ok=True, json=lambda: {"sync_status": "Synced"})
+            if url.endswith("/commits"):
+                assert kw["params"]["path"] == "apps/ride/base/deployment.yaml"
+                return MagicMock(ok=True, json=lambda: [{"sha": "abc1234567890"}])
+            if "/commits/abc1234567890/pulls" in url:
+                return MagicMock(ok=True, json=lambda: [
+                    {"number": 45, "title": "Fix env", "html_url": "https://github.com/x/pull/45"}])
+            if "/commits/abc1234567890" in url:
+                return MagicMock(ok=True, json=lambda: {
+                    "commit": {"author": {"name": "Alice"}, "message": "fix redis addr"},
+                    "html_url": "https://github.com/x/commit/abc1234567890",
+                    "files": [{"filename": "apps/ride/base/deployment.yaml", "patch": "-old\n+new"}],
+                })
+            raise AssertionError(f"unexpected call to {url}")
+        mock_get.side_effect = side
+        result = collect_provenance("ride-service", "vroom-dev",
+                                     {"changed_at": "t", "env_changed": True})
+        assert result["classification"] == "gitops-commit"
+        assert result["commit"]["sha"] == "abc1234"
+        assert result["commit"]["author"] == "Alice"
+        assert result["commit"]["diff_snippet"] == "-old\n+new"
+        assert result["pr"] == {"number": 45, "title": "Fix env", "url": "https://github.com/x/pull/45"}
+
+    @patch("diagnostics.http_requests.get")
+    def test_gitops_commit_uses_overlay_path_for_image_change(self, mock_get):
+        captured = {}
+        def side(url, **kw):
+            if "argocd-sync" in url:
+                return MagicMock(ok=True, json=lambda: {"sync_status": "Synced"})
+            if url.endswith("/commits"):
+                captured["path"] = kw["params"]["path"]
+                return MagicMock(ok=True, json=lambda: [])
+            raise AssertionError(f"unexpected call to {url}")
+        mock_get.side_effect = side
+        collect_provenance("ride-service", "vroom-dev", {"changed_at": "t", "image_changed": True})
+        assert captured["path"] == "apps/ride/overlays/dev/kustomization.yaml"
+
+    @patch("diagnostics.http_requests.get")
+    def test_gitops_commit_not_found_returns_null_commit(self, mock_get):
+        def side(url, **kw):
+            if "argocd-sync" in url:
+                return MagicMock(ok=True, json=lambda: {"sync_status": "Synced"})
+            if url.endswith("/commits"):
+                return MagicMock(ok=True, json=lambda: [])
+            raise AssertionError(f"unexpected call to {url}")
+        mock_get.side_effect = side
+        result = collect_provenance("ride-service", "vroom-dev", {"changed_at": "t", "env_changed": True})
+        assert result == {"classification": "gitops-commit", "commit": None, "pr": None}
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_hotfix_on_exception(self, mock_get):
+        mock_get.side_effect = Exception("network down")
+        result = collect_provenance("ride-service", "vroom-dev", {"changed_at": "t", "env_changed": True})
+        assert result["classification"] == "hotfix"

@@ -12,6 +12,9 @@ LOKI_URL = os.environ.get(
 EXECUTOR_URL   = os.environ.get("KUBECTL_EXECUTOR_URL",
                                 "http://kubectl-executor.monitoring.svc.cluster.local:5001")
 EXECUTOR_TOKEN = os.environ.get("EXECUTOR_API_KEY", "change-me")
+GITHUB_TOKEN       = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_GITOPS_REPO = os.environ.get("GITHUB_GITOPS_REPO", "Ama2352/vroom-gitops")
+GITHUB_API_URL     = "https://api.github.com"
 
 _IP_PORT_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)\b")
 
@@ -175,6 +178,106 @@ def resolve_dependency(log_error: str, event_message: str) -> dict | None:
         "pods_available": dep_available, "pods_desired": dep_desired,
         "waiting_reason": dep_waiting,
     }
+
+
+def _short_name(service: str) -> str:
+    return service[:-len("-service")] if service.endswith("-service") else service
+
+
+def _env_name(namespace: str) -> str:
+    return namespace[len("vroom-"):] if namespace.startswith("vroom-") else namespace
+
+
+def _argocd_app_name(service: str, namespace: str) -> str:
+    return f"vroom-{_env_name(namespace)}-{_short_name(service)}"
+
+
+def _gitops_file_path(service: str, namespace: str, template_diff: dict) -> str:
+    short = _short_name(service)
+    if template_diff.get("image_changed"):
+        return f"apps/{short}/overlays/{_env_name(namespace)}/kustomization.yaml"
+    return f"apps/{short}/base/deployment.yaml"
+
+
+def _github_headers() -> dict:
+    return {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+
+
+def collect_provenance(service: str, namespace: str, template_diff: dict | None) -> dict | None:
+    """Attribute a template_diff to either a manual hotfix (ArgoCD OutOfSync — the live
+    change bypassed GitOps) or the git commit that introduced it (ArgoCD Synced). Returns
+    None when there's no template_diff to attribute in the first place."""
+    if template_diff is None:
+        return None
+
+    app_name = _argocd_app_name(service, namespace)
+    try:
+        r = http_requests.get(
+            f"{EXECUTOR_URL}/tools/argocd-sync",
+            params={"app": app_name},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        sync_status = r.json().get("sync_status", "Unknown") if r.ok else "Unknown"
+    except Exception:
+        sync_status = "Unknown"
+
+    if sync_status != "Synced":
+        return {"classification": "hotfix", "changed_at": template_diff.get("changed_at", "")}
+
+    file_path = _gitops_file_path(service, namespace, template_diff)
+    try:
+        r = http_requests.get(
+            f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits",
+            params={"path": file_path, "until": template_diff.get("changed_at", ""), "per_page": 1},
+            headers=_github_headers(),
+            timeout=10,
+        )
+        commits = r.json() if r.ok else []
+    except Exception:
+        commits = []
+
+    if not commits:
+        return {"classification": "gitops-commit", "commit": None, "pr": None}
+
+    sha = commits[0]["sha"]
+    try:
+        r = http_requests.get(
+            f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits/{sha}",
+            headers=_github_headers(), timeout=10,
+        )
+        detail = r.json() if r.ok else {}
+    except Exception:
+        detail = {}
+
+    diff_snippet = ""
+    for f in detail.get("files", []):
+        if f.get("filename") == file_path:
+            diff_snippet = f.get("patch", "")
+            break
+
+    commit_info = {
+        "sha":          sha[:7],
+        "author":       detail.get("commit", {}).get("author", {}).get("name", ""),
+        "message":      detail.get("commit", {}).get("message", ""),
+        "url":          detail.get("html_url", ""),
+        "diff_snippet": diff_snippet,
+    }
+
+    pr_info = None
+    try:
+        r = http_requests.get(
+            f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits/{sha}/pulls",
+            headers={**_github_headers(), "Accept": "application/vnd.github.groot-preview+json"},
+            timeout=10,
+        )
+        prs = r.json() if r.ok else []
+        if prs:
+            pr_info = {"number": prs[0]["number"], "title": prs[0]["title"], "url": prs[0]["html_url"]}
+    except Exception:
+        pass
+
+    return {"classification": "gitops-commit", "commit": commit_info, "pr": pr_info}
 
 
 def collect_diagnostics(service: str, namespace: str) -> dict:
