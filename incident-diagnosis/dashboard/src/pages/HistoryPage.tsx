@@ -25,6 +25,17 @@ function HistoryRow({ entry, knowledgeKeys, onChanged }: {
   })
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => {
+    if (editing) {
+      setForm({
+        service: entry.service,
+        symptom: entry.symptom,
+        context_notes: entry.context_notes,
+        knowledge_key: entry.knowledge_key,
+      })
+    }
+  }, [editing, entry])
+
   function save() {
     setSaving(true)
     api.put(`/history/${entry.id}`, { actor: getActor(), ...form })
@@ -78,6 +89,9 @@ function HistoryRow({ entry, knowledgeKeys, onChanged }: {
       </div>
       <div className="mb-1 text-sm font-semibold text-ink">{entry.service}</div>
       <p className="mb-2 text-sm text-ink-soft">{entry.symptom}</p>
+      {entry.context_notes && (
+        <p className="mb-2 text-sm text-ink-soft">{entry.context_notes}</p>
+      )}
       <Link to={`/knowledge/${entry.knowledge_key}`} className="text-xs text-accent hover:text-accent-strong">
         {entry.knowledge_key}
       </Link>
@@ -96,16 +110,23 @@ export function HistoryPage() {
 
   function load() {
     setError(null)
-    Promise.all([
-      api.get('/history').then(r => r.data.history as KnowledgeHistoryEntry[]),
-      api.get('/knowledge').then(r => r.data.knowledge.map((k: { key: string }) => k.key)),
-    ]).then(([h, keys]) => {
-      setHistory([...h].sort((a, b) => Number(b.timestamp) - Number(a.timestamp)))
-      setKnowledgeKeys(keys)
-    }).catch(() => setError('Failed to load data from the incident-agent API.'))
+    api.get('/history')
+      .then(r => {
+        const h = r.data.history as KnowledgeHistoryEntry[]
+        setHistory([...h].sort((a, b) => Number(b.timestamp) - Number(a.timestamp)))
+      })
+      .catch(() => setError('Failed to load data from the incident-agent API.'))
   }
 
-  useEffect(load, [])
+  useEffect(() => {
+    load()
+    api.get('/knowledge')
+      .then(r => {
+        const keys = r.data.knowledge.map((k: { key: string }) => k.key)
+        setKnowledgeKeys(keys)
+      })
+      .catch(() => setError('Failed to load data from the incident-agent API.'))
+  }, [])
 
   if (error) return <ErrorBanner message={error} onRetry={load} />
   if (!history) return <SkeletonTable />
