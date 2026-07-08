@@ -1,38 +1,31 @@
-import { ScanSearch, Database, Brain, Save, type LucideIcon } from 'lucide-react'
 import type { TimelineEntry, TimelineFiredEntry, TimelineResolvedEntry, TimelineStepEntry } from '../types/incident'
 
 export interface Phase {
   name: string
-  Icon: LucideIcon
   steps: string[]
 }
 
 export const PHASES: Phase[] = [
-  { name: 'Collect Evidence', Icon: ScanSearch, steps: ['collect_diagnostics', 'replicaset_diff', 'dependency_chase'] },
-  { name: 'Match Knowledge',  Icon: Database,   steps: ['trusted_match_check'] },
-  { name: 'Interpret',        Icon: Brain,      steps: ['llm_phase1', 'quality_check', 'llm_refine'] },
-  { name: 'Record',           Icon: Save,       steps: ['record_incident'] },
+  { name: 'Collect Evidence', steps: ['collect_diagnostics', 'replicaset_diff', 'dependency_chase', 'provenance_lookup'] },
+  { name: 'Match Knowledge',  steps: ['trusted_match_check'] },
+  { name: 'Interpret',        steps: ['llm_phase1', 'quality_check', 'llm_refine'] },
+  { name: 'Record',           steps: ['record_incident'] },
 ]
 
 function phaseForStep(stepName: string): Phase | undefined {
   return PHASES.find(p => p.steps.includes(stepName))
 }
 
-function interpretStatus(steps: TimelineStepEntry[]): 'ok' | 'warn' | 'error' {
-  const byName = Object.fromEntries(steps.map(s => [s.name, s]))
-  const last = byName.llm_refine || byName.llm_phase1
-  if (last && last.metadata?.parsed === false) return 'error'
-  if (byName.quality_check && byName.quality_check.metadata?.passed === false) return 'warn'
-  return 'ok'
+function computePhaseStatus(steps: TimelineStepEntry[]): 'ok' | 'error' {
+  return steps.some(s => s.metadata?.parsed === false) ? 'error' : 'ok'
 }
 
 export type PhaseItem = {
   kind: 'phase'
   name: string
-  Icon: LucideIcon
   steps: TimelineStepEntry[]
   durationMs: number
-  status: 'ok' | 'warn' | 'error' | 'neutral'
+  status: 'ok' | 'error'
 }
 export type FiredItem = { kind: 'fired'; entry: TimelineFiredEntry }
 export type ResolvedItem = { kind: 'resolved'; entry: TimelineResolvedEntry }
@@ -49,8 +42,7 @@ export function groupTimeline(entries: TimelineEntry[]): TimelineItem[] {
     // unknown step name with no phase mapping — drop rather than crash (defensive; shouldn't happen with real data)
     if (!phaseDef) { currentPhaseName = null; currentSteps = []; return }
     const durationMs = currentSteps.reduce((sum, s) => sum + (s.duration_ms || 0), 0)
-    const status = currentPhaseName === 'Interpret' ? interpretStatus(currentSteps) : 'neutral'
-    items.push({ kind: 'phase', name: currentPhaseName, Icon: phaseDef.Icon, steps: currentSteps, durationMs, status })
+    items.push({ kind: 'phase', name: currentPhaseName, steps: currentSteps, durationMs, status: computePhaseStatus(currentSteps) })
     currentPhaseName = null
     currentSteps = []
   }

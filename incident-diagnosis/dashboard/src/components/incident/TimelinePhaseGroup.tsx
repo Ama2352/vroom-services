@@ -4,20 +4,14 @@ import type { PhaseItem } from '../../utils/groupTimeline'
 import { formatDuration } from '../../lib/format'
 
 const STATUS_DOT: Record<PhaseItem['status'], string> = {
-  neutral: 'bg-border-strong',
   ok: 'bg-healthy',
-  warn: 'bg-root-cause',
   error: 'bg-critical',
 }
 
 export function TimelinePhaseGroup({ phase }: { phase: PhaseItem }) {
   const [expanded, setExpanded] = useState(false)
-  const Icon = phase.Icon
   return (
-    <div className="relative">
-      <span className="absolute -left-6 top-0.5 flex h-[22px] w-[22px] items-center justify-center rounded-full border-2 border-border-strong bg-white text-ink-soft">
-        <Icon size={12} />
-      </span>
+    <div>
       <button onClick={() => setExpanded(!expanded)} className="flex w-full items-center gap-2 text-left text-ink">
         <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[phase.status]}`} />
         <span className="text-sm font-semibold">{phase.name}</span>
