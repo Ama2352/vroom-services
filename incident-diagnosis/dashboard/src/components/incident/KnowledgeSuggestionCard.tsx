@@ -9,7 +9,7 @@ export function KnowledgeSuggestionCard({ suggestion }: { suggestion: PendingSug
     <Card>
       <CardTitle className="text-ink-soft">Knowledge Suggestion</CardTitle>
       <p className="mb-2 text-[11px] text-ink-faint">
-        Đề xuất lưu lại mẫu triệu chứng này vào Knowledge Base để nhận diện nhanh hơn lần sau — cần bạn duyệt.
+        Suggested to save this symptom pattern to the Knowledge Base for faster future recognition — approval required.
       </p>
       <p className="mb-2.5 rounded-md border border-border bg-canvas px-2.5 py-2 text-[12.5px] text-ink-soft">
         "{suggestion.symptom}"
