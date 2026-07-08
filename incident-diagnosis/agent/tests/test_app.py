@@ -758,3 +758,88 @@ def test_delete_history_removes_entry(client):
 
 def test_delete_history_missing_returns_404(client):
     assert client.delete("/history/does-not-exist").status_code == 404
+
+
+# ── /knowledge POST + /history GET/PUT extensions ─────────────────────────
+
+def test_create_knowledge_requires_actor(client):
+    r = client.post("/knowledge",
+        data=json.dumps({"key": "new_key", "root_cause_pattern": "x", "fix_action": "y", "conclusive": False}),
+        content_type="application/json")
+    assert r.status_code == 400
+
+
+def test_create_knowledge_rejects_bad_key_format(client):
+    r = client.post("/knowledge",
+        data=json.dumps({"actor": "Alice", "key": "Not-Snake-Case",
+                         "root_cause_pattern": "x", "fix_action": "y", "conclusive": False}),
+        content_type="application/json")
+    assert r.status_code == 400
+
+
+def test_create_knowledge_rejects_duplicate_key(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {"key": "dup_key", "root_cause_pattern": "a", "fix_action": "b"})
+    r = client.post("/knowledge",
+        data=json.dumps({"actor": "Alice", "key": "dup_key",
+                         "root_cause_pattern": "x", "fix_action": "y", "conclusive": False}),
+        content_type="application/json")
+    assert r.status_code == 409
+
+
+def test_create_knowledge_succeeds(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    r = client.post("/knowledge",
+        data=json.dumps({"actor": "Alice", "key": "brand_new_key",
+                         "root_cause_pattern": "Something broke", "fix_action": "Fix it", "conclusive": True}),
+        content_type="application/json")
+    assert r.status_code == 201
+    entry = memory.get_knowledge_entry(_FAKE_REDIS, "brand_new_key")
+    assert entry["root_cause_pattern"] == "Something broke"
+    assert entry["source"] == "manual"
+    assert entry["created_by"] == "Alice"
+    assert entry["conclusive"] is True
+
+
+def test_list_history_returns_all_entries(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {"key": "k1", "root_cause_pattern": "a", "fix_action": "b"})
+    memory.store_history_entry(_FAKE_REDIS, {"service": "ride", "knowledge_key": "k1", "symptom": "s"})
+    r = client.get("/history")
+    assert r.status_code == 200
+    body = r.get_json()["history"]
+    assert len(body) == 1
+    assert body[0]["service"] == "ride"
+    assert body[0]["knowledge_key"] == "k1"
+
+
+def test_update_history_reassigns_knowledge_key(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {"key": "k1", "root_cause_pattern": "a", "fix_action": "b"})
+    memory.store_knowledge_entry(_FAKE_REDIS, {"key": "k2", "root_cause_pattern": "c", "fix_action": "d"})
+    hid = memory.store_history_entry(_FAKE_REDIS, {"service": "ride", "knowledge_key": "k1", "symptom": "s"})
+    r = client.put(f"/history/{hid}",
+        data=json.dumps({"actor": "Alice", "knowledge_key": "k2", "service": "dispatch"}),
+        content_type="application/json")
+    assert r.status_code == 200
+    entry = memory.get_history_entry(_FAKE_REDIS, hid)
+    assert entry["knowledge_key"] == "k2"
+    assert entry["service"] == "dispatch"
+
+
+def test_update_history_rejects_nonexistent_knowledge_key(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    memory.store_knowledge_entry(_FAKE_REDIS, {"key": "k1", "root_cause_pattern": "a", "fix_action": "b"})
+    hid = memory.store_history_entry(_FAKE_REDIS, {"service": "ride", "knowledge_key": "k1", "symptom": "s"})
+    r = client.put(f"/history/{hid}",
+        data=json.dumps({"actor": "Alice", "knowledge_key": "does_not_exist"}),
+        content_type="application/json")
+    assert r.status_code == 400
+    entry = memory.get_history_entry(_FAKE_REDIS, hid)
+    assert entry["knowledge_key"] == "k1"
+

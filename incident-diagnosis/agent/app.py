@@ -1,4 +1,4 @@
-import os, json, uuid, threading, time
+import os, json, uuid, threading, time, re
 import redis as redis_lib
 import requests
 from flask import Flask, request, jsonify
@@ -14,10 +14,11 @@ from memory import (search_memory as memory_search,
                     approve_pending_suggestion, reject_pending_suggestion,
                     list_knowledge_entries, get_knowledge_entry, update_knowledge_entry,
                     delete_knowledge_entry, list_history_entries_for_knowledge,
-                    get_history_entry, update_history_entry, delete_history_entry)
+                    get_history_entry, update_history_entry, delete_history_entry,
+                    store_knowledge_entry, list_all_history_entries)
 from collector import collect_bundle
 from diagnostics import (collect_diagnostics, format_evidence,
-                         collect_change_evidence, resolve_dependency, collect_provenance)
+                          collect_change_evidence, resolve_dependency, collect_provenance)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 
@@ -31,6 +32,7 @@ GROQ_KEY       = os.environ.get("GROQ_API_KEY", "")
 rdb = redis_connect(REDIS_URL)
 
 _MODELS_KEY    = "config:models"
+_KNOWLEDGE_KEY_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 
 
 def _load_models(rdb) -> list:
@@ -521,6 +523,28 @@ def reject_pending_route(pid):
     return jsonify({"rejected": True})
 
 
+@app.route("/knowledge", methods=["POST"])
+def create_knowledge_route():
+    data  = request.get_json(silent=True) or {}
+    actor = (data.get("actor") or "").strip()
+    key   = (data.get("key") or "").strip()
+    if not actor:
+        return jsonify({"error": "actor is required"}), 400
+    if not _KNOWLEDGE_KEY_RE.match(key):
+        return jsonify({"error": "key must be snake_case (lowercase letters, digits, underscores, starting with a letter)"}), 400
+    if rdb.sismember(KNOWLEDGE_INDEX, key):
+        return jsonify({"error": "key already exists"}), 409
+    store_knowledge_entry(rdb, {
+        "key":                key,
+        "root_cause_pattern": data.get("root_cause_pattern", ""),
+        "fix_action":         data.get("fix_action", ""),
+        "conclusive":         bool(data.get("conclusive", False)),
+        "source":             "manual",
+        "created_by":         actor,
+    })
+    return jsonify({"created": True, "key": key}), 201
+
+
 @app.route("/knowledge", methods=["GET"])
 def list_knowledge_route():
     out = []
@@ -567,17 +591,29 @@ def delete_knowledge_route(key):
     return jsonify({"deleted": True})
 
 
+@app.route("/history", methods=["GET"])
+def list_history_route():
+    return jsonify({"history": list_all_history_entries(rdb)})
+
+
 @app.route("/history/<hid>", methods=["PUT"])
 def update_history_route(hid):
     data  = request.get_json(silent=True) or {}
     actor = (data.get("actor") or "").strip()
     if not actor:
         return jsonify({"error": "actor is required"}), 400
-    ok = update_history_entry(rdb, hid, {
+    fields = {
         "symptom":          data.get("symptom", ""),
         "context_notes":    data.get("context_notes", ""),
         "last_modified_by": actor,
-    })
+    }
+    if "knowledge_key" in data:
+        if not rdb.sismember(KNOWLEDGE_INDEX, data["knowledge_key"]):
+            return jsonify({"error": "knowledge_key does not exist"}), 400
+        fields["knowledge_key"] = data["knowledge_key"]
+    if "service" in data:
+        fields["service"] = data["service"]
+    ok = update_history_entry(rdb, hid, fields)
     if not ok:
         return jsonify({"error": "not found"}), 404
     return jsonify({"updated": True})

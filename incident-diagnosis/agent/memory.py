@@ -177,6 +177,10 @@ def update_history_entry(rdb: redis_lib.Redis, hid: str, fields: dict) -> bool:
         mapping["symptom"] = fields["symptom"]
     if "context_notes" in fields:
         mapping["context_notes"] = fields["context_notes"]
+    if "knowledge_key" in fields:
+        mapping["knowledge_key"] = fields["knowledge_key"]
+    if "service" in fields:
+        mapping["service"] = fields["service"]
     if "last_modified_by" in fields:
         mapping["last_modified_by"] = fields["last_modified_by"]
         mapping["last_modified_at"] = str(int(time.time()))
