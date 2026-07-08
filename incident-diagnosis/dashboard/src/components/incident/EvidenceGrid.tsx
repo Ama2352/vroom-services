@@ -42,13 +42,26 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
             <Row label="Last terminated reason" value={incident.last_terminated_reason} />
             {incident.restarts > 0 && <Row label="Restarts" value={incident.restarts} />}
           </dl>
-          {dep && (
+          {dep && dep.pods_available === dep.pods_desired && !dep.waiting_reason && (
             <div className="mt-2 flex justify-between border-t border-dashed border-border pt-2 text-[11px] text-ink-faint">
               <span>Dependency: {dep.namespace}/{dep.name}</span>
               <span className="font-mono">{dep.pods_available}/{dep.pods_desired}</span>
             </div>
           )}
         </Card>
+
+        {dep && (dep.pods_available !== dep.pods_desired || dep.waiting_reason) && (
+          <Card className="border-critical bg-critical-soft">
+            <CardTitle className="text-critical">
+              <AlertTriangle size={14} /> Dependency Unhealthy
+            </CardTitle>
+            <dl className="m-0">
+              <Row label="Name" value={`${dep.namespace}/${dep.name}`} />
+              <Row label="Pods" value={`${dep.pods_available}/${dep.pods_desired}`} />
+              <Row label="Waiting reason" value={dep.waiting_reason} />
+            </dl>
+          </Card>
+        )}
 
         {hasInit && (
           <Card>
