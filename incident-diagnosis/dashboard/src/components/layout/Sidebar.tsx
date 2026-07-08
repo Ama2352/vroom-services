@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useEffect, useState, type ChangeEvent } from 'react'
-import { Activity, ListChecks, Inbox, BookOpen } from 'lucide-react'
+import { Activity, ListChecks, Inbox, BookOpen, History } from 'lucide-react'
 import { ACTORS, getActor, setActor } from '../../lib/actor'
 import { api } from '../../lib/api'
 import { cn } from '../../lib/cn'
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: '/incidents', end: false, label: 'Incidents', Icon: ListChecks, badgeKey: undefined },
   { to: '/pending', end: false, label: 'Pending Knowledge', Icon: Inbox, badgeKey: 'pending' as const },
   { to: '/knowledge', end: false, label: 'Knowledge Base', Icon: BookOpen, badgeKey: undefined },
+  { to: '/history', end: false, label: 'History', Icon: History, badgeKey: undefined },
 ]
 
 export function Sidebar() {

@@ -8,6 +8,7 @@ import { PendingDetailPage } from './pages/PendingDetailPage'
 import { KnowledgePage } from './pages/KnowledgePage'
 import { KnowledgeCreatePage } from './pages/KnowledgeCreatePage'
 import { KnowledgeDetailPage } from './pages/KnowledgeDetailPage'
+import { HistoryPage } from './pages/HistoryPage'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/knowledge/new" element={<KnowledgeCreatePage />} />
         <Route path="/knowledge/:key" element={<KnowledgeDetailPage />} />
+        <Route path="/history" element={<HistoryPage />} />
       </Routes>
     </AppShell>
   )

@@ -9,6 +9,11 @@ export interface KnowledgeHistoryEntry {
   id: string
   service: string
   symptom: string
+  context_notes: string
+  knowledge_key: string
+  source: string
+  created_by: string
+  timestamp: string
 }
 
 export interface KnowledgeDetail {
