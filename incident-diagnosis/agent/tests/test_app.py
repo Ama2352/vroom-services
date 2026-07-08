@@ -70,6 +70,7 @@ def test_investigate_returns_structured_diagnosis(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -88,6 +89,7 @@ def test_investigate_includes_evidence_snippet(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -104,6 +106,7 @@ def test_investigate_includes_trusted_match_field(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.find_trusted_match",     return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -123,6 +126,7 @@ def test_investigate_trusted_match_true_omits_related_incidents(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.find_trusted_match",     return_value=fake_match), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -142,6 +146,7 @@ def test_investigate_stores_incident_and_returns_incident_id(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.find_trusted_match",     return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -161,6 +166,7 @@ def test_investigate_records_step_events_in_timeline(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.find_trusted_match",     return_value=None), \
          patch("app.interpret",              return_value=dict(_FAKE_DIAGNOSIS)), \
          patch("app._reflect_and_store"):
@@ -175,7 +181,7 @@ def test_investigate_records_step_events_in_timeline(client):
     # llm_phase1/quality_check/llm_refine are covered separately by Task 9's TestStepLog and
     # by Task 11's live manual verification.
     assert step_names == [
-        "collect_diagnostics", "replicaset_diff", "dependency_chase",
+        "collect_diagnostics", "replicaset_diff", "dependency_chase", "provenance_lookup",
         "trusted_match_check", "record_incident",
     ]
     for entry in timeline:
@@ -194,6 +200,7 @@ def test_investigate_step_log_not_in_response_body(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=fake_diagnosis_with_steps), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -288,6 +295,7 @@ def test_investigate_no_old_fields_in_response(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.find_trusted_match",     return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -310,6 +318,7 @@ def test_investigate_debug_param_returns_facts(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate?debug=true",
@@ -369,6 +378,7 @@ def test_investigate_includes_low_confidence(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS_WITH_LC), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -385,6 +395,7 @@ def test_investigate_forwards_pod_to_interpret(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS) as mock_interpret, \
          patch("app._reflect_and_store"):
         client.post("/investigate",
@@ -424,6 +435,7 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
          patch("app.collect_diagnostics",    side_effect=fake_collect_diagnostics), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.find_trusted_match",     side_effect=fake_find_trusted_match), \
          patch("app.search_memory_items",    side_effect=fake_search_memory_items), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
@@ -448,6 +460,7 @@ def test_investigate_query_includes_waiting_reason_and_log_error(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
+         patch("app.collect_provenance",      return_value=None), \
          patch("app.find_trusted_match",     side_effect=fake_find_trusted_match), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):

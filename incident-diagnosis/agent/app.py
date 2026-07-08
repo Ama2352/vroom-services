@@ -17,7 +17,7 @@ from memory import (search_memory as memory_search,
                     get_history_entry, update_history_entry, delete_history_entry)
 from collector import collect_bundle
 from diagnostics import (collect_diagnostics, format_evidence,
-                         collect_change_evidence, resolve_dependency)
+                         collect_change_evidence, resolve_dependency, collect_provenance)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 
@@ -338,7 +338,13 @@ def investigate():
     t1d        = time.time()
     _step("dependency_chase", t1c, t1d, found=dependency is not None)
 
-    facts = {**facts, "template_diff": template_diff, "dependency": dependency}
+    t1e        = time.time()
+    provenance = collect_provenance(service, namespace, template_diff)
+    t1f        = time.time()
+    _step("provenance_lookup", t1e, t1f,
+          classification=(provenance or {}).get("classification"))
+
+    facts = {**facts, "template_diff": template_diff, "dependency": dependency, "provenance": provenance}
 
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
           f"reason={facts['waiting_reason']!r} last_exit={facts['last_terminated_reason']!r} "

@@ -418,6 +418,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
                 "low_confidence": "true" if occurrence.get("low_confidence") else "false",
                 "template_diff":  json.dumps(occurrence.get("template_diff")),
                 "dependency":     json.dumps(occurrence.get("dependency")),
+                "provenance":     json.dumps(occurrence.get("provenance")),
             })
             rdb.hset(f"incident:{oid_str}", mapping=mapping)
             append_incident_timeline(rdb, oid_str, {
@@ -438,6 +439,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         "low_confidence": "true" if occurrence.get("low_confidence") else "false",
         "template_diff":  json.dumps(occurrence.get("template_diff")),
         "dependency":     json.dumps(occurrence.get("dependency")),
+        "provenance":     json.dumps(occurrence.get("provenance")),
         "status":       "open",
         "resolved_at":  "",
         "resolved_by":  "",
@@ -464,6 +466,7 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
         d[f] = int(d.get(f) or 0)
     d["template_diff"] = json.loads(d["template_diff"]) if "template_diff" in d else None
     d["dependency"] = json.loads(d["dependency"]) if "dependency" in d else None
+    d["provenance"] = json.loads(d["provenance"]) if "provenance" in d else None
     return d
 
 
