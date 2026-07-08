@@ -288,7 +288,7 @@ def tool_argocd_sync():
         raw = json.loads(body.get("stdout", "{}"))
         status = raw.get("status", {}).get("sync", {}).get("status", "Unknown")
         return jsonify({"sync_status": status})
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, AttributeError):
         return jsonify({"sync_status": "Unknown"})
 
 
