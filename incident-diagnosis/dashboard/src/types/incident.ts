@@ -23,6 +23,14 @@ export interface Dependency {
   waiting_reason?: string
 }
 
+export type Provenance =
+  | { classification: 'hotfix'; changed_at: string }
+  | {
+      classification: 'gitops-commit'
+      commit: { sha: string; author: string; message: string; url: string; diff_snippet: string } | null
+      pr: { number: number; title: string; url: string } | null
+    }
+
 export interface PendingSuggestionRef {
   id: string
   symptom: string
@@ -76,6 +84,7 @@ export interface Incident {
   event_object?: string
   template_diff: TemplateDiff | null
   dependency: Dependency | null
+  provenance: Provenance | null
   pending_suggestion: PendingSuggestionRef | null
   timeline: TimelineEntry[]
 }

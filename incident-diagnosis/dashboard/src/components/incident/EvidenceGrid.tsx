@@ -1,5 +1,5 @@
 import { Activity, RefreshCw, AlertTriangle, History } from 'lucide-react'
-import type { Incident } from '../../types/incident'
+import type { Incident, Provenance } from '../../types/incident'
 import { Card, CardTitle } from '../ui/Card'
 
 function Row({ label, value }: { label: string; value: string | number | null | undefined }) {
@@ -20,6 +20,46 @@ function DiffBlock({ header, oldValue, newValue }: { header: string; oldValue?: 
         <div className="whitespace-pre-wrap break-words bg-critical-soft px-2 py-1 text-critical">- {oldValue}</div>
         <div className="whitespace-pre-wrap break-words bg-healthy-soft px-2 py-1 text-healthy">+ {newValue}</div>
       </div>
+    </div>
+  )
+}
+
+function ProvenanceNote({ provenance }: { provenance: Provenance }) {
+  if (provenance.classification === 'hotfix') {
+    return (
+      <div className="mt-2 rounded-md border border-root-cause bg-root-cause-soft px-2.5 py-2 text-xs text-root-cause-label">
+        Manual change (not GitOps) — detected at {provenance.changed_at}
+      </div>
+    )
+  }
+  if (!provenance.commit) {
+    return (
+      <div className="mt-2 rounded-md border border-border bg-canvas px-2.5 py-2 text-xs text-ink-faint">
+        Change confirmed via GitOps but the originating commit wasn't found.
+      </div>
+    )
+  }
+  const { commit, pr } = provenance
+  return (
+    <div className="mt-2">
+      <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
+        <a href={commit.url} target="_blank" rel="noreferrer" className="font-mono text-accent hover:text-accent-strong">
+          {commit.sha}
+        </a>
+        <span>{commit.message}</span>
+        <span className="text-ink-faint">by {commit.author}</span>
+        {pr && (
+          <a href={pr.url} target="_blank" rel="noreferrer"
+             className="rounded-full bg-info-soft px-2 py-0.5 text-info hover:underline">
+            PR #{pr.number}: {pr.title}
+          </a>
+        )}
+      </div>
+      {commit.diff_snippet && (
+        <pre className="overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-2 font-mono text-[11px] text-ink-soft">
+          {commit.diff_snippet}
+        </pre>
+      )}
     </div>
   )
 }
@@ -85,6 +125,7 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
             <DiffBlock header={`${incident.service} · image`} oldValue={td.old_image} newValue={td.new_image} />
           )}
           <Row label="Changed at" value={td.changed_at} />
+          {incident.provenance && <ProvenanceNote provenance={incident.provenance} />}
         </Card>
       )}
 
