@@ -20,6 +20,7 @@ export function PendingDetailPage() {
   const [form, setForm] = useState({
     knowledge_key: '', symptom: '', context_notes: '',
     root_cause_pattern: '', fix_action: '', conclusive: false,
+    trigger_waiting_reason: '',
   })
   const [submitting, setSubmitting] = useState(false)
 
@@ -39,6 +40,7 @@ export function PendingDetailPage() {
         root_cause_pattern: p.root_cause,
         fix_action: p.fix_action,
         conclusive: false,
+        trigger_waiting_reason: p.trigger_waiting_reason || '',
       })
     }).catch(() => setError('Failed to load data from the incident-agent API.'))
   }
@@ -52,6 +54,7 @@ export function PendingDetailPage() {
       symptom: form.symptom, context_notes: form.context_notes,
       root_cause_pattern: form.root_cause_pattern, fix_action: form.fix_action,
       conclusive: form.conclusive,
+      trigger_waiting_reason: form.trigger_waiting_reason,
     }).then(() => navigate('/pending')).finally(() => setSubmitting(false))
   }
 
@@ -105,6 +108,13 @@ export function PendingDetailPage() {
 
       {mode === 'new' && (
         <>
+          <div className="mb-4">
+            <label className={labelClasses}>Trigger waiting reason</label>
+            <input className={inputClasses} value={form.trigger_waiting_reason}
+                   onChange={e => setForm({ ...form, trigger_waiting_reason: e.target.value })}
+                   placeholder="e.g. OOMKilled, or Dependency:postgres:ZeroReplicas" />
+            <div className="mt-1 text-xs text-ink-faint">Optional. Conclusive matching uses this status signal to link incidents automatically.</div>
+          </div>
           <div className="mb-4">
             <label className={labelClasses}>Root cause pattern</label>
             <textarea className={inputClasses} rows={3} value={form.root_cause_pattern}

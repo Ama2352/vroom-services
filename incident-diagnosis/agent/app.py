@@ -15,7 +15,8 @@ from memory import (search_memory as memory_search,
                     list_knowledge_entries, get_knowledge_entry, update_knowledge_entry,
                     delete_knowledge_entry, list_history_entries_for_knowledge,
                     get_history_entry, update_history_entry, delete_history_entry,
-                    store_knowledge_entry, list_all_history_entries)
+                    store_knowledge_entry, list_all_history_entries,
+                    _derive_reason_signal)
 from collector import collect_bundle
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance)
@@ -91,6 +92,9 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
         k.decode() if isinstance(k, bytes) else k for k in rdb.smembers(KNOWLEDGE_INDEX)
     )) or "(none yet)"
 
+    incident_full = get_incident(rdb, incident.get("id")) if incident.get("id") else None
+    trigger_waiting_reason = _derive_reason_signal(incident_full) if incident_full else ""
+
     _mock_mode = os.environ.get("LLM_MOCK", "").lower() == "true"
     if _mock_mode:
         proposed_key = "mock_key"
@@ -103,6 +107,7 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
             "fix_action":             fix_command or "",
             "context_notes":          "",
             "source_incident_id":     incident.get("id", ""),
+            "trigger_waiting_reason": trigger_waiting_reason,
         }
         store_pending_suggestion(rdb, suggestion)
         print(f"[reflect] mock stored pending suggestion for {incident['service']}", flush=True)
@@ -145,6 +150,7 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
             "fix_action":             parsed.get("fix_action", ""),
             "context_notes":          parsed.get("context_notes", ""),
             "source_incident_id":     incident.get("id", ""),
+            "trigger_waiting_reason": trigger_waiting_reason,
         }
         store_pending_suggestion(rdb, suggestion)
         print(f"[reflect] stored pending suggestion: {suggestion['symptom']}", flush=True)

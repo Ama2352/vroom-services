@@ -21,6 +21,7 @@ export interface PendingDetail {
   proposed_knowledge_key: string
   is_new_knowledge_key: boolean
   status: PendingStatus
+  trigger_waiting_reason?: string
 }
 
 export interface ApprovePayload {
@@ -32,4 +33,5 @@ export interface ApprovePayload {
   root_cause_pattern: string
   fix_action: string
   conclusive: boolean
+  trigger_waiting_reason?: string
 }

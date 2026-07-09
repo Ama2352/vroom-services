@@ -311,6 +311,7 @@ def store_pending_suggestion(rdb: redis_lib.Redis, suggestion: dict) -> str:
         "fix_action":             suggestion.get("fix_action", ""),
         "context_notes":          suggestion.get("context_notes", ""),
         "source_incident_id":     suggestion.get("source_incident_id", ""),
+        "trigger_waiting_reason": suggestion.get("trigger_waiting_reason", ""),
         "created_at":             str(int(time.time())),
         "status":                 "pending",
         "decided_by":             "",

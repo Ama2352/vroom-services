@@ -14,11 +14,11 @@ function Row({ label, value }: { label: string; value: string | number | null | 
 
 function DiffBlock({ header, oldValue, newValue }: { header: string; oldValue?: string; newValue?: string }) {
   return (
-    <div className="mb-2 last:mb-0">
-      <div className="mb-1 font-mono text-xs text-ink-faint">{header}</div>
-      <div className="overflow-hidden rounded-md border border-border font-mono text-[11px]">
-        <div className="whitespace-pre-wrap break-words bg-critical-soft px-2 py-1 text-critical">- {oldValue}</div>
-        <div className="whitespace-pre-wrap break-words bg-healthy-soft px-2 py-1 text-healthy">+ {newValue}</div>
+    <div className="mb-3 last:mb-0">
+      <div className="mb-1.5 font-mono text-xs text-ink-faint">{header}</div>
+      <div className="overflow-hidden rounded-md border border-border font-mono text-[11px] leading-relaxed">
+        <div className="whitespace-pre-wrap break-words bg-critical-soft px-3 py-1.5 text-critical">- {oldValue}</div>
+        <div className="whitespace-pre-wrap break-words bg-healthy-soft px-3 py-1.5 text-healthy">+ {newValue}</div>
       </div>
     </div>
   )
@@ -59,7 +59,7 @@ function ColoredDiffSnippet({ diff }: { diff: string }) {
 function ProvenanceNote({ provenance }: { provenance: Provenance }) {
   if (provenance.classification === 'hotfix') {
     return (
-      <div className="mt-2 rounded-md border border-root-cause bg-root-cause-soft px-2.5 py-2 text-xs text-root-cause-label">
+      <div className="mt-3 rounded-md border border-root-cause bg-root-cause-soft px-3 py-2 text-xs text-root-cause-label font-medium">
         Manual change (not GitOps) — detected at {formatChangedAt(provenance.changed_at)}
       </div>
     )
@@ -95,6 +95,7 @@ function ProvenanceNote({ provenance }: { provenance: Provenance }) {
 export function EvidenceGrid({ incident }: { incident: Incident }) {
   const td = incident.template_diff
   const dep = incident.dependency
+  const prov = incident.provenance
   const hasInit = Boolean(incident.init_waiting_reason || incident.init_last_terminated_reason || incident.init_restarts > 0)
   const hasLogEvent = Boolean(incident.log_error || incident.event_reason)
 
@@ -147,47 +148,35 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
         )}
       </div>
 
-      {(td || incident.provenance) && (
+      {(td || prov) && (
         <Card>
           <CardTitle><History size={14} /> Recent Change</CardTitle>
-          {incident.provenance && incident.provenance.target === 'dependency' && incident.provenance.classification === 'hotfix' ? (
-            <div className="rounded-md border border-root-cause-soft bg-root-cause-soft p-3 mb-3">
-              <div className="flex items-start gap-2.5">
-                <AlertTriangle className="text-root-cause shrink-0 mt-0.5" size={16} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-root-cause">Manual Change Detected (Not GitOps)</div>
-                  <p className="text-[11px] text-ink-soft mt-1 leading-normal">
-                    Dependency <span className="font-semibold text-ink">{incident.provenance.dependency_name}</span> is currently <span className="font-semibold text-root-cause">OutOfSync</span> in ArgoCD due to manual scaling/configuration drift:
-                  </p>
-                  {incident.provenance.drift && incident.provenance.drift.length > 0 ? (
-                    <div className="mt-3 flex flex-col gap-2.5">
-                      {incident.provenance.drift.map((item, idx) => (
-                        <div key={idx} className="text-[11px] font-mono">
-                          <div className="text-ink-soft font-semibold mb-1">{item.key}:</div>
-                          <div className="flex flex-col gap-1 pl-2 border-l border-border">
-                            <div className="text-healthy bg-healthy-soft px-1.5 py-0.5 rounded-sm">
-                              Desired: {item.correct}
-                            </div>
-                            <div className="text-critical bg-critical-soft px-1.5 py-0.5 rounded-sm">
-                              Actual: {item.wrong}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    incident.provenance.diff && (
-                      <div className="mt-2 inline-block rounded bg-critical-soft px-2 py-0.5 font-mono text-[10px] text-critical border border-critical-soft">
-                        {incident.provenance.diff}
-                      </div>
-                    )
-                  )}
+          {prov && prov.target === 'dependency' && prov.classification === 'hotfix' ? (
+            <>
+              <p className="text-xs text-ink-soft mb-3 leading-normal">
+                Dependency <span className="font-semibold text-ink">{prov.dependency_name}</span> is currently <span className="font-semibold text-root-cause">OutOfSync</span> in ArgoCD due to manual scaling/configuration drift:
+              </p>
+              {prov.drift && prov.drift.map((item, idx) => (
+                <DiffBlock
+                  key={idx}
+                  header={`${prov.dependency_name} · ${item.key}`}
+                  oldValue={`Desired: ${item.correct}`}
+                  newValue={`Actual: ${item.wrong}`}
+                />
+              ))}
+              {prov.changed_at && (
+                <div className="mt-3 flex justify-between border-t border-border pt-2.5 text-xs text-ink-soft">
+                  <span>Changed at</span>
+                  <span className="font-mono text-ink">
+                    {formatChangedAt(prov.changed_at)}
+                  </span>
                 </div>
-              </div>
-            </div>
+              )}
+              <ProvenanceNote provenance={prov} />
+            </>
           ) : (
             <>
-              {td && (!incident.provenance || incident.provenance.classification === 'hotfix') && (
+              {td && (!prov || prov.classification === 'hotfix') && (
                 <>
                   {td.env_changed && td.env_diff.map((d, i) => (
                     <DiffBlock key={i} header={`${incident.service} · env.${d.key}`} oldValue={d.old_value} newValue={d.new_value} />
@@ -197,17 +186,19 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
                   )}
                 </>
               )}
-              {((incident.provenance && incident.provenance.classification === 'gitops-commit' && incident.provenance.commit?.date) || (td && td.changed_at)) && (
-                <Row
-                  label="Changed at"
-                  value={formatChangedAt(
-                    (incident.provenance?.classification === 'gitops-commit' && incident.provenance.commit?.date)
-                      ? incident.provenance.commit.date
-                      : (td ? td.changed_at : "")
-                  )}
-                />
+              {((prov && prov.classification === 'gitops-commit' && prov.commit?.date) || (td && td.changed_at)) && (
+                <div className="mt-3 flex justify-between border-t border-border pt-2.5 text-xs text-ink-soft">
+                  <span>Changed at</span>
+                  <span className="font-mono text-ink">
+                    {formatChangedAt(
+                      (prov?.classification === 'gitops-commit' && prov.commit?.date)
+                        ? prov.commit.date
+                        : (td ? td.changed_at : "")
+                    )}
+                  </span>
+                </div>
               )}
-              {incident.provenance && <ProvenanceNote provenance={incident.provenance} />}
+              {prov && <ProvenanceNote provenance={prov} />}
             </>
           )}
         </Card>
