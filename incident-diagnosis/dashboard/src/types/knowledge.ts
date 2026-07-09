@@ -21,6 +21,7 @@ export interface KnowledgeDetail {
     root_cause_pattern: string
     fix_action: string
     conclusive: boolean
+    trigger_waiting_reason?: string
   }
   history: KnowledgeHistoryEntry[]
 }

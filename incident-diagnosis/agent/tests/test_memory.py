@@ -287,6 +287,29 @@ def test_derive_reason_signal_zero_replicas():
     assert memory._derive_reason_signal(facts) == "ZeroReplicas"
 
 
+def test_derive_reason_signal_dependency_unhealthy():
+    facts = {
+        "waiting_reason": "",
+        "pods_available": 1, "pods_desired": 1,
+        "dependency": {"name": "postgres", "namespace": "platform", "pods_available": 0, "pods_desired": 0, "waiting_reason": ""}
+    }
+    assert memory._derive_reason_signal(facts) == "Dependency:postgres:ZeroReplicas"
+
+    facts2 = {
+        "waiting_reason": "",
+        "pods_available": 1, "pods_desired": 1,
+        "dependency": {"name": "postgres", "namespace": "platform", "pods_available": 1, "pods_desired": 2, "waiting_reason": ""}
+    }
+    assert memory._derive_reason_signal(facts2) == "Dependency:postgres:Unhealthy"
+
+    facts3 = {
+        "waiting_reason": "",
+        "pods_available": 1, "pods_desired": 1,
+        "dependency": {"name": "postgres", "namespace": "platform", "pods_available": 0, "pods_desired": 1, "waiting_reason": "CrashLoopBackOff"}
+    }
+    assert memory._derive_reason_signal(facts3) == "Dependency:postgres:CrashLoopBackOff"
+
+
 def test_derive_reason_signal_empty_when_nothing_matches():
     facts = {"waiting_reason": "", "pods_available": 1, "pods_desired": 1}
     assert memory._derive_reason_signal(facts) == ""

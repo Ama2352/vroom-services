@@ -538,6 +538,7 @@ def create_knowledge_route():
         "key":                key,
         "root_cause_pattern": data.get("root_cause_pattern", ""),
         "fix_action":         data.get("fix_action", ""),
+        "trigger_waiting_reason": data.get("trigger_waiting_reason", ""),
         "conclusive":         bool(data.get("conclusive", False)),
         "source":             "manual",
         "created_by":         actor,

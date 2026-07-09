@@ -14,7 +14,7 @@ const labelClasses = 'mb-1 block text-sm font-medium text-ink-soft'
 export function KnowledgeDetailPage() {
   const { key } = useParams()
   const [data, setData] = useState<KnowledgeDetail | undefined>(undefined)
-  const [form, setForm] = useState<{ root_cause_pattern: string; fix_action: string; conclusive: boolean } | null>(null)
+  const [form, setForm] = useState<{ root_cause_pattern: string; fix_action: string; trigger_waiting_reason: string; conclusive: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -26,6 +26,7 @@ export function KnowledgeDetailPage() {
       setForm({
         root_cause_pattern: d.knowledge.root_cause_pattern,
         fix_action: d.knowledge.fix_action,
+        trigger_waiting_reason: d.knowledge.trigger_waiting_reason || '',
         conclusive: d.knowledge.conclusive,
       })
     }).catch(() => setError('Failed to load data from the incident-agent API.'))
@@ -50,6 +51,13 @@ export function KnowledgeDetailPage() {
     <div className="max-w-2xl space-y-4">
       <div className="rounded-[10px] border border-border bg-surface p-4">
         <h2 className="mb-4 text-base font-bold text-ink">{key}</h2>
+        <div className="mb-4">
+          <label className={labelClasses}>Trigger waiting reason</label>
+          <input className={inputClasses} value={form.trigger_waiting_reason}
+                 onChange={e => setForm({ ...form, trigger_waiting_reason: e.target.value })}
+                 placeholder="e.g. OOMKilled, or Dependency:postgres:ZeroReplicas" />
+          <div className="mt-1 text-xs text-ink-faint">Optional status signal for conclusive matching.</div>
+        </div>
         <div className="mb-4">
           <label className={labelClasses}>Root cause pattern</label>
           <textarea className={inputClasses} rows={3} value={form.root_cause_pattern}

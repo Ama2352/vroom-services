@@ -222,6 +222,16 @@ def _derive_reason_signal(facts: dict) -> str:
         return facts["event_reason"]
     if facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0:
         return "ZeroReplicas"
+
+    dep = facts.get("dependency")
+    if dep and isinstance(dep, dict):
+        if dep.get("pods_desired") == 0:
+            return f"Dependency:{dep.get('name')}:ZeroReplicas"
+        elif dep.get("waiting_reason"):
+            return f"Dependency:{dep.get('name')}:{dep.get('waiting_reason')}"
+        elif dep.get("pods_available") != dep.get("pods_desired"):
+            return f"Dependency:{dep.get('name')}:Unhealthy"
+
     return ""
 
 

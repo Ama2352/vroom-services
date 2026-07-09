@@ -9,7 +9,7 @@ const labelClasses = 'mb-1 block text-sm font-medium text-ink-soft'
 
 export function KnowledgeCreatePage() {
   const navigate = useNavigate()
-  const [form, setForm] = useState({ key: '', root_cause_pattern: '', fix_action: '', conclusive: false })
+  const [form, setForm] = useState({ key: '', root_cause_pattern: '', fix_action: '', trigger_waiting_reason: '', conclusive: false })
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -34,6 +34,14 @@ export function KnowledgeCreatePage() {
                onChange={e => setForm({ ...form, key: e.target.value })}
                placeholder="e.g. bad_dependency_address" />
         <div className="mt-1 text-xs text-ink-faint">snake_case, must be unique.</div>
+      </div>
+
+      <div className="mb-4">
+        <label className={labelClasses}>Trigger waiting reason</label>
+        <input className={inputClasses} value={form.trigger_waiting_reason}
+               onChange={e => setForm({ ...form, trigger_waiting_reason: e.target.value })}
+               placeholder="e.g. OOMKilled, or Dependency:postgres:ZeroReplicas" />
+        <div className="mt-1 text-xs text-ink-faint">Optional. Conclusive matching uses this status signal to link incidents automatically.</div>
       </div>
 
       <div className="mb-4">
