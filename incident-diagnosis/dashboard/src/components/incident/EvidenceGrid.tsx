@@ -151,18 +151,36 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
         <Card>
           <CardTitle><History size={14} /> Recent Change</CardTitle>
           {incident.provenance && incident.provenance.target === 'dependency' && incident.provenance.classification === 'hotfix' ? (
-            <div className="rounded-md border border-critical bg-critical-soft p-3 mb-3">
+            <div className="rounded-md border border-root-cause-soft bg-root-cause-soft p-3 mb-3">
               <div className="flex items-start gap-2.5">
-                <AlertTriangle className="text-critical shrink-0 mt-0.5" size={16} />
-                <div>
-                  <div className="text-xs font-semibold text-critical">Manual Change Detected (Not GitOps)</div>
+                <AlertTriangle className="text-root-cause shrink-0 mt-0.5" size={16} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-root-cause">Manual Change Detected (Not GitOps)</div>
                   <p className="text-[11px] text-ink-soft mt-1 leading-normal">
-                    Dependency <span className="font-semibold text-ink">{incident.provenance.dependency_name}</span> is currently <span className="font-semibold text-critical">OutOfSync</span> in ArgoCD due to manual scaling/configuration drift:
+                    Dependency <span className="font-semibold text-ink">{incident.provenance.dependency_name}</span> is currently <span className="font-semibold text-root-cause">OutOfSync</span> in ArgoCD due to manual scaling/configuration drift:
                   </p>
-                  {incident.provenance.diff && (
-                    <div className="mt-2 inline-block rounded bg-critical/10 px-2 py-0.5 font-mono text-[10px] text-critical border border-critical/10">
-                      {incident.provenance.diff}
+                  {incident.provenance.drift && incident.provenance.drift.length > 0 ? (
+                    <div className="mt-3 flex flex-col gap-2.5">
+                      {incident.provenance.drift.map((item, idx) => (
+                        <div key={idx} className="text-[11px] font-mono">
+                          <div className="text-ink-soft font-semibold mb-1">{item.key}:</div>
+                          <div className="flex flex-col gap-1 pl-2 border-l border-border">
+                            <div className="text-healthy bg-healthy-soft px-1.5 py-0.5 rounded-sm">
+                              Desired: {item.correct}
+                            </div>
+                            <div className="text-critical bg-critical-soft px-1.5 py-0.5 rounded-sm">
+                              Actual: {item.wrong}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
+                  ) : (
+                    incident.provenance.diff && (
+                      <div className="mt-2 inline-block rounded bg-critical-soft px-2 py-0.5 font-mono text-[10px] text-critical border border-critical-soft">
+                        {incident.provenance.diff}
+                      </div>
+                    )
                   )}
                 </div>
               </div>

@@ -326,7 +326,7 @@ def _parse_yaml_deployment(yaml_str: str) -> dict:
     return res
 
 
-def _compute_drift(live_deploy: dict, desired_yaml_str: str) -> str:
+def _compute_drift(live_deploy: dict, desired_yaml_str: str) -> list:
     desired = _parse_yaml_deployment(desired_yaml_str)
     live_spec = live_deploy.get("spec", {})
     desired_spec = desired.get("spec", {})
@@ -337,7 +337,11 @@ def _compute_drift(live_deploy: dict, desired_yaml_str: str) -> str:
     live_rep = live_spec.get("replicas", 1)
     desired_rep = desired_spec.get("replicas", 1)
     if live_rep != desired_rep:
-        diffs.append(f"replicas: {desired_rep} ➔ {live_rep}")
+        diffs.append({
+            "key": "replicas",
+            "correct": str(desired_rep),
+            "wrong": str(live_rep)
+        })
 
     # Image
     def _first_img(spec):
@@ -348,7 +352,11 @@ def _compute_drift(live_deploy: dict, desired_yaml_str: str) -> str:
     live_img = _first_img(live_spec)
     desired_img = _first_img(desired_spec)
     if live_img and desired_img and live_img != desired_img:
-        diffs.append(f"image: {desired_img} ➔ {live_img}")
+        diffs.append({
+            "key": "image",
+            "correct": desired_img,
+            "wrong": live_img
+        })
 
     # Env
     def _env_map(spec):
@@ -364,12 +372,20 @@ def _compute_drift(live_deploy: dict, desired_yaml_str: str) -> str:
 
     for k, v in desired_env.items():
         if live_env.get(k) != v:
-            diffs.append(f"env.{k}: {v} ➔ {live_env.get(k, '')}")
+            diffs.append({
+                "key": f"env.{k}",
+                "correct": v,
+                "wrong": live_env.get(k, "")
+            })
     for k, v in live_env.items():
         if k not in desired_env:
-            diffs.append(f"env.{k}: added ➔ {v}")
+            diffs.append({
+                "key": f"env.{k}",
+                "correct": "(none)",
+                "wrong": v
+            })
 
-    return ", ".join(diffs)
+    return diffs
 
 
 def _fetch_git_provenance(file_path: str, synced_sha: str) -> dict:
@@ -477,12 +493,14 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None,
 
             if sync_status != "Synced":
                 desired_yaml = _github_get_raw_file(file_path, synced_sha or "HEAD")
-                drift = _compute_drift(live_deploy, desired_yaml) if desired_yaml else "drift detected"
+                drift = _compute_drift(live_deploy, desired_yaml) if desired_yaml else [{"key": "configuration", "correct": "GitOps config", "wrong": "drift detected"}]
+                diff_str = ", ".join(f"{x['key']}: {x['correct']} ➔ {x['wrong']}" for x in drift)
                 return {
                     "classification": "hotfix",
                     "target": "dependency",
                     "dependency_name": f"{dep_ns}/{dep_name}",
-                    "diff": drift
+                    "diff": diff_str,
+                    "drift": drift
                 }
             else:
                 res = _fetch_git_provenance(file_path, synced_sha)

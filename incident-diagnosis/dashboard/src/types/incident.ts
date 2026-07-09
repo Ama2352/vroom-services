@@ -24,12 +24,13 @@ export interface Dependency {
 }
 
 export type Provenance =
-  | { classification: 'hotfix'; target?: 'dependency'; dependency_name?: string; diff?: string; changed_at?: string }
+  | { classification: 'hotfix'; target?: 'dependency'; dependency_name?: string; diff?: string; drift?: Array<{ key: string; correct: string; wrong: string }>; changed_at?: string }
   | {
       classification: 'gitops-commit'
       target?: 'dependency'
       dependency_name?: string
       diff?: string
+      drift?: Array<{ key: string; correct: string; wrong: string }>
       commit: { sha: string; author: string; message: string; url: string; diff_snippet: string; date?: string } | null
       pr: { number: number; title: string; url: string } | null
     }

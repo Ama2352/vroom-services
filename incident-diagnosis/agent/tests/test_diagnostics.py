@@ -652,5 +652,6 @@ spec:
             "classification": "hotfix",
             "target": "dependency",
             "dependency_name": "platform/postgres",
-            "diff": "replicas: 1 ➔ 0"
+            "diff": "replicas: 1 ➔ 0",
+            "drift": [{"key": "replicas", "correct": "1", "wrong": "0"}]
         }
