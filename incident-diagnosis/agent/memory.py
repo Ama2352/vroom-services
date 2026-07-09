@@ -386,7 +386,7 @@ def reject_pending_suggestion(rdb: redis_lib.Redis, pending_id: str, actor: str,
 OPEN_INDEX = "incident:open_index"
 
 _INCIDENT_EVIDENCE_FIELDS = [
-    "pods_available", "pods_desired", "waiting_reason", "last_terminated_reason",
+    "pods_available", "pods_desired", "pods_running", "pods_ready", "waiting_reason", "last_terminated_reason",
     "restarts", "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
     "log_error", "event_reason", "event_message", "event_object",
 ]
@@ -466,7 +466,7 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
     d = _hash_to_dict(raw)
     d["id"] = iid
     d["low_confidence"] = _to_bool(d.get("low_confidence"))
-    for f in ("pods_available", "pods_desired", "restarts", "init_restarts"):
+    for f in ("pods_available", "pods_desired", "pods_running", "pods_ready", "restarts", "init_restarts"):
         d[f] = int(d.get(f) or 0)
     d["template_diff"] = json.loads(d["template_diff"]) if "template_diff" in d else None
     d["dependency"] = json.loads(d["dependency"]) if "dependency" in d else None

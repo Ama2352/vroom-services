@@ -248,6 +248,12 @@ def _parse_yaml_deployment(yaml_str: str) -> dict:
     in_template = False
     in_containers = False
     in_env = False
+
+    spec_indent = -1
+    template_indent = -1
+    containers_indent = -1
+    env_indent = -1
+
     current_env = {}
 
     for line in lines:
@@ -257,9 +263,29 @@ def _parse_yaml_deployment(yaml_str: str) -> dict:
 
         indent = len(line) - len(stripped)
 
+        if in_env and (indent < env_indent or (indent == env_indent and not stripped.startswith("-"))):
+            in_env = False
+            env_indent = -1
+            if current_env:
+                res["spec"]["template"]["spec"]["containers"][0]["env"].append(current_env)
+                current_env = {}
+
+        if in_containers and (indent < containers_indent or (indent == containers_indent and not stripped.startswith("-"))):
+            in_containers = False
+            containers_indent = -1
+
+        if in_template and indent <= template_indent:
+            in_template = False
+            template_indent = -1
+
+        if in_spec and indent <= spec_indent:
+            in_spec = False
+            spec_indent = -1
+
         if stripped.startswith("spec:"):
-            if indent == 0:
+            if not in_spec:
                 in_spec = True
+                spec_indent = indent
         elif stripped.startswith("replicas:") and in_spec and not in_template:
             val = stripped.split(":", 1)[1].strip()
             try:
@@ -268,24 +294,25 @@ def _parse_yaml_deployment(yaml_str: str) -> dict:
                 pass
         elif stripped.startswith("template:") and in_spec:
             in_template = True
+            template_indent = indent
         elif stripped.startswith("containers:") and in_template:
             in_containers = True
+            containers_indent = indent
         elif (stripped.startswith("- image:") or stripped.startswith("image:")) and in_containers:
             img = stripped.split(":", 1)[1].strip()
-            if img.startswith('"') and img.endswith('"'):
+            if (img.startswith('"') and img.endswith('"')) or (img.startswith("'") and img.endswith("'")):
                 img = img[1:-1]
             res["spec"]["template"]["spec"]["containers"][0]["image"] = img
         elif stripped.startswith("env:") and in_containers:
             in_env = True
+            env_indent = indent
         elif stripped.startswith("- name:") and in_env:
             if current_env:
                 res["spec"]["template"]["spec"]["containers"][0]["env"].append(current_env)
             name = stripped.split(":", 1)[1].strip()
+            if (name.startswith('"') and name.endswith('"')) or (name.startswith("'") and name.endswith("'")):
+                name = name[1:-1]
             current_env = {"name": name, "value": ""}
-        elif stripped.startswith("name:") and in_env:
-            if current_env and not stripped.startswith("-"):
-                name = stripped.split(":", 1)[1].strip()
-                current_env["name"] = name
         elif stripped.startswith("value:") and in_env:
             val = stripped.split(":", 1)[1].strip()
             if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):

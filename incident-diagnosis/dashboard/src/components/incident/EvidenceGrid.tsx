@@ -151,8 +151,21 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
         <Card>
           <CardTitle><History size={14} /> Recent Change</CardTitle>
           {incident.provenance && incident.provenance.target === 'dependency' && incident.provenance.classification === 'hotfix' ? (
-            <div className="text-xs text-critical font-medium mb-3">
-              ⚠️ Manual change (not GitOps) — {incident.provenance.dependency_name} is OutOfSync in ArgoCD ({incident.provenance.diff})
+            <div className="rounded-md border border-critical bg-critical-soft p-3 mb-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="text-critical shrink-0 mt-0.5" size={16} />
+                <div>
+                  <div className="text-xs font-semibold text-critical">Manual Change Detected (Not GitOps)</div>
+                  <p className="text-[11px] text-ink-soft mt-1 leading-normal">
+                    Dependency <span className="font-semibold text-ink">{incident.provenance.dependency_name}</span> is currently <span className="font-semibold text-critical">OutOfSync</span> in ArgoCD due to manual scaling/configuration drift:
+                  </p>
+                  {incident.provenance.diff && (
+                    <div className="mt-2 inline-block rounded bg-critical/10 px-2 py-0.5 font-mono text-[10px] text-critical border border-critical/10">
+                      {incident.provenance.diff}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
             <>
