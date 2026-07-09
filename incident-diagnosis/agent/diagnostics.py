@@ -495,12 +495,21 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None,
                 desired_yaml = _github_get_raw_file(file_path, synced_sha or "HEAD")
                 drift = _compute_drift(live_deploy, desired_yaml) if desired_yaml else [{"key": "configuration", "correct": "GitOps config", "wrong": "drift detected"}]
                 diff_str = ", ".join(f"{x['key']}: {x['correct']} ➔ {x['wrong']}" for x in drift)
+                
+                changed_at = ""
+                if live_deploy:
+                    for cond in live_deploy.get("status", {}).get("conditions", []):
+                        if cond.get("type") == "Progressing" and cond.get("status") == "True":
+                            changed_at = cond.get("lastUpdateTime", "")
+                            break
+
                 return {
                     "classification": "hotfix",
                     "target": "dependency",
                     "dependency_name": f"{dep_ns}/{dep_name}",
                     "diff": diff_str,
-                    "drift": drift
+                    "drift": drift,
+                    "changed_at": changed_at
                 }
             else:
                 res = _fetch_git_provenance(file_path, synced_sha)

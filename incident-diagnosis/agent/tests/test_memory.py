@@ -310,6 +310,16 @@ def test_derive_reason_signal_dependency_unhealthy():
     assert memory._derive_reason_signal(facts3) == "Dependency:postgres:CrashLoopBackOff"
 
 
+def test_derive_reason_signal_dependency_priority_over_event_reason():
+    facts = {
+        "waiting_reason": "",
+        "event_reason": "Unhealthy",
+        "pods_available": 1, "pods_desired": 1,
+        "dependency": {"name": "postgres", "namespace": "platform", "pods_available": 0, "pods_desired": 0, "waiting_reason": ""}
+    }
+    assert memory._derive_reason_signal(facts) == "Dependency:postgres:ZeroReplicas"
+
+
 def test_derive_reason_signal_empty_when_nothing_matches():
     facts = {"waiting_reason": "", "pods_available": 1, "pods_desired": 1}
     assert memory._derive_reason_signal(facts) == ""

@@ -218,8 +218,6 @@ def _derive_reason_signal(facts: dict) -> str:
     if facts.get("waiting_reason"):
         wr = facts["waiting_reason"]
         return "ImagePullBackOff" if wr == "ErrImagePull" else wr
-    if facts.get("event_reason"):
-        return facts["event_reason"]
     if facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0:
         return "ZeroReplicas"
 
@@ -231,6 +229,9 @@ def _derive_reason_signal(facts: dict) -> str:
             return f"Dependency:{dep.get('name')}:{dep.get('waiting_reason')}"
         elif dep.get("pods_available") != dep.get("pods_desired"):
             return f"Dependency:{dep.get('name')}:Unhealthy"
+
+    if facts.get("event_reason"):
+        return facts["event_reason"]
 
     return ""
 

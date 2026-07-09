@@ -602,6 +602,15 @@ class TestCollectProvenance:
                                     "containers": [{"image": "postgres:15", "env": [{"name": "POSTGRES_DB", "value": "vroom"}]}]
                                 }
                             }
+                        },
+                        "status": {
+                            "conditions": [
+                                {
+                                    "type": "Progressing",
+                                    "status": "True",
+                                    "lastUpdateTime": "2026-07-09T08:52:00Z"
+                                }
+                            ]
                         }
                     }
                 })
@@ -653,5 +662,6 @@ spec:
             "target": "dependency",
             "dependency_name": "platform/postgres",
             "diff": "replicas: 1 ➔ 0",
-            "drift": [{"key": "replicas", "correct": "1", "wrong": "0"}]
+            "drift": [{"key": "replicas", "correct": "1", "wrong": "0"}],
+            "changed_at": "2026-07-09T08:52:00Z"
         }
