@@ -102,15 +102,16 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Card>
-          <CardTitle><Activity size={14} /> Pod Health</CardTitle>
+          <CardTitle><Activity size={14} /> Service Health ({incident.service})</CardTitle>
           <dl className="m-0">
-            <Row label="Pods available" value={incident.pods_available} />
-            <Row label="Pods desired" value={incident.pods_desired} />
+            <Row label="Desired pods" value={incident.pods_desired} />
+            <Row label="Running pods" value={incident.pods_running} />
+            <Row label="Ready pods" value={incident.pods_ready} />
             <Row label="Waiting reason" value={incident.waiting_reason} />
             <Row label="Last terminated reason" value={incident.last_terminated_reason} />
             {incident.restarts > 0 && <Row label="Restarts" value={incident.restarts} />}
           </dl>
-          {dep && dep.pods_available === dep.pods_desired && !dep.waiting_reason && (
+          {dep && dep.pods_desired > 0 && dep.pods_available === dep.pods_desired && !dep.waiting_reason && (
             <div className="mt-2 flex justify-between border-t border-dashed border-border pt-2 text-[11px] text-ink-faint">
               <span>Dependency: {dep.namespace}/{dep.name}</span>
               <span className="font-mono">{dep.pods_available}/{dep.pods_desired}</span>
@@ -118,15 +119,18 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
           )}
         </Card>
 
-        {dep && (dep.pods_available !== dep.pods_desired || dep.waiting_reason) && (
+        {dep && (dep.pods_desired === 0 || dep.pods_available !== dep.pods_desired || dep.waiting_reason) && (
           <Card className="border-critical bg-critical-soft">
             <CardTitle className="text-critical">
               <AlertTriangle size={14} /> Dependency Unhealthy
             </CardTitle>
             <dl className="m-0">
               <Row label="Name" value={`${dep.namespace}/${dep.name}`} />
-              <Row label="Pods" value={`${dep.pods_available}/${dep.pods_desired}`} />
-              <Row label="Waiting reason" value={dep.waiting_reason} />
+              <Row 
+                label="Status" 
+                value={dep.pods_desired === 0 ? "Scaled to 0 replicas (No pods running)" : `${dep.pods_available} of ${dep.pods_desired} pods ready`} 
+              />
+              {dep.waiting_reason && <Row label="Waiting reason" value={dep.waiting_reason} />}
             </dl>
           </Card>
         )}
@@ -143,28 +147,38 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
         )}
       </div>
 
-      {td && (
+      {(td || incident.provenance) && (
         <Card>
           <CardTitle><History size={14} /> Recent Change</CardTitle>
-          {(!incident.provenance || incident.provenance.classification === 'hotfix') && (
+          {incident.provenance && incident.provenance.target === 'dependency' && incident.provenance.classification === 'hotfix' ? (
+            <div className="text-xs text-critical font-medium mb-3">
+              ⚠️ Manual change (not GitOps) — {incident.provenance.dependency_name} is OutOfSync in ArgoCD ({incident.provenance.diff})
+            </div>
+          ) : (
             <>
-              {td.env_changed && td.env_diff.map((d, i) => (
-                <DiffBlock key={i} header={`${incident.service} · env.${d.key}`} oldValue={d.old_value} newValue={d.new_value} />
-              ))}
-              {td.image_changed && (
-                <DiffBlock header={`${incident.service} · image`} oldValue={td.old_image} newValue={td.new_image} />
+              {td && (!incident.provenance || incident.provenance.classification === 'hotfix') && (
+                <>
+                  {td.env_changed && td.env_diff.map((d, i) => (
+                    <DiffBlock key={i} header={`${incident.service} · env.${d.key}`} oldValue={d.old_value} newValue={d.new_value} />
+                  ))}
+                  {td.image_changed && (
+                    <DiffBlock header={`${incident.service} · image`} oldValue={td.old_image} newValue={td.new_image} />
+                  )}
+                </>
               )}
+              {((incident.provenance && incident.provenance.classification === 'gitops-commit' && incident.provenance.commit?.date) || (td && td.changed_at)) && (
+                <Row
+                  label="Changed at"
+                  value={formatChangedAt(
+                    (incident.provenance?.classification === 'gitops-commit' && incident.provenance.commit?.date)
+                      ? incident.provenance.commit.date
+                      : (td ? td.changed_at : "")
+                  )}
+                />
+              )}
+              {incident.provenance && <ProvenanceNote provenance={incident.provenance} />}
             </>
           )}
-          <Row
-            label="Changed at"
-            value={formatChangedAt(
-              (incident.provenance?.classification === 'gitops-commit' && incident.provenance.commit?.date)
-                ? incident.provenance.commit.date
-                : td.changed_at
-            )}
-          />
-          {incident.provenance && <ProvenanceNote provenance={incident.provenance} />}
         </Card>
       )}
 

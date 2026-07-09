@@ -209,47 +209,146 @@ def _argocd_app_name(service: str, namespace: str) -> str:
     return f"vroom-{_env_name(namespace)}-{_short_name(service)}"
 
 
-def _gitops_file_path(service: str, namespace: str, template_diff: dict) -> str:
+def _gitops_file_path(service: str, namespace: str, template_diff: dict | None = None) -> str:
     short = _short_name(service)
-    if template_diff.get("image_changed"):
+    if namespace == "platform":
+        return f"platform/{short}/deployment.yaml"
+    if template_diff and template_diff.get("image_changed"):
         return f"apps/{short}/overlays/{_env_name(namespace)}/kustomization.yaml"
     return f"apps/{short}/base/deployment.yaml"
 
 
 def _github_headers() -> dict:
-    return {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+    return {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": f"application/vnd.github+json"}
 
 
-def collect_provenance(service: str, namespace: str, template_diff: dict | None) -> dict | None:
-    """Attribute a template_diff to either a manual hotfix (ArgoCD OutOfSync — the live
-    change bypassed GitOps) or the git commit that introduced it (ArgoCD Synced). Returns
-    None when there's no template_diff to attribute in the first place."""
-    if template_diff is None:
-        return None
-
-    app_name = _argocd_app_name(service, namespace)
+def _github_get_raw_file(path: str, ref: str = "main") -> str:
     try:
+        headers = {
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.raw",
+        }
         r = http_requests.get(
-            f"{EXECUTOR_URL}/tools/argocd-sync",
-            params={"app": app_name},
-            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
-            timeout=10,
+            f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/contents/{path}",
+            params={"ref": ref},
+            headers=headers,
+            timeout=10
         )
-        data = r.json() if r.ok else {}
-        sync_status = data.get("sync_status", "Unknown")
-        raw_app = data.get("raw", {})
-        synced_sha = raw_app.get("status", {}).get("sync", {}).get("revision", "")
+        return r.text if r.ok else ""
     except Exception:
-        sync_status = "Unknown"
-        synced_sha = ""
+        return ""
 
-    if sync_status != "Synced":
-        return {"classification": "hotfix", "changed_at": template_diff.get("changed_at", "")}
 
+def _parse_yaml_deployment(yaml_str: str) -> dict:
+    import textwrap
+    yaml_str = textwrap.dedent(yaml_str)
+    res = {"spec": {"replicas": 1, "template": {"spec": {"containers": [{"image": "", "env": []}]}}}}
+    lines = yaml_str.split("\n")
+    in_spec = False
+    in_template = False
+    in_containers = False
+    in_env = False
+    current_env = {}
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(line) - len(stripped)
+
+        if stripped.startswith("spec:"):
+            if indent == 0:
+                in_spec = True
+        elif stripped.startswith("replicas:") and in_spec and not in_template:
+            val = stripped.split(":", 1)[1].strip()
+            try:
+                res["spec"]["replicas"] = int(val)
+            except Exception:
+                pass
+        elif stripped.startswith("template:") and in_spec:
+            in_template = True
+        elif stripped.startswith("containers:") and in_template:
+            in_containers = True
+        elif (stripped.startswith("- image:") or stripped.startswith("image:")) and in_containers:
+            img = stripped.split(":", 1)[1].strip()
+            if img.startswith('"') and img.endswith('"'):
+                img = img[1:-1]
+            res["spec"]["template"]["spec"]["containers"][0]["image"] = img
+        elif stripped.startswith("env:") and in_containers:
+            in_env = True
+        elif stripped.startswith("- name:") and in_env:
+            if current_env:
+                res["spec"]["template"]["spec"]["containers"][0]["env"].append(current_env)
+            name = stripped.split(":", 1)[1].strip()
+            current_env = {"name": name, "value": ""}
+        elif stripped.startswith("name:") and in_env:
+            if current_env and not stripped.startswith("-"):
+                name = stripped.split(":", 1)[1].strip()
+                current_env["name"] = name
+        elif stripped.startswith("value:") and in_env:
+            val = stripped.split(":", 1)[1].strip()
+            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                val = val[1:-1]
+            if current_env:
+                current_env["value"] = val
+
+    if current_env:
+        res["spec"]["template"]["spec"]["containers"][0]["env"].append(current_env)
+
+    return res
+
+
+def _compute_drift(live_deploy: dict, desired_yaml_str: str) -> str:
+    desired = _parse_yaml_deployment(desired_yaml_str)
+    live_spec = live_deploy.get("spec", {})
+    desired_spec = desired.get("spec", {})
+
+    diffs = []
+
+    # Replicas
+    live_rep = live_spec.get("replicas", 1)
+    desired_rep = desired_spec.get("replicas", 1)
+    if live_rep != desired_rep:
+        diffs.append(f"replicas: {desired_rep} ➔ {live_rep}")
+
+    # Image
+    def _first_img(spec):
+        try:
+            return spec.get("template", {}).get("spec", {}).get("containers", [])[0].get("image", "")
+        except Exception:
+            return ""
+    live_img = _first_img(live_spec)
+    desired_img = _first_img(desired_spec)
+    if live_img and desired_img and live_img != desired_img:
+        diffs.append(f"image: {desired_img} ➔ {live_img}")
+
+    # Env
+    def _env_map(spec):
+        try:
+            containers = spec.get("template", {}).get("spec", {}).get("containers", [])
+            if not containers:
+                return {}
+            return {e.get("name"): e.get("value", "") for e in containers[0].get("env", []) if e.get("name")}
+        except Exception:
+            return {}
+    live_env = _env_map(live_spec)
+    desired_env = _env_map(desired_spec)
+
+    for k, v in desired_env.items():
+        if live_env.get(k) != v:
+            diffs.append(f"env.{k}: {v} ➔ {live_env.get(k, '')}")
+    for k, v in live_env.items():
+        if k not in desired_env:
+            diffs.append(f"env.{k}: added ➔ {v}")
+
+    return ", ".join(diffs)
+
+
+def _fetch_git_provenance(file_path: str, synced_sha: str) -> dict:
     if not synced_sha:
         return {"classification": "gitops-commit", "commit": None, "pr": None}
 
-    file_path = _gitops_file_path(service, namespace, template_diff)
     try:
         r = http_requests.get(
             f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits",
@@ -283,7 +382,7 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None)
     commit_info = {
         "sha":          sha[:7],
         "author":       (detail.get("commit") or {}).get("author", {}).get("name", ""),
-        "message":      (detail.get("commit") or {}).get("message", ""),
+        "message":      (detail.get("commit") or {}).get("message", "").split("\n")[0],
         "date":         (detail.get("commit") or {}).get("author", {}).get("date", ""),
         "url":          detail.get("html_url", ""),
         "diff_snippet": diff_snippet,
@@ -305,6 +404,92 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None)
     return {"classification": "gitops-commit", "commit": commit_info, "pr": pr_info}
 
 
+def collect_provenance(service: str, namespace: str, template_diff: dict | None, dependency: dict | None = None) -> dict | None:
+    # 1. Check if dependency is unhealthy and handle dependency provenance
+    if dependency and (
+        dependency.get("pods_desired") == 0 or 
+        dependency.get("pods_available") != dependency.get("pods_desired") or 
+        dependency.get("waiting_reason")
+    ):
+        dep_name = dependency["name"]
+        dep_ns = dependency["namespace"]
+        try:
+            r = http_requests.get(
+                f"{EXECUTOR_URL}/tools/deployment",
+                params={"service": dep_name, "namespace": dep_ns},
+                headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+                timeout=10,
+            )
+            live_deploy = r.json().get("deployment") if r.ok else None
+        except Exception:
+            live_deploy = None
+
+        if live_deploy:
+            tracking_id = live_deploy.get("metadata", {}).get("annotations", {}).get("argocd.argoproj.io/tracking-id", "")
+            if tracking_id and ":" in tracking_id:
+                app_name = tracking_id.split(":")[0]
+            else:
+                app_name = "vroom-infrastructure" if dep_ns == "platform" else f"vroom-{_env_name(dep_ns)}-{_short_name(dep_name)}"
+
+            try:
+                r = http_requests.get(
+                    f"{EXECUTOR_URL}/tools/argocd-sync",
+                    params={"app": app_name},
+                    headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+                    timeout=10,
+                )
+                data = r.json() if r.ok else {}
+                sync_status = data.get("sync_status", "Unknown")
+                raw_app = data.get("raw", {})
+                synced_sha = raw_app.get("status", {}).get("sync", {}).get("revision", "HEAD")
+            except Exception:
+                sync_status = "Unknown"
+                synced_sha = "HEAD"
+
+            file_path = _gitops_file_path(dep_name, dep_ns)
+
+            if sync_status != "Synced":
+                desired_yaml = _github_get_raw_file(file_path, synced_sha or "HEAD")
+                drift = _compute_drift(live_deploy, desired_yaml) if desired_yaml else "drift detected"
+                return {
+                    "classification": "hotfix",
+                    "target": "dependency",
+                    "dependency_name": f"{dep_ns}/{dep_name}",
+                    "diff": drift
+                }
+            else:
+                res = _fetch_git_provenance(file_path, synced_sha)
+                res["target"] = "dependency"
+                res["dependency_name"] = f"{dep_ns}/{dep_name}"
+                return res
+
+    # 2. Main service provenance logic (fallback/default)
+    if template_diff is None:
+        return None
+
+    app_name = _argocd_app_name(service, namespace)
+    try:
+        r = http_requests.get(
+            f"{EXECUTOR_URL}/tools/argocd-sync",
+            params={"app": app_name},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        data = r.json() if r.ok else {}
+        sync_status = data.get("sync_status", "Unknown")
+        raw_app = data.get("raw", {})
+        synced_sha = raw_app.get("status", {}).get("sync", {}).get("revision", "")
+    except Exception:
+        sync_status = "Unknown"
+        synced_sha = ""
+
+    if sync_status != "Synced":
+        return {"classification": "hotfix", "changed_at": template_diff.get("changed_at", "")}
+
+    file_path = _gitops_file_path(service, namespace, template_diff)
+    return _fetch_git_provenance(file_path, synced_sha)
+
+
 def collect_diagnostics(service: str, namespace: str) -> dict:
     """Fetch structured pod diagnostics from Prometheus, Loki, and K8s Events API.
 
@@ -316,6 +501,12 @@ def collect_diagnostics(service: str, namespace: str) -> dict:
     ))
     pods_desired = int(_prom_scalar(
         f'kube_deployment_spec_replicas{{deployment="{service}",namespace="{namespace}"}}'
+    ))
+    pods_running = int(_prom_scalar(
+        f'kube_deployment_status_replicas{{deployment="{service}",namespace="{namespace}"}}'
+    ))
+    pods_ready = int(_prom_scalar(
+        f'kube_deployment_status_replicas_ready{{deployment="{service}",namespace="{namespace}"}}'
     ))
     waiting_reason = _prom_active_label(
         f'kube_pod_container_status_waiting_reason{{namespace="{namespace}",pod=~"{service}-.*"}}',
@@ -347,6 +538,8 @@ def collect_diagnostics(service: str, namespace: str) -> dict:
     return {
         "pods_available":             pods_available,
         "pods_desired":               pods_desired,
+        "pods_running":               pods_running,
+        "pods_ready":                 pods_ready,
         "waiting_reason":             waiting_reason,
         "last_terminated_reason":     last_terminated_reason,
         "restarts":                   restarts,

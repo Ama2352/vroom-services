@@ -1,5 +1,6 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+os.environ["MAX_CHANGE_AGE_SECONDS"] = "999999999"
 import pytest
 from unittest.mock import patch, MagicMock
 from diagnostics import (collect_diagnostics, format_evidence,
@@ -200,7 +201,7 @@ class TestCollectDiagnostics:
         mock_get.return_value = _fail()
         result = collect_diagnostics("ride", "vroom-dev")
         assert set(result.keys()) == {
-            "pods_available", "pods_desired", "waiting_reason", "last_terminated_reason",
+            "pods_available", "pods_desired", "pods_running", "pods_ready", "waiting_reason", "last_terminated_reason",
             "restarts", "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
             "log_error", "event_reason", "event_message", "event_object",
         }
@@ -582,3 +583,74 @@ class TestCollectProvenance:
         assert res["classification"] == "gitops-commit"
         assert res["commit"]["sha"] == "test_co"
         assert res["commit"]["date"] == "2026-07-08T10:58:26Z"
+
+    @patch("diagnostics.http_requests.get")
+    def test_dependency_provenance_hotfix(self, mock_get):
+        def side(url, **kw):
+            if "/tools/deployment" in url:
+                return MagicMock(ok=True, json=lambda: {
+                    "deployment": {
+                        "metadata": {
+                            "annotations": {
+                                "argocd.argoproj.io/tracking-id": "vroom-infrastructure:apps/Deployment:platform/postgres"
+                            }
+                        },
+                        "spec": {
+                            "replicas": 0,
+                            "template": {
+                                "spec": {
+                                    "containers": [{"image": "postgres:15", "env": [{"name": "POSTGRES_DB", "value": "vroom"}]}]
+                                }
+                            }
+                        }
+                    }
+                })
+            if "/tools/argocd-sync" in url:
+                return MagicMock(ok=True, json=lambda: {
+                    "sync_status": "OutOfSync",
+                    "raw": {
+                        "status": {
+                            "sync": {
+                                "revision": "synced_sha_123"
+                            }
+                        }
+                    }
+                })
+            if "contents" in url:
+                desired_yaml = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - image: postgres:15
+        env:
+        - name: POSTGRES_DB
+          value: vroom
+"""
+                m_res = MagicMock(ok=True)
+                m_res.text = desired_yaml
+                return m_res
+            raise AssertionError(f"unexpected call to {url}")
+
+        mock_get.side_effect = side
+
+        dependency = {
+            "name": "postgres",
+            "namespace": "platform",
+            "pods_available": 0,
+            "pods_desired": 0,
+            "waiting_reason": ""
+        }
+
+        result = collect_provenance("ride-service", "vroom-dev", None, dependency)
+        assert result == {
+            "classification": "hotfix",
+            "target": "dependency",
+            "dependency_name": "platform/postgres",
+            "diff": "replicas: 1 ➔ 0"
+        }

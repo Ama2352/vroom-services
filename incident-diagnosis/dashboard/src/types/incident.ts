@@ -24,9 +24,12 @@ export interface Dependency {
 }
 
 export type Provenance =
-  | { classification: 'hotfix'; changed_at: string }
+  | { classification: 'hotfix'; target?: 'dependency'; dependency_name?: string; diff?: string; changed_at?: string }
   | {
       classification: 'gitops-commit'
+      target?: 'dependency'
+      dependency_name?: string
+      diff?: string
       commit: { sha: string; author: string; message: string; url: string; diff_snippet: string; date?: string } | null
       pr: { number: number; title: string; url: string } | null
     }
@@ -72,6 +75,8 @@ export interface Incident {
   kubectl_hint: string
   pods_available: number
   pods_desired: number
+  pods_running: number
+  pods_ready: number
   waiting_reason?: string
   last_terminated_reason?: string
   restarts: number

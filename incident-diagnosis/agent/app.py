@@ -341,7 +341,7 @@ def investigate():
     _step("dependency_chase", t1c, t1d, found=dependency is not None)
 
     t1e        = time.time()
-    provenance = collect_provenance(service, namespace, template_diff)
+    provenance = collect_provenance(service, namespace, template_diff, dependency)
     t1f        = time.time()
     _step("provenance_lookup", t1e, t1f,
           classification=(provenance or {}).get("classification"))
