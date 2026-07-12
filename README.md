@@ -108,6 +108,127 @@ This is a static image rather than a live Mermaid block — sequence-diagram mes
 
 ---
 
+## SRE Incident Diagnosis Agent
+
+Vroom includes an LLM-assisted SRE incident diagnosis agent for turning a
+Kubernetes alert into an evidence-backed investigation. It is designed to
+reduce the time an operator spends searching across dashboards, logs, events,
+deployment history, and runbooks when a service is unhealthy.
+
+The agent does not treat the alert message alone as the diagnosis. For each
+investigation, it collects the current state of the affected service and its
+dependencies, recent container logs and Kubernetes events, Prometheus health
+signals, and relevant deployment or configuration changes. It then combines
+that evidence with trusted patterns from its Redis-backed incident memory and
+asks the configured LLM to produce a structured interpretation.
+
+The result is recorded as an incident and shown in the dashboard with:
+
+- a probable root cause and confidence signal;
+- the evidence that supports the diagnosis;
+- an immediate developer/operator action and suggested `kubectl` command;
+- a step-by-step investigation timeline; and
+- related incidents or a proposed knowledge-base update when a reusable
+  failure pattern is found.
+
+### Incident flow
+
+1. Alertmanager sends an alert through the incident-response workflow.
+2. The agent collects service, dependency, metrics, logs, events, and change
+   evidence through its diagnostic tools.
+3. Redis-backed memory is searched for a trusted match or related incidents.
+4. The LLM interprets the collected facts and returns a structured diagnosis.
+5. The dashboard presents the diagnosis for operator validation and resolution.
+
+```mermaid
+flowchart TB
+    subgraph Alerting["Alert intake"]
+        Prometheus["Prometheus alert fires"] --> Alertmanager["Alertmanager"]
+        Alertmanager --> N8n["n8n incident workflow"]
+        N8n --> Slack["Vroom Ops Slack alert"]
+        N8n --> Agent["Incident agent<br/>POST /investigate"]
+    end
+
+    subgraph Evidence["Evidence collection"]
+        Agent --> Collect["Collect diagnostic facts"]
+        Metrics["Prometheus<br/>metrics and health signals"] --> Collect
+        Logs["Loki<br/>service logs"] --> Collect
+        Kubernetes["Kubernetes<br/>pods, events, deployments"] --> Collect
+        Changes["ReplicaSet, dependency, and<br/>GitOps/provenance changes"] --> Collect
+        Collect --> Bundle["Structured evidence bundle"]
+    end
+
+    subgraph Diagnosis["Diagnosis and incident record"]
+        Bundle --> Match{"Trusted memory match?"}
+        Redis[("Redis<br/>knowledge and incident history")] --> Match
+        Match -->|Yes| Known["Known failure pattern<br/>and prior fix"]
+        Match -->|No| Related["Related incidents<br/>when available"]
+        Known --> LLM["LLM interpretation"]
+        Related --> LLM
+        Bundle --> LLM
+        LLM --> Result["Root cause, confidence,<br/>evidence, and suggested action"]
+        Result --> Record[("Redis incident record<br/>and investigation timeline")]
+    end
+
+    subgraph Review["Operator review and learning"]
+        Record --> Dashboard["Incident dashboard"]
+        Dashboard --> Validate["Operator validates diagnosis"]
+        Validate --> Recommendation["Recommended action<br/>and suggested kubectl command"]
+        Recommendation --> Apply{"Operator manually applies fix?"}
+        Apply -->|Yes| Cluster["Kubernetes cluster"]
+        Apply -->|No or later| Continue["Continue investigation"]
+        Cluster --> Resolve["Operator resolves incident"]
+        Continue --> Dashboard
+        Resolve --> Suggest["Propose knowledge-base update"]
+        Suggest --> ReviewKnowledge{"Operator review"}
+        ReviewKnowledge -->|Approve| Redis
+        ReviewKnowledge -->|Reject| Archive["Keep incident history only"]
+    end
+
+    classDef trigger fill:#e55050,stroke:#8c2424,color:#fff
+    classDef agent fill:#376996,stroke:#1d3d5c,color:#fff
+    classDef data fill:#6b4c91,stroke:#3e2860,color:#fff
+    classDef human fill:#c8862b,stroke:#805316,color:#fff
+    classDef external fill:#3f7a67,stroke:#205242,color:#fff
+
+    class Prometheus,Alertmanager,Slack trigger
+    class N8n,Agent,Collect,LLM,Result agent
+    class Redis,Record,Bundle,Known,Related data
+    class Dashboard,Validate,Recommendation,Apply,Resolve,Suggest,ReviewKnowledge human
+    class Metrics,Logs,Kubernetes,Changes,Cluster,Continue,Archive external
+```
+
+Remediation is strictly operator-controlled. The agent recommends an action
+and provides a suggested `kubectl` command, but never executes it. After
+validating the diagnosis, an operator manually applies any required change and
+then resolves the incident.
+
+![Slack incident alert](docs/images/sre-slack-alert.png)
+
+The incident begins with an alert in the Vroom Ops Slack channel, identifying
+the alert, affected service, namespace, and initial evidence.
+
+![Dependency diagnosis](docs/images/sre-live-dependency.png)
+
+For dependency failures, the dashboard correlates service health, dependency
+status, logs, events, recent changes, and investigation steps to explain the
+likely root cause and suggest an immediate recovery action.
+
+![GitOps change diagnosis](docs/images/sre-live-gitops.png)
+
+The same workflow can identify configuration or GitOps drift as the source of
+an incident, including the changed value, related commit, and recommended
+rollback or correction.
+
+![Knowledge review](docs/images/sre-knowledge-review.png)
+
+After resolution, the agent can suggest a reusable knowledge entry. An
+operator can attach it to an existing pattern or create a new one, edit the
+wording and context, and approve or reject it before it is used for future
+incident matching.
+
+---
+
 ## Repository Layout
 
 ```

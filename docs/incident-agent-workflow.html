@@ -34,13 +34,21 @@
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <script>
         mermaid.initialize({
-            startOnLoad: true,
+            startOnLoad: false,
             theme: 'dark',
             themeVariables: {
                 background: '#131926',
                 primaryColor: '#0ea5e9',
                 primaryTextColor: '#f8fafc',
                 lineColor: '#202a42'
+            }
+        });
+        window.addEventListener('DOMContentLoaded', () => {
+            const overviewDiagram = document.querySelector('#content-overview .mermaid');
+            if (overviewDiagram) {
+                mermaid.run({ nodes: [overviewDiagram] }).catch(error => {
+                    console.error('Mermaid overview render failed', error);
+                });
             }
         });
     </script>
@@ -78,6 +86,18 @@
             </button>
             <button onclick="switchTab('pipeline')" id="tab-pipeline" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
                 Quy trình Chi tiết (Pipeline)
+            </button>
+            <button onclick="switchTab('evidence')" id="tab-evidence" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
+                Evidence &amp; Priority
+            </button>
+            <button onclick="switchTab('r-retrieval')" id="tab-r-retrieval" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
+                R - Retrieval
+            </button>
+            <button onclick="switchTab('a-augmentation')" id="tab-a-augmentation" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
+                A - Augmentation
+            </button>
+            <button onclick="switchTab('g-generation')" id="tab-g-generation" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
+                G - Generation
             </button>
             <button onclick="switchTab('use-cases')" id="tab-use-cases" class="tab-btn px-4 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-white transition-all">
                 Tình huống Thực tế (Use Cases)
@@ -161,6 +181,65 @@
                             Sử dụng các mô hình ngôn ngữ lớn (mặc định là Llama 3.3 70B và Llama 3.1 8B) để lập luận và tổng hợp đề xuất cập nhật tri thức.
                         </p>
                     </div>
+                </div>
+            </div>
+
+            <!-- Design Decisions Card -->
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    3. Quyết định Thiết kế &amp; Trade-offs SRE/RAG
+                </h2>
+                <p class="text-slate-400 text-sm leading-relaxed mb-6 max-w-4xl">
+                    Agent không xem toàn bộ dữ liệu incident là văn bản để tìm kiếm. Bằng chứng vận hành có cấu trúc được xử lý theo quy tắc xác định; RAG chỉ được dùng để truy xuất tri thức và tiền lệ do con người viết. Mỗi quyết định dưới đây ưu tiên độ tin cậy và khả năng giải thích trong ngữ cảnh SRE.
+                </p>
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[760px] text-left text-xs border-collapse">
+                        <thead class="text-slate-300 border-b border-border">
+                            <tr>
+                                <th class="pb-3 pr-4 font-semibold">Quyết định</th>
+                                <th class="pb-3 pr-4 font-semibold">Lý do theo nghiệp vụ</th>
+                                <th class="pb-3 font-semibold">Trade-off được chấp nhận</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-slate-400 align-top">
+                            <tr class="border-b border-border/70">
+                                <td class="py-4 pr-4 text-white font-medium">Evidence có cấu trúc trước RAG</td>
+                                <td class="py-4 pr-4">Kubernetes state, metrics, events, ReplicaSet diff và dependency health là nguồn sự thật có kiểu dữ liệu rõ ràng; chúng được thu thập trực tiếp thay vì embedding.</td>
+                                <td class="py-4">Ít “linh hoạt” hơn một agent hội thoại tự do, nhưng giảm suy diễn sai về trạng thái cluster.</td>
+                            </tr>
+                            <tr class="border-b border-border/70">
+                                <td class="py-4 pr-4 text-white font-medium">Exact match cho tín hiệu K8s conclusive</td>
+                                <td class="py-4 pr-4"><code class="text-accent">OOMKilled</code> hoặc <code class="text-accent">CreateContainerConfigError</code> là trạng thái chuẩn hóa, có giá trị chẩn đoán cao; khớp chính xác cho độ chính xác và tính an toàn tốt nhất.</td>
+                                <td class="py-4">Chỉ bao phủ các failure mode đã biết; các lỗi mơ hồ vẫn phải dựa vào evidence và LLM.</td>
+                            </tr>
+                            <tr class="border-b border-border/70">
+                                <td class="py-4 pr-4 text-white font-medium">Token coverage là trust gate hiện tại</td>
+                                <td class="py-4 pr-4">History do SRE phê duyệt chỉ trở thành trusted context khi triệu chứng hiện tại có đủ token chung; ngưỡng <code class="text-accent">0.5</code> là chính sách bảo thủ để tránh đưa tiền lệ yếu vào chẩn đoán.</td>
+                                <td class="py-4">Ngưỡng chưa được hiệu chỉnh bằng benchmark; có thể bỏ lỡ các cách diễn đạt tương đương nhưng ít token trùng nhau.</td>
+                            </tr>
+                            <tr class="border-b border-border/70">
+                                <td class="py-4 pr-4 text-white font-medium">BM25 cho tiền lệ không xác nhận</td>
+                                <td class="py-4 pr-4">Logs SRE thường chứa hostname, port, error code và K8s reason lặp lại theo nghĩa đen. Với corpus nhỏ và giới hạn pod 400 MiB, BM25 nhẹ hơn dense embedding và dễ giải thích hơn.</td>
+                                <td class="py-4">BM25 không hiểu paraphrase không có token chung; kết quả chỉ là <em>candidate precedent</em>, không phải bằng chứng root cause.</td>
+                            </tr>
+                            <tr class="border-b border-border/70">
+                                <td class="py-4 pr-4 text-white font-medium">Service là metadata, không phải relevance token</td>
+                                <td class="py-4 pr-4">Root cause có thể lặp lại giữa nhiều service. Không đưa tên service vào điểm lexical giúp tránh incident cùng service nhưng khác nguyên nhân vượt lên incident đúng ở service khác.</td>
+                                <td class="py-4">Cần dùng namespace/service như bộ lọc hoặc ngữ cảnh hiển thị khi nghiệp vụ yêu cầu, thay vì coi chúng là bằng chứng nhân quả.</td>
+                            </tr>
+                            <tr class="border-b border-border/70">
+                                <td class="py-4 pr-4 text-white font-medium">Grounded generation có deterministic guardrails</td>
+                                <td class="py-4 pr-4">LLM tổng hợp và giải thích evidence, nhưng JSON schema, grounding check, phát hiện câu trả lời chung chung và self-refinement giới hạn các khẳng định không được hỗ trợ.</td>
+                                <td class="py-4">Đôi khi trả lời low-confidence hoặc ngắn thay vì đoán nguyên nhân; đây là hành vi mong muốn trong incident response.</td>
+                            </tr>
+                            <tr>
+                                <td class="py-4 pr-4 text-white font-medium">Human-in-the-loop, recommendation-only</td>
+                                <td class="py-4 pr-4">Agent đề xuất lệnh và cập nhật knowledge, còn SRE phê duyệt trước khi tri thức được tin cậy hoặc trước khi operator thực hiện remediation.</td>
+                                <td class="py-4">Không tự động giảm MTTR bằng remediation tự trị, đổi lại tránh mutation không an toàn trên cluster.</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </section>
@@ -267,7 +346,7 @@
                         <div class="space-y-2 text-xs">
                             <div class="p-3 bg-canvas border border-border rounded-lg">
                                 <span class="bg-healthy/10 text-healthy text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider mr-2">Layer 1</span>
-                                <strong class="text-white">Exact-match Short-circuit:</strong> Đối với các lỗi conclusive (chắc chắn do một nguyên nhân, ví dụ: <code class="text-accent">OOMKilled</code>, <code class="text-accent">CreateContainerConfigError</code>), Agent lập tức ánh xạ trực tiếp đến giải pháp định sẵn mà không cần chạy suy luận LLM phức tạp.
+                                <strong class="text-white">Exact-match Trusted Grounding:</strong> Đối với các lỗi conclusive (chắc chắn do một nguyên nhân, ví dụ: <code class="text-accent">OOMKilled</code>, <code class="text-accent">CreateContainerConfigError</code>), Agent ánh xạ trực tiếp đến tri thức đã được phê duyệt. Tri thức này được đưa vào prompt như một cơ sở đáng tin cậy; LLM vẫn tổng hợp đầu ra và phải qua deterministic quality check.
                             </div>
                             <div class="p-3 bg-canvas border border-border rounded-lg">
                                 <span class="bg-info/10 text-info text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider mr-2">Layer 2</span>
@@ -283,7 +362,7 @@
                         <span class="absolute -left-[33px] top-0 bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">5</span>
                         <h3 class="text-base font-semibold text-white mb-2">Lập luận có Kiểm chứng & Tự sửa lỗi (LLM Reasoning & Self-Refine)</h3>
                         <p class="text-slate-400 text-sm mb-3">
-                            Khi không có short-circuit ở Layer 1, thông tin dữ liệu thô kèm ngữ cảnh đối khớp (nếu có) được gửi vào LLM Interpreter thông qua ba giai đoạn:
+                            Sau khi Retrieval hoàn tất, Agent luôn gửi evidence hiện tại vào LLM Interpreter. Nếu có trusted match ở Layer 1 hoặc Layer 2, match đó được thêm làm context đã được phê duyệt; nó không bỏ qua bước LLM reasoning.
                         </p>
                         <div class="space-y-2 text-xs">
                             <div class="p-3 bg-canvas border border-border rounded-lg">
@@ -319,6 +398,512 @@
                         </p>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- Section: Evidence Collection & Priority -->
+        <section id="content-evidence" class="tab-content hidden space-y-8">
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    Vì sao thu thập Evidence này?
+                </h2>
+                <p class="text-slate-300 text-sm leading-relaxed max-w-4xl">
+                    Agent không gửi toàn bộ raw telemetry cho LLM. Mỗi nguồn được thu thập vì nó trả lời một câu hỏi khác nhau: Kubernetes cho biết <strong class="text-white">đang hỏng ở trạng thái nào</strong>, log thường cho biết <strong class="text-white">đã xảy ra lỗi gì</strong>, metrics xác nhận <strong class="text-white">mức độ ảnh hưởng</strong>, còn trace chỉ hữu ích khi cần lần theo một request qua nhiều service.
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-6 text-xs">
+                    <div class="p-4 bg-accent/5 border border-accent/20 rounded-lg">
+                        <div class="text-accent font-semibold mb-2">01 · Collect</div>
+                        <p class="text-slate-400 leading-relaxed">Prometheus, Loki, Kubernetes Events, ReplicaSet và Tempo trả về dữ liệu thô.</p>
+                    </div>
+                    <div class="p-4 bg-canvas border border-border rounded-lg">
+                        <div class="text-white font-semibold mb-2">02 · Normalize</div>
+                        <p class="text-slate-400 leading-relaxed">Backend chuyển chúng thành các facts có tên, kiểu và ý nghĩa ổn định.</p>
+                    </div>
+                    <div class="p-4 bg-canvas border border-border rounded-lg">
+                        <div class="text-white font-semibold mb-2">03 · Route</div>
+                        <p class="text-slate-400 leading-relaxed">Một số field dùng để query, một số làm evidence cho LLM, số khác chỉ để hiển thị/audit.</p>
+                    </div>
+                    <div class="p-4 bg-healthy/5 border border-healthy/20 rounded-lg">
+                        <div class="text-healthy font-semibold mb-2">04 · Diagnose</div>
+                        <p class="text-slate-400 leading-relaxed">LLM nhận context ngắn, có cấu trúc và được kiểm tra grounding trước khi lưu kết quả.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-2">Field glossary · Ý nghĩa của từng field</h2>
+                <p class="text-slate-400 text-sm mb-5">
+                    Đây là bảng giải thích từng field được thu thập. “LLM” nghĩa là field được đưa vào grounded prompt dưới dạng đã chuẩn hóa; không có nghĩa là raw response được gửi nguyên bản.
+                </p>
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[1180px] text-left text-xs border-collapse">
+                        <thead class="text-slate-300 border-b border-border">
+                            <tr>
+                                <th class="pb-3 pr-4 font-semibold">Field</th>
+                                <th class="pb-3 pr-4 font-semibold">Nguồn</th>
+                                <th class="pb-3 pr-4 font-semibold">Ý nghĩa</th>
+                                <th class="pb-3 pr-4 font-semibold">Mục đích thu thập</th>
+                                <th class="pb-3 pr-4 font-semibold">Query / match</th>
+                                <th class="pb-3 pr-4 font-semibold">LLM</th>
+                                <th class="pb-3 font-semibold">UI / audit</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-slate-400 align-top">
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>alert_name</code></td><td class="py-3 pr-4">Prometheus alert</td><td class="py-3 pr-4">Tên rule cảnh báo, ví dụ <code>ServiceDown</code>.</td><td class="py-3 pr-4">Cho biết loại triệu chứng ban đầu và nhóm lịch sử tương tự.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>service</code></td><td class="py-3 pr-4">Alert / routing</td><td class="py-3 pr-4">Workload hoặc service bị ảnh hưởng.</td><td class="py-3 pr-4">Chọn label Prometheus, Loki, Deployment và phạm vi điều tra.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>namespace</code></td><td class="py-3 pr-4">Alert / Kubernetes</td><td class="py-3 pr-4">Namespace chứa workload.</td><td class="py-3 pr-4">Tránh query nhầm service cùng tên ở namespace khác.</td><td class="py-3 pr-4">Có, để scope</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>pod</code></td><td class="py-3 pr-4">Alert</td><td class="py-3 pr-4">Pod cụ thể nếu alert có label pod.</td><td class="py-3 pr-4">Giúp chọn đúng pod khi cần xem log hoặc tạo kubectl hint.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4">Có nếu có giá trị</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>pods_available</code> / <code>pods_desired</code></td><td class="py-3 pr-4">kube-state-metrics</td><td class="py-3 pr-4">Số replica đang available so với số replica Deployment mong muốn.</td><td class="py-3 pr-4">Phát hiện thiếu replica hoặc <code>ZeroReplicas</code>.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>pods_running</code> / <code>pods_ready</code></td><td class="py-3 pr-4">kube-state-metrics</td><td class="py-3 pr-4">Số pod đang chạy và số pod đã sẵn sàng nhận traffic.</td><td class="py-3 pr-4">Phân biệt “pod còn chạy” với “service thực sự ready”.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>waiting_reason</code></td><td class="py-3 pr-4">kube-state-metrics</td><td class="py-3 pr-4">Lý do container <strong class="text-white">hiện tại</strong> đang ở trạng thái Waiting, ví dụ <code>CrashLoopBackOff</code>, <code>ImagePullBackOff</code> hoặc <code>CreateContainerConfigError</code>.</td><td class="py-3 pr-4">Đây là Kubernetes reason signal trực tiếp và thường có tính chẩn đoán cao.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>last_terminated_reason</code></td><td class="py-3 pr-4">kube-state-metrics</td><td class="py-3 pr-4">Lý do container kết thúc ở lần chạy gần nhất, ví dụ <code>OOMKilled</code> hoặc <code>Error</code>.</td><td class="py-3 pr-4">Giải thích nguyên nhân của lần crash trước, kể cả khi container đã restart.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>restarts</code></td><td class="py-3 pr-4">kube-state-metrics</td><td class="py-3 pr-4">Số lần container đã restart.</td><td class="py-3 pr-4">Đo mức độ lặp lại của failure và hỗ trợ diễn giải CrashLoop.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>init_waiting_reason</code> / <code>init_last_terminated_reason</code></td><td class="py-3 pr-4">kube-state-metrics</td><td class="py-3 pr-4">Trạng thái hoặc lý do thoát của init container.</td><td class="py-3 pr-4">Phát hiện lỗi xảy ra trước khi main container khởi động.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>init_restarts</code></td><td class="py-3 pr-4">kube-state-metrics</td><td class="py-3 pr-4">Số lần init container restart.</td><td class="py-3 pr-4">Cho biết init failure có lặp lại hay không.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>log_error</code></td><td class="py-3 pr-4">Loki</td><td class="py-3 pr-4">Dòng log lỗi gần nhất, gồm các pattern như error, failed, refused, fatal.</td><td class="py-3 pr-4">Thường là bằng chứng cụ thể nhất về hostname, port, dependency hoặc error code.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>event_reason</code></td><td class="py-3 pr-4">Kubernetes Events</td><td class="py-3 pr-4">Reason của Warning event mới nhất.</td><td class="py-3 pr-4">Bổ sung nguyên nhân control-plane như BackOff, FailedScheduling hoặc FailedMount.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>event_message</code> / <code>event_object</code></td><td class="py-3 pr-4">Kubernetes Events</td><td class="py-3 pr-4">Nội dung event và object bị ảnh hưởng.</td><td class="py-3 pr-4">Giúp grounding và xác định resource mà event nói tới.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>template_diff</code></td><td class="py-3 pr-4">ReplicaSet / GitOps</td><td class="py-3 pr-4">Thay đổi image, environment hoặc deployment template giữa các phiên bản.</td><td class="py-3 pr-4">Tìm quan hệ thời gian giữa deploy/hotfix và incident.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>dependency</code></td><td class="py-3 pr-4">Loki + Kubernetes</td><td class="py-3 pr-4">Dependency được suy ra từ lỗi IP:port và trạng thái pod của dependency đó.</td><td class="py-3 pr-4">Phân biệt service hỏng với dependency hỏng.</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3 pr-4 text-healthy">Có</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>rps</code></td><td class="py-3 pr-4">Prometheus</td><td class="py-3 pr-4">Request trung bình mỗi giây trong khoảng 5 phút.</td><td class="py-3 pr-4">Đặt error/latency vào bối cảnh traffic.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có, dạng summary</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>err</code></td><td class="py-3 pr-4">Prometheus</td><td class="py-3 pr-4">Tỷ lệ request HTTP 5xx trong khoảng 5 phút.</td><td class="py-3 pr-4">Xác nhận mức độ ảnh hưởng, nhưng không tự nói ra root cause.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có, dạng summary</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>p99</code></td><td class="py-3 pr-4">Prometheus</td><td class="py-3 pr-4">Ngưỡng latency mà 99% request nằm dưới trong khoảng 5 phút.</td><td class="py-3 pr-4">Phát hiện degradation và hỗ trợ phân biệt lỗi nhanh/chậm.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có, dạng summary</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>loki_errors</code></td><td class="py-3 pr-4">Loki</td><td class="py-3 pr-4">Số stream kết quả có log lỗi trong cửa sổ truy vấn.</td><td class="py-3 pr-4">Tóm tắt rằng log errors có xuất hiện.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4 text-healthy">Có, dạng summary</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>traces_errored</code> / <code>trace_sample</code></td><td class="py-3 pr-4">Tempo</td><td class="py-3 pr-4">Số trace có error và tên root trace mẫu trong cửa sổ gần đây.</td><td class="py-3 pr-4">Tín hiệu phụ cho cross-service/latency investigation; hiện chưa phải span-level evidence.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4">Có, summary hiện tại</td><td class="py-3">Có</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>memory_context</code></td><td class="py-3 pr-4">Redis knowledge base</td><td class="py-3 pr-4">Failure pattern đã được SRE xác nhận.</td><td class="py-3 pr-4">Tái sử dụng pattern đáng tin cậy khi facts hiện tại khớp.</td><td class="py-3 pr-4">Kết quả sau retrieval</td><td class="py-3 pr-4 text-healthy">Có nếu trusted</td><td class="py-3">Có</td></tr>
+                            <tr><td class="py-3 pr-4"><code>provenance</code></td><td class="py-3 pr-4">ArgoCD / GitOps</td><td class="py-3 pr-4">Nguồn thay đổi: commit, PR, drift hoặc manual hotfix.</td><td class="py-3 pr-4">Giải thích nguồn gốc thay đổi và phục vụ audit.</td><td class="py-3 pr-4">Không</td><td class="py-3 pr-4">Không trong prompt hiện tại</td><td class="py-3">Có</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                    <h2 class="text-lg font-bold text-white mb-3">Vì sao chỉ một số field vào LLM?</h2>
+                    <ul class="list-disc pl-5 space-y-2 text-slate-400 text-sm leading-relaxed">
+                        <li>Raw Prometheus, Loki, Tempo và <code>kubectl</code> response quá dài, không ổn định và nhiều noise.</li>
+                        <li>Field dùng để query chỉ cần tạo symptom hoặc reason signal; không cần lặp lại toàn bộ logic query trong prompt.</li>
+                        <li>Field UI/audit vẫn được lưu để operator kiểm tra, nhưng không nhất thiết giúp model suy luận root cause.</li>
+                        <li>Prompt ngắn và có cấu trúc giúp giảm token cost, giảm hallucination và làm grounding check đáng tin cậy hơn.</li>
+                        <li>LLM nhận condensed metrics bundle, không nhận raw time series hoặc toàn bộ trace tree.</li>
+                    </ul>
+                </div>
+                <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                    <h2 class="text-lg font-bold text-white mb-3">Thứ tự ưu tiên chẩn đoán</h2>
+                    <ol class="space-y-3 text-sm">
+                        <li class="flex gap-3"><span class="text-accent font-mono font-semibold">01</span><span><strong class="text-white">Kubernetes state/events:</strong> sự thật trực tiếp từ control plane, có reason và action rõ.</span></li>
+                        <li class="flex gap-3"><span class="text-accent font-mono font-semibold">02</span><span><strong class="text-white">Deployment/config change:</strong> bằng chứng nhân quả mạnh nếu xảy ra gần thời điểm incident.</span></li>
+                        <li class="flex gap-3"><span class="text-accent font-mono font-semibold">03</span><span><strong class="text-white">Error logs:</strong> thường chứa hostname, port, error code hoặc dependency cụ thể.</span></li>
+                        <li class="flex gap-3"><span class="text-accent font-mono font-semibold">04</span><span><strong class="text-white">Metrics:</strong> xác nhận symptom, severity, traffic và latency; thường không tự giải thích nguyên nhân.</span></li>
+                        <li class="flex gap-3"><span class="text-accent font-mono font-semibold">05</span><span><strong class="text-white">Traces:</strong> hữu ích cho cross-service/latency, nhưng hiện chỉ được thu thập ở mức summary.</span></li>
+                    </ol>
+                    <div class="mt-5 p-3 bg-root-cause/5 border border-root-cause/20 rounded-lg text-xs text-slate-400 leading-relaxed">
+                        “Ưu tiên” không có nghĩa là metrics hoặc traces vô dụng. Nó nghĩa là evidence ở trên thường có tính nhân quả, actionability và độ tin cậy cao hơn cho automated diagnosis.
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-3">AlertManager, Redis Stream và tracing hiện tại</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div class="p-4 bg-canvas border border-border rounded-lg">
+                        <h3 class="text-white font-semibold mb-2">Alert name</h3>
+                        <p class="text-slate-400 leading-relaxed">DevOps đặt tên rule trong field <code class="text-accent">alert:</code> của Prometheus values, ví dụ <code>ServiceDown</code> hoặc <code>KubernetesPodNotReady</code>. AlertManager nhận tên này dưới label <code>alertname</code> để group và route.</p>
+                    </div>
+                    <div class="p-4 bg-canvas border border-border rounded-lg">
+                        <h3 class="text-white font-semibold mb-2">Event-stream errors</h3>
+                        <p class="text-slate-400 leading-relaxed">Các rule hiện tại bắt pod crash, readiness, service down và một số node condition; chưa có rule trực tiếp cho Redis consumer lag, pending entries hoặc DLQ counter. Vì vậy consumer có thể lỗi nhưng pod vẫn healthy mà không tạo incident.</p>
+                    </div>
+                    <div class="p-4 bg-canvas border border-border rounded-lg">
+                        <h3 class="text-white font-semibold mb-2">Trace depth</h3>
+                        <p class="text-slate-400 leading-relaxed">Trace context được truyền qua Redis bằng <code>traceparent</code>, nhưng agent hiện không nhận trace ID từ alert và không dựng span tree. Tempo hiện chỉ đóng vai trò summary; deep trace cần operator hoặc một collector giàu span hơn.</p>
+                    </div>
+                </div>
+                <div class="mt-5 p-4 bg-accent/5 border border-accent/20 rounded-lg text-xs text-slate-400 leading-relaxed">
+                    Muốn phát hiện đầy đủ lỗi event stream, cần bổ sung alert cho consumer lag, số message pending, processing error counter và DLQ events. Muốn agent trace sâu, cần thu thập trace ID/span lỗi, exception attributes, service boundary và duration breakdown rồi đưa chúng vào evidence model.
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: Evidence Model -->
+        <section id="content-r-retrieval" class="tab-content hidden space-y-8">
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    R - Retrieval: chọn tri thức nào đủ tin cậy
+                </h2>
+                <p class="text-slate-300 text-sm leading-relaxed max-w-4xl">
+                    Retrieval không tìm kiếm trên raw logs. Backend bắt đầu từ alert và object <code class="text-accent">facts</code> đã được chuẩn hóa, tạo một symptom query và một K8s reason signal, sau đó quyết định liệu Redis có thể cung cấp một trusted failure pattern hay không.
+                </p>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6">
+                    <div class="p-4 bg-canvas border border-border rounded-lg space-y-3">
+                        <span class="text-accent text-xs font-semibold uppercase tracking-wider">01. Query inputs</span>
+                        <h3 class="text-white font-semibold">Triệu chứng để tìm kiếm</h3>
+                        <p class="text-slate-400 text-xs leading-relaxed">
+                            <code>build_symptom_text()</code> ghép alert name, main-container waiting reason và lỗi Loki mới nhất. Đây là query dùng để chấm token coverage với history.
+                        </p>
+                        <pre class="bg-surface border border-border rounded p-3 text-[11px] text-accent overflow-x-auto">alert_name
+waiting_reason
+log_error
+
+KubernetesPodCrashLooping
+CrashLoopBackOff
+dial tcp: connection refused</pre>
+                    </div>
+                    <div class="p-4 bg-canvas border border-border rounded-lg space-y-3">
+                        <span class="text-accent text-xs font-semibold uppercase tracking-wider">02. Reason signal</span>
+                        <h3 class="text-white font-semibold">Tín hiệu K8s chuẩn hóa</h3>
+                        <p class="text-slate-400 text-xs leading-relaxed">
+                            <code>_derive_reason_signal()</code> chọn một signal duy nhất theo thứ tự ưu tiên. Signal cụ thể nhất được dùng cho exact trusted match.
+                        </p>
+                        <pre class="bg-surface border border-border rounded p-3 text-[11px] text-accent overflow-x-auto">init last exit
+init waiting
+last exit
+waiting reason
+ZeroReplicas
+dependency health
+event reason</pre>
+                    </div>
+                    <div class="p-4 bg-canvas border border-border rounded-lg space-y-3">
+                        <span class="text-accent text-xs font-semibold uppercase tracking-wider">03. Trusted result</span>
+                        <h3 class="text-white font-semibold">Context cho LLM hoặc dashboard</h3>
+                        <p class="text-slate-400 text-xs leading-relaxed">
+                            Knowledge entry chỉ trở thành trusted context khi exact conclusive match hoặc token-coverage score đạt ngưỡng. Các related incident chưa trusted chỉ hiện trên dashboard.
+                        </p>
+                        <pre class="bg-surface border border-border rounded p-3 text-[11px] text-accent overflow-x-auto">source
+knowledge_key
+root_cause_pattern
+fix_action
+context_notes</pre>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-4">Luồng Retrieval hiện tại</h2>
+                <div class="bg-canvas border border-border rounded-xl p-4 overflow-x-auto">
+                    <div class="mermaid">
+                        graph TD
+                            Inputs[Alert and facts] --> Query[Build symptom query]
+                            Inputs --> Signal[Derive reason signal]
+                            Query --> Exact[Exact conclusive check]
+                            Signal --> Exact
+                            Exact --> History[Score history candidates]
+                            Query --> History
+                            Exact --> Trusted[Trusted match]
+                            History --> Trusted
+                            History --> Related[Untrusted related incidents]
+                            Trusted --> Prompt[Trusted context for prompt]
+                            Related --> Dashboard[Dashboard only]
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5 text-xs">
+                    <div class="p-4 bg-accent/5 border border-accent/20 rounded-lg">
+                        <strong class="text-accent">Exact match action</strong>
+                        <p class="text-slate-400 mt-2 leading-relaxed">
+                            Nếu <code>trigger_waiting_reason</code> của knowledge entry bằng signal hiện tại và entry có <code>conclusive=true</code>, Agent trả về pattern đó ngay như trusted context.
+                        </p>
+                    </div>
+                    <div class="p-4 bg-healthy/5 border border-healthy/20 rounded-lg">
+                        <strong class="text-healthy">Token coverage action</strong>
+                        <p class="text-slate-400 mt-2 leading-relaxed">
+                            Với history hoặc non-conclusive knowledge, Agent tính tỷ lệ token query xuất hiện trong symptom. Candidate cao nhất phải đạt ngưỡng <code>0.5</code> mới trở thành trusted match.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-4">Object cuối trước bước LLM</h2>
+                <p class="text-slate-400 text-sm mb-4">
+                    Đây là mô hình khái niệm của dữ liệu sau khi hoàn tất collection. Một số field có thể là <code>null</code> hoặc chuỗi rỗng nếu nguồn không có dữ liệu.
+                </p>
+                <pre class="bg-canvas border border-border rounded-lg p-4 text-xs text-slate-300 overflow-x-auto">{
+  "alert_name": "KubernetesPodCrashLooping",
+  "service": "ride-service",
+  "namespace": "vroom-dev",
+  "pods_available": 0,
+  "pods_desired": 1,
+  "pods_running": 1,
+  "pods_ready": 0,
+  "waiting_reason": "CrashLoopBackOff",
+  "restarts": 40,
+  "log_error": "dial tcp: lookup bad-host: no such host",
+  "event_reason": "BackOff",
+  "event_message": "Back-off restarting failed container",
+  "template_diff": {
+    "env_changed": true,
+    "env_diff": [{
+      "key": "REDIS_ADDR",
+      "old_value": "redis.platform.svc.cluster.local:6379",
+      "new_value": "bad-host:6379"
+    }]
+  },
+  "dependency": null,
+  "provenance": { "classification": "hotfix" }
+}</pre>
+                <p class="text-slate-500 text-xs mt-3">
+                    <code>format_evidence()</code> tạo một snippet ngắn để hiển thị trong dashboard sau khi LLM trả lời. Snippet này không phải là prompt gửi cho LLM.
+                </p>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-3">Tất cả field thu thập và vai trò trong Retrieval</h2>
+                <p class="text-slate-400 text-sm mb-5">
+                    Cột cuối là điểm quan trọng nhất: chỉ các field ghi <span class="text-healthy font-medium">Có</span> thực sự ảnh hưởng đến việc chọn trusted knowledge hiện tại.
+                </p>
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[920px] text-left text-xs border-collapse">
+                        <thead class="text-slate-300 border-b border-border">
+                            <tr>
+                                <th class="pb-3 pr-4 font-semibold">Nguồn</th>
+                                <th class="pb-3 pr-4 font-semibold">Field</th>
+                                <th class="pb-3 pr-4 font-semibold">Ý nghĩa</th>
+                                <th class="pb-3 font-semibold">Dùng trong Retrieval</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-slate-400 align-top">
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Alert</td><td class="py-3 pr-4"><code>alert_name</code></td><td class="py-3 pr-4">Tên rule cảnh báo, ví dụ <code>ServiceDown</code>.</td><td class="py-3 text-healthy">Có - symptom query</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Alert</td><td class="py-3 pr-4"><code>service</code>, <code>namespace</code>, <code>pod</code></td><td class="py-3 pr-4">Định danh workload và pod cụ thể nếu alert cung cấp.</td><td class="py-3">Không - dùng cho collection/prompt</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Metrics bundle</td><td class="py-3 pr-4"><code>rps</code>, <code>err</code>, <code>p99</code></td><td class="py-3 pr-4">Lưu lượng, tỷ lệ 5xx và P99 trong cửa sổ 5 phút.</td><td class="py-3">Không - chỉ prompt</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Metrics bundle</td><td class="py-3 pr-4"><code>loki_errors</code>, <code>traces_errored</code>, <code>trace_sample</code></td><td class="py-3 pr-4">Số log/traces lỗi và tên một trace mẫu khi có.</td><td class="py-3">Không - chỉ prompt</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Pod health</td><td class="py-3 pr-4"><code>pods_available</code>, <code>pods_desired</code></td><td class="py-3 pr-4">Replica available so với replica mong muốn.</td><td class="py-3 text-healthy">Có - suy ra <code>ZeroReplicas</code></td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Pod health</td><td class="py-3 pr-4"><code>pods_running</code>, <code>pods_ready</code></td><td class="py-3 pr-4">Replica đang chạy và ready.</td><td class="py-3">Không - lưu/dashboard</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Main container</td><td class="py-3 pr-4"><code>waiting_reason</code></td><td class="py-3 pr-4">Trạng thái chờ hiện tại, ví dụ <code>CrashLoopBackOff</code>.</td><td class="py-3 text-healthy">Có - query và reason signal</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Main container</td><td class="py-3 pr-4"><code>last_terminated_reason</code></td><td class="py-3 pr-4">Lý do container thoát ở lần gần nhất.</td><td class="py-3 text-healthy">Có - reason signal, trừ <code>Unknown</code></td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Main container</td><td class="py-3 pr-4"><code>restarts</code></td><td class="py-3 pr-4">Tổng số lần restart của main container.</td><td class="py-3">Không - prompt/dashboard</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Init container</td><td class="py-3 pr-4"><code>init_waiting_reason</code>, <code>init_last_terminated_reason</code></td><td class="py-3 pr-4">Trạng thái/lý do thoát init container.</td><td class="py-3 text-healthy">Có - ưu tiên cao nhất trong reason signal</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Init container</td><td class="py-3 pr-4"><code>init_restarts</code></td><td class="py-3 pr-4">Tổng số lần restart của init container.</td><td class="py-3">Không - prompt/dashboard</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Logs</td><td class="py-3 pr-4"><code>log_error</code></td><td class="py-3 pr-4">Dòng error/fatal/refused gần nhất từ Loki.</td><td class="py-3 text-healthy">Có - symptom query</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">K8s event</td><td class="py-3 pr-4"><code>event_reason</code></td><td class="py-3 pr-4">Reason của warning event mới nhất.</td><td class="py-3 text-healthy">Có - fallback reason signal</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">K8s event</td><td class="py-3 pr-4"><code>event_message</code>, <code>event_object</code></td><td class="py-3 pr-4">Nội dung và đối tượng của warning event.</td><td class="py-3">Không - prompt/quality check</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Change evidence</td><td class="py-3 pr-4"><code>template_diff</code>: image/env change, old/new values, <code>changed_at</code></td><td class="py-3 pr-4">Khác biệt giữa hai ReplicaSet mới nhất.</td><td class="py-3">Không - prompt/quality check</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4">Dependency</td><td class="py-3 pr-4"><code>dependency.name</code>, namespace, available/desired, waiting reason</td><td class="py-3 pr-4">Service được resolve từ IP:port lỗi và trạng thái health của nó.</td><td class="py-3 text-healthy">Có - dependency reason signal</td></tr>
+                            <tr><td class="py-3 pr-4">Provenance</td><td class="py-3 pr-4"><code>provenance</code>: classification, drift, commit, PR, changed_at</td><td class="py-3 pr-4">Nguồn thay đổi GitOps hoặc manual hotfix.</td><td class="py-3">Không - lưu/dashboard</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section: RAG Augmentation -->
+        <section id="content-a-augmentation" class="tab-content hidden space-y-8">
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    A - Augmentation: dựng context có giới hạn
+                </h2>
+                <p class="text-slate-300 text-sm leading-relaxed max-w-4xl">
+                    Augmentation là phần backend chọn evidence nào được đưa vào prompt. Nó không dump toàn bộ object Python hoặc raw API response. <code>_build_grounded_prompt()</code> biến các field có giá trị chẩn đoán thành text, sau đó chỉ thêm Redis context khi Retrieval trả về một trusted match.
+                </p>
+
+                <div class="bg-canvas border border-border rounded-xl p-4 overflow-x-auto mt-6">
+                    <div class="mermaid">
+                        graph TD
+                            Facts[Final facts] --> Select[Select fields]
+                            Bundle[Metrics bundle] --> Select
+                            Query[Incident symptom] --> Match[Trusted match]
+                            Redis[Knowledge memory] --> Match
+                            Match --> Context[Trusted context]
+                            Match --> NoContext[No trusted context]
+                            Context --> Build[Build prompt]
+                            Select --> Build
+                            NoContext --> Build
+                            Build --> Prompt[One bounded user prompt]
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-4">Prompt skeleton</h2>
+                <pre class="bg-canvas border border-border rounded-lg p-4 text-xs text-slate-300 overflow-x-auto">Alert: KubernetesPodCrashLooping
+Service: ride-service
+Namespace: vroom-dev
+
+Evidence:
+  Pods: 0/1 running
+  Container state: CrashLoopBackOff (40 restarts)
+  Last error log: dial tcp: lookup bad-host: no such host
+  Last K8s event: BackOff on ride-service-pod
+  Recent change: env changed - REDIS_ADDR: old-value -> bad-host:6379
+  Service metrics (5 min): rps=2.4 err=18.5% p99=0.842s
+
+Trusted match from the knowledge base (human-approved):
+Known failure pattern: invalid_dependency_address
+Fix: Restore the dependency address to the platform service DNS name
+Notes: caused by an unintended configuration change
+
+GROUNDING RULE:
+You may only assert claims supported by the evidence above.
+Do not invent service names, ports, errors, or causes.
+If evidence is insufficient, state the observed symptom and what data is missing.
+
+Output exactly this JSON:
+{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}</pre>
+                <p class="text-slate-500 text-xs mt-3">
+                    Đây là một user message duy nhất. Request hiện tại không truyền <code>tools</code> và không cho LLM tự chọn REST endpoint.
+                </p>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-3">Field nào thực sự đi vào prompt?</h2>
+                <p class="text-slate-400 text-sm mb-5">
+                    Augmentation render có điều kiện. Field trống sẽ không tạo dòng prompt, vì vậy model chỉ nhận evidence thực tế thay vì các giá trị mặc định rỗng.
+                </p>
+                <div class="overflow-x-auto">
+                    <table class="w-full min-w-[880px] text-left text-xs border-collapse">
+                        <thead class="text-slate-300 border-b border-border">
+                            <tr>
+                                <th class="pb-3 pr-4 font-semibold">Field</th>
+                                <th class="pb-3 pr-4 font-semibold">Dòng prompt được tạo</th>
+                                <th class="pb-3 font-semibold">Ghi chú</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-slate-400 align-top">
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>alert_name</code>, <code>service</code>, <code>namespace</code>, <code>pod</code></td><td class="py-3 pr-4">Header Alert, Service, Namespace, Pod.</td><td class="py-3">Pod chỉ xuất hiện khi alert cung cấp giá trị.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>pods_available</code>, <code>pods_desired</code></td><td class="py-3 pr-4">Pods: available/desired running.</td><td class="py-3">Luôn là dòng evidence đầu tiên.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>waiting_reason</code>, <code>last_terminated_reason</code>, <code>restarts</code></td><td class="py-3 pr-4">Container state hoặc last exit reason.</td><td class="py-3">Chỉ render khi có waiting/exit reason.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>init_waiting_reason</code>, <code>init_last_terminated_reason</code>, <code>init_restarts</code></td><td class="py-3 pr-4">Init container state và restart count.</td><td class="py-3">Tách biệt với main container.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>log_error</code></td><td class="py-3 pr-4">Last error log.</td><td class="py-3">Là evidence chính cho grounding check.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>event_reason</code>, <code>event_object</code>, <code>event_message</code></td><td class="py-3 pr-4">Last K8s event.</td><td class="py-3">Event message cũng tham gia grounding check.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>template_diff</code></td><td class="py-3 pr-4">Recent env change hoặc image change.</td><td class="py-3">Old/new env và image là grounding evidence.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>dependency</code></td><td class="py-3 pr-4">Dependency namespace, available/desired, waiting state.</td><td class="py-3">Dependency name cũng tham gia grounding check.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>bundle</code></td><td class="py-3 pr-4">Service metrics in 5 min.</td><td class="py-3">Gồm RPS, error rate, P99, Loki/Tempo summary.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>memory_context</code></td><td class="py-3 pr-4">Trusted match from knowledge base.</td><td class="py-3">Chỉ xuất hiện khi Retrieval trả về trusted match.</td></tr>
+                            <tr><td class="py-3 pr-4"><code>pods_running</code>, <code>pods_ready</code>, full <code>provenance</code></td><td class="py-3 pr-4">Không có dòng prompt hiện tại.</td><td class="py-3">Các field này vẫn được lưu và hiển thị ở dashboard.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                    <h2 class="text-lg font-bold text-white mb-4">Trusted context injection</h2>
+                    <p class="text-slate-400 text-sm leading-relaxed mb-4">
+                        Agent tạo query từ alert name, waiting reason và log error. Redis kiểm tra theo hai lớp:
+                    </p>
+                    <ul class="list-disc pl-5 space-y-2 text-xs text-slate-400">
+                        <li><strong class="text-white">Exact match:</strong> dùng trực tiếp tri thức conclusive đã được phê duyệt.</li>
+                        <li><strong class="text-white">Token coverage:</strong> tìm history hoặc knowledge entry có đủ token trùng với symptom hiện tại.</li>
+                        <li><strong class="text-white">No trusted match:</strong> LLM chỉ nhận evidence hiện tại, không nhận tiền lệ chưa xác nhận làm fact.</li>
+                    </ul>
+                    <div class="p-3 bg-healthy/5 border border-healthy/20 rounded-lg text-xs text-slate-400 mt-5">
+                        Related incidents chưa trusted được trả về dashboard để tham khảo. Chúng hiện không được chèn vào prompt grounding.
+                    </div>
+                </div>
+                <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                    <h2 class="text-lg font-bold text-white mb-4">Dữ liệu không được nâng thành fact</h2>
+                    <ul class="list-disc pl-5 space-y-2 text-xs text-slate-400">
+                        <li><code>related_incidents_unconfirmed</code> chỉ là candidate cho operator xem ở dashboard.</li>
+                        <li><code>format_evidence()</code> chỉ tạo evidence snippet sau khi có diagnosis.</li>
+                        <li>Full GitOps commit, PR và drift trong <code>provenance</code> được lưu/display nhưng chưa được inject vào prompt hiện tại.</li>
+                        <li>Raw Prometheus, Loki, Tempo và kubectl response được backend chuẩn hóa trước khi tới LLM.</li>
+                        <li>LLM không nhận <code>tools</code>, không gọi collector và không có quyền chạy remediation.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="bg-root-cause/5 border border-root-cause/30 rounded-xl p-5">
+                <h2 class="text-base font-bold text-root-cause mb-2">Ranh giới hiện tại</h2>
+                <p class="text-slate-300 text-sm leading-relaxed">
+                    Backend là thành phần chủ động gọi các collector và cung cấp evidence cho LLM. LLM chỉ diễn giải evidence và tạo recommendation. Nó không gọi tool, không gọi kubectl và không tự áp dụng remediation.
+                </p>
+            </div>
+        </section>
+
+        <!-- Section: RAG Generation -->
+        <section id="content-g-generation" class="tab-content hidden space-y-8">
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                    <span class="w-1.5 h-6 bg-accent rounded-full"></span>
+                    G - Generation: diễn giải, kiểm tra, rồi ghi nhận
+                </h2>
+                <p class="text-slate-300 text-sm leading-relaxed max-w-4xl">
+                    Generation nhận đúng một grounded user prompt từ tab Augmentation. Model được gọi theo danh sách fallback đã cấu hình, nhưng backend vẫn là thành phần kiểm soát schema, quality gate, self-refine và persistence.
+                </p>
+
+                <div class="bg-canvas border border-border rounded-xl p-4 overflow-x-auto mt-6">
+                    <div class="mermaid">
+                        graph TD
+                            Prompt[Grounded prompt] --> Model[Configured model]
+                            Model --> Response[JSON response]
+                            Response --> Parse[Parse and schema check]
+                            Parse --> Quality[Grounding and quality check]
+                            Quality --> Pass[Accepted diagnosis]
+                            Quality --> Repair[Targeted self refine]
+                            Repair --> Model
+                            Pass --> Record[Incident record and timeline]
+                            Parse --> Fallback[Safe fallback]
+                            Fallback --> Record
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                <h2 class="text-lg font-bold text-white mb-4">Output contract và ý nghĩa từng field</h2>
+                <pre class="bg-canvas border border-border rounded-lg p-4 text-xs text-accent overflow-x-auto">{
+  "root_cause": "...",
+  "dev_action": "...",
+  "kubectl_hint": "..."
+}</pre>
+                <div class="overflow-x-auto mt-5">
+                    <table class="w-full min-w-[840px] text-left text-xs border-collapse">
+                        <thead class="text-slate-300 border-b border-border">
+                            <tr>
+                                <th class="pb-3 pr-4 font-semibold">Field / action</th>
+                                <th class="pb-3 pr-4 font-semibold">Ý nghĩa</th>
+                                <th class="pb-3 font-semibold">Nơi được dùng</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-slate-400 align-top">
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>root_cause</code></td><td class="py-3 pr-4">Nguyên nhân được diễn giải từ evidence hiện tại.</td><td class="py-3">Dashboard, Redis incident, knowledge suggestion.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>dev_action</code></td><td class="py-3 pr-4">Hành động cụ thể mà operator/developer nên thực hiện.</td><td class="py-3">Immediate Fix card trên dashboard.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>kubectl_hint</code></td><td class="py-3 pr-4">Câu lệnh gợi ý để operator tự chạy sau khi xác thực diagnosis.</td><td class="py-3">Dashboard và knowledge suggestion; agent không chạy lệnh.</td></tr>
+                            <tr class="border-b border-border/70"><td class="py-3 pr-4"><code>low_confidence</code></td><td class="py-3 pr-4">Đánh dấu response dạng insufficient evidence.</td><td class="py-3">Warning UI và Redis incident record.</td></tr>
+                            <tr><td class="py-3 pr-4"><code>_step_log</code></td><td class="py-3 pr-4">Duration/metadata của phase LLM và quality check.</td><td class="py-3">Được append vào incident timeline.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                    <h2 class="text-lg font-bold text-white mb-4">Deterministic quality gate</h2>
+                    <ul class="list-disc pl-5 space-y-2 text-xs text-slate-400">
+                        <li>Parse JSON, kể cả khi model thêm text trước/sau object.</li>
+                        <li>Yêu cầu ba field bắt buộc phải tồn tại, là string và không rỗng.</li>
+                        <li>Reject kubectl hint có placeholder và đề xuất giá trị thực thay thế.</li>
+                        <li>Kiểm tra root cause có token chung với log error, event message, template diff hoặc dependency name.</li>
+                        <li>Reject root cause hoặc dev action chung chung theo blacklist.</li>
+                        <li>Cho phép low-confidence response nếu nó nhắc lại đúng symptom quan sát được.</li>
+                    </ul>
+                </div>
+                <div class="bg-surface border border-border rounded-xl p-6 md:p-8">
+                    <h2 class="text-lg font-bold text-white mb-4">Targeted self-refine và fallback</h2>
+                    <p class="text-slate-400 text-xs leading-relaxed mb-4">
+                        Nếu quality check thất bại, backend gửi prompt gốc, JSON cũ và danh sách lỗi cụ thể cho model. Model chỉ được yêu cầu sửa các lỗi đã nêu.
+                    </p>
+                    <pre class="bg-canvas border border-border rounded p-3 text-[11px] text-slate-300 overflow-x-auto">Your previous answer was: { ... }
+
+The following specific issues were detected:
+- root_cause is not grounded in evidence
+- dev_action is too vague
+
+Fix ONLY these issues.
+Output exactly the required JSON.</pre>
+                    <p class="text-slate-500 text-xs mt-3">
+                        Nếu model trả output không parse được, backend dùng fallback an toàn từ waiting reason và latest log error thay vì suy đoán thêm.
+                    </p>
+                </div>
+            </div>
+
+            <div class="bg-root-cause/5 border border-root-cause/30 rounded-xl p-5">
+                <h2 class="text-base font-bold text-root-cause mb-2">Ranh giới quyền hạn của Generation</h2>
+                <p class="text-slate-300 text-sm leading-relaxed">
+                    Request hiện tại gửi <code>model</code>, <code>messages</code>, <code>temperature</code> và <code>max_tokens</code>. Không có <code>tools</code> trong request. LLM chỉ tạo diagnosis và recommendation; backend không cho model gọi collector, kubectl hoặc remediation endpoint.
+                </p>
             </div>
         </section>
 
@@ -385,8 +970,8 @@
                             <span class="text-white font-medium block">Luồng chẩn đoán của Agent:</span>
                             <div class="space-y-1">
                                 <p>1. Prometheus ghi nhận trạng thái thoát gần nhất của pod là <code class="text-critical">OOMKilled</code>.</p>
-                                <p>2. Bộ lọc <strong class="text-white">Exact-match Short-circuit</strong> phát hiện lỗi conclusive này và kích hoạt ngay tri thức đã lưu sẵn cho khóa <code class="text-accent">oom</code>.</p>
-                                <p>3. Agent bỏ qua bước chạy LLM, trả về kết quả chẩn đoán và khuyến nghị tăng bộ nhớ giới hạn trong manifest ngay lập tức để tiết kiệm chi phí tính toán.</p>
+                                <p>2. Bộ lọc <strong class="text-white">Exact-match Trusted Grounding</strong> phát hiện lỗi conclusive này và nạp tri thức đã được phê duyệt cho khóa <code class="text-accent">oom</code>.</p>
+                                <p>3. Tri thức trusted được đưa vào prompt làm cơ sở cho chẩn đoán; LLM tạo JSON và quality check xác thực đầu ra trước khi Agent khuyến nghị tăng giới hạn bộ nhớ trong manifest.</p>
                             </div>
                         </div>
                     </div>
@@ -526,6 +1111,16 @@ POST /admin/models
             const targetContent = document.getElementById('content-' + tabId);
             if (targetContent) {
                 targetContent.classList.remove('hidden');
+                requestAnimationFrame(() => {
+                    const diagrams = Array.from(
+                        targetContent.querySelectorAll('.mermaid:not([data-processed])')
+                    );
+                    if (diagrams.length && window.mermaid) {
+                        mermaid.run({ nodes: diagrams }).catch(error => {
+                            console.error('Mermaid tab render failed', error);
+                        });
+                    }
+                });
             }
 
             // Reset tab button styles
