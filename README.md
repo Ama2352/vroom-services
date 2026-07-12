@@ -227,6 +227,8 @@ operator can attach it to an existing pattern or create a new one, edit the
 wording and context, and approve or reject it before it is used for future
 incident matching.
 
+**[Read the detailed Incident Agent workflow →](docs/incident-agent-workflow.md)**
+
 ---
 
 ## Repository Layout
