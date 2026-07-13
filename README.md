@@ -135,7 +135,8 @@ The result is recorded as an incident and shown in the dashboard with:
    evidence through its diagnostic tools.
 3. Redis-backed memory is searched for a trusted match or related incidents.
 4. The LLM interprets the collected facts and returns a structured diagnosis.
-5. The dashboard presents the diagnosis for operator validation and resolution.
+5. The dashboard lets an administrator validate the agent's diagnosis, optionally
+   try its suggested remediation, and review the proposed knowledge update.
 
 ```mermaid
 flowchart TB
@@ -167,19 +168,20 @@ flowchart TB
         Result --> Record[("Redis incident record<br/>and investigation timeline")]
     end
 
-    subgraph Review["Operator review and learning"]
+    subgraph Review["Administrator review and learning"]
         Record --> Dashboard["Incident dashboard"]
-        Dashboard --> Validate["Operator validates diagnosis"]
-        Validate --> Recommendation["Recommended action<br/>and suggested kubectl command"]
-        Recommendation --> Apply{"Operator manually applies fix?"}
+        Dashboard --> Validate["Administrator validates<br/>agent diagnosis"]
+        Validate --> Recommendation["Agent-suggested remediation<br/>and kubectl command"]
+        Recommendation --> Apply{"Administrator tries<br/>the remediation?"}
         Apply -->|Yes| Cluster["Kubernetes cluster"]
-        Apply -->|No or later| Continue["Continue investigation"]
-        Cluster --> Resolve["Operator resolves incident"]
-        Continue --> Dashboard
-        Resolve --> Suggest["Propose knowledge-base update"]
-        Suggest --> ReviewKnowledge{"Operator review"}
-        ReviewKnowledge -->|Approve| Redis
-        ReviewKnowledge -->|Reject| Archive["Keep incident history only"]
+        Apply -->|No| Suggest["Agent-recommended<br/>knowledge record"]
+        Cluster --> Suggest
+        Suggest --> ReviewKnowledge{"Administrator reviews<br/>knowledge recommendation"}
+        ReviewKnowledge -->|Approve as new| NewKnowledge["Create new knowledge"]
+        ReviewKnowledge -->|Attach to existing| ExistingKnowledge["Attach to existing knowledge"]
+        ReviewKnowledge -->|Do not approve| Archive["Keep as incident history only"]
+        NewKnowledge --> Redis
+        ExistingKnowledge --> Redis
     end
 
     classDef trigger fill:#e55050,stroke:#8c2424,color:#fff
@@ -191,14 +193,16 @@ flowchart TB
     class Prometheus,Alertmanager,Slack trigger
     class N8n,Agent,Collect,LLM,Result agent
     class Redis,Record,Bundle,Known,Related data
-    class Dashboard,Validate,Recommendation,Apply,Resolve,Suggest,ReviewKnowledge human
-    class Metrics,Logs,Kubernetes,Changes,Cluster,Continue,Archive external
+    class Dashboard,Validate,Recommendation,Apply,Suggest,ReviewKnowledge,NewKnowledge,ExistingKnowledge human
+    class Metrics,Logs,Kubernetes,Changes,Cluster,Archive external
 ```
 
-Remediation is strictly operator-controlled. The agent recommends an action
-and provides a suggested `kubectl` command, but never executes it. After
-validating the diagnosis, an operator manually applies any required change and
-then resolves the incident.
+Remediation is strictly administrator-controlled. The agent recommends an
+action and provides a suggested `kubectl` command, but never executes it. The
+administrator may try that remediation or choose not to; either way, they then
+review the agent's recommended knowledge record. They can approve it as new
+knowledge, attach it to an existing knowledge entry, or decline it, in which
+case the incident remains history only.
 
 ![Slack incident alert](docs/images/sre-slack-alert.png)
 
