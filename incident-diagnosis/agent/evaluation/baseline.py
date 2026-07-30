@@ -10,9 +10,42 @@ from evaluation.models import RankedCandidate, RetrievalCase, RetrievalOutcome
 RUNBOOKS_DIR = Path(__file__).resolve().parents[1] / "runbooks"
 
 
+def _stabilize_seeded_history_ids(rdb: fakeredis.FakeRedis) -> None:
+    histories = memory.list_all_history_entries(rdb)
+    histories.sort(key=lambda entry: tuple(
+        entry.get(field, "")
+        for field in (
+            "knowledge_key",
+            "service",
+            "symptom",
+            "context_notes",
+            "source",
+            "created_by",
+            "timestamp",
+            "last_modified_by",
+            "last_modified_at",
+        )
+    ))
+    for history in histories:
+        rdb.delete(f"history:entry:{history['id']}")
+    rdb.delete(memory.HISTORY_INDEX)
+    for ordinal, history in enumerate(histories, start=1):
+        history_id = f"fixture-history-{ordinal:04d}"
+        rdb.hset(
+            f"history:entry:{history_id}",
+            mapping={
+                key: value
+                for key, value in history.items()
+                if key != "id"
+            },
+        )
+        rdb.sadd(memory.HISTORY_INDEX, history_id)
+
+
 def seed_store() -> fakeredis.FakeRedis:
     rdb = fakeredis.FakeRedis()
     seed.seed_if_empty(rdb, str(RUNBOOKS_DIR))
+    _stabilize_seeded_history_ids(rdb)
     return rdb
 
 

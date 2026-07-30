@@ -57,9 +57,17 @@ def test_query_repetition_does_not_change_rank():
     )
     first = rank_bm25(seed_store(), case, CONFIG)
     second = rank_bm25(seed_store(), repeated, CONFIG)
-    assert [c.knowledge_key for c in first.candidates] == [
-        c.knowledge_key for c in second.candidates
-    ]
+    assert first == second
+
+
+def test_history_candidate_source_id_identifies_stored_record():
+    rdb = seed_store()
+    outcome = rank_bm25(rdb, _case("outbox_not_draining"), CONFIG)
+    history_candidate = next(
+        candidate for candidate in outcome.candidates
+        if candidate.source == "history"
+    )
+    assert rdb.exists(f"history:entry:{history_candidate.source_id}")
 
 
 def test_results_are_collapsed_by_knowledge_key():

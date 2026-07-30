@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import hashlib
 
 import memory
 from evaluation.models import (
@@ -123,18 +122,10 @@ def _documents(rdb, history_variant: str) -> list[_Document]:
         ]
         if history_variant == "joined":
             parts.append(knowledge.get("root_cause_pattern", ""))
-        stable_fields = "\0".join([
-            history.get("knowledge_key", ""),
-            history.get("service", ""),
-            history.get("symptom", ""),
-            history.get("context_notes", ""),
-            history.get("source", ""),
-        ])
-        source_id = hashlib.sha256(stable_fields.encode()).hexdigest()
         documents.append(_Document(
             knowledge=knowledge,
             source="history",
-            source_id=source_id,
+            source_id=history["id"],
             text=" ".join(filter(None, parts)),
             context_notes=history.get("context_notes", ""),
         ))
