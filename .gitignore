@@ -41,6 +41,7 @@ Thumbs.db
 .docker/
 
 .notes/
+.worktrees/
 
 .venv
 
