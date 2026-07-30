@@ -136,6 +136,8 @@ def calibrate_variant(
     baseline_metrics: MetricSummary,
 ) -> VariantConfig | None:
     calibration_cases = tuple(calibration_cases)
+    if any(case.split != "calibration" for case in calibration_cases):
+        raise ValueError("calibrate_variant accepts calibration cases only")
     unthresholded = replace(config, threshold=0.0)
     outcomes = {
         case.id: rank_bm25(rdb, case, unthresholded)
