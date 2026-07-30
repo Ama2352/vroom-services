@@ -1,4 +1,8 @@
-from evaluation.baseline import rank_current_coverage, seed_store
+from evaluation.baseline import (
+    _stabilize_seeded_history_ids,
+    rank_current_coverage,
+    seed_store,
+)
 from evaluation.fixture_loader import load_cases
 from pathlib import Path
 
@@ -33,6 +37,32 @@ def test_seed_store_is_fully_local():
     rdb = seed_store()
     assert rdb.scard("knowledge:index") >= 8
     assert rdb.scard("history:index") >= 1
+
+
+def test_seed_store_assigns_stable_unique_history_ids():
+    first = memory.list_all_history_entries(seed_store())
+    second = memory.list_all_history_entries(seed_store())
+    first_ids = sorted(entry["id"] for entry in first)
+    second_ids = sorted(entry["id"] for entry in second)
+    assert first_ids == second_ids
+    assert len(first_ids) == len(set(first_ids)) == len(first)
+
+
+def test_stable_history_ids_preserve_identical_records_as_distinct():
+    import fakeredis
+
+    rdb = fakeredis.FakeRedis()
+    duplicate = {
+        "knowledge_key": "same",
+        "symptom": "same symptom",
+        "context_notes": "same context",
+    }
+    memory.store_history_entry(rdb, duplicate)
+    memory.store_history_entry(rdb, duplicate)
+    _stabilize_seeded_history_ids(rdb)
+    histories = memory.list_all_history_entries(rdb)
+    assert len(histories) == 2
+    assert len({entry["id"] for entry in histories}) == 2
 
 
 def test_instrumented_top1_matches_production_find_trusted_match():
