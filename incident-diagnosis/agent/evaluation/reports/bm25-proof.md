@@ -4,7 +4,7 @@
 **Infrastructure required:** none
 **LLM calls:** none
 **Selected variant:** rich_joined
-**Calibrated raw-score floor:** 3.7249771912130707
+**Calibrated raw-score floor:** 3.725
 **Selection rationale:** Lowest calibration false-positive rate, then highest top-1 accuracy, highest recall@3, and lexicographic variant name.
 
 ## Calibration metrics
@@ -23,10 +23,10 @@
 
 ## Challenger calibration outcomes
 
-- **baseline_plain**: calibrated=true, threshold=12.792813657432989, false_positive=0.000, top1=0.625, recall_at_3=0.625, exact_failures=0
-- **baseline_joined**: calibrated=true, threshold=3.7249771912130707, false_positive=0.000, top1=0.750, recall_at_3=0.875, exact_failures=0
-- **rich_plain**: calibrated=true, threshold=4.421570276219816, false_positive=0.000, top1=0.750, recall_at_3=0.750, exact_failures=0
-- **rich_joined**: calibrated=true, threshold=3.7249771912130707, false_positive=0.000, top1=0.875, recall_at_3=1.000, exact_failures=0
+- **baseline_plain**: calibrated=true, threshold=12.793, false_positive=0.000, top1=0.625, recall_at_3=0.625, exact_failures=0
+- **baseline_joined**: calibrated=true, threshold=3.725, false_positive=0.000, top1=0.750, recall_at_3=0.875, exact_failures=0
+- **rich_plain**: calibrated=true, threshold=4.422, false_positive=0.000, top1=0.750, recall_at_3=0.750, exact_failures=0
+- **rich_joined**: calibrated=true, threshold=3.725, false_positive=0.000, top1=0.875, recall_at_3=1.000, exact_failures=0
 
 ## Per-case traces
 

@@ -50,7 +50,7 @@ def _run(cases, ranker) -> dict[str, RetrievalOutcome]:
 def _render_markdown(result: dict) -> str:
     selected = result.get("selected_variant")
     selected_name = selected["name"] if selected else "none"
-    selected_floor = str(selected["threshold"]) if selected else "n/a"
+    selected_floor = f"{selected['threshold']:.3f}" if selected else "n/a"
     lines = [
         "# BM25 Retrieval Proof",
         "",
@@ -90,9 +90,14 @@ def _render_markdown(result: dict) -> str:
     lines.extend(["## Challenger calibration outcomes", ""])
     for variant in result["variants"]:
         metrics = variant["calibration_metrics"]
+        threshold = (
+            f"{variant['threshold']:.3f}"
+            if variant["threshold"] is not None
+            else "n/a"
+        )
         lines.append(
             f"- **{variant['name']}**: calibrated={str(variant['calibrated']).lower()}, "
-            f"threshold={variant['threshold'] if variant['threshold'] is not None else 'n/a'}, "
+            f"threshold={threshold}, "
             f"false_positive={metrics['false_positive_rate']:.3f}, "
             f"top1={metrics['top1_accuracy']:.3f}, "
             f"recall_at_3={metrics['recall_at_3']:.3f}, "
