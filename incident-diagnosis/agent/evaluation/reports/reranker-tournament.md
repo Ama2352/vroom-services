@@ -12,8 +12,8 @@ Offline evidence compares frozen candidates across 40 cases: 20 calibration and 
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | baseline | 40.0% | 40.0% | 0.400 | 0/10 (0.0%) | 0 | 1 | true | n/a ms | n/a MB |
 | bm25 | 30.0% | 30.0% | 0.300 | 0/10 (0.0%) | 0 | 0 | true | n/a ms | n/a MB |
-| minilm | 80.0% | 80.0% | 0.800 | 0/10 (0.0%) | 0 | 0 | true | 278.7 ms | 189.3 MB |
-| mixedbread_xsmall | 70.0% | 70.0% | 0.700 | 0/10 (0.0%) | 1 | 0 | true | 989.7 ms | 353.8 MB |
+| minilm | 80.0% | 80.0% | 0.800 | 0/10 (0.0%) | 0 | 0 | true | 415.2 ms | 189.7 MB |
+| mixedbread_xsmall | 70.0% | 70.0% | 0.700 | 0/10 (0.0%) | 1 | 0 | true | 725.0 ms | 353.7 MB |
 | llm | n/a | n/a | n/a | n/a | n/a | n/a | false | n/a ms | n/a MB |
 
 ## Results
@@ -27,7 +27,7 @@ Operational telemetry: local artifact/estimated-container sizes: minilm 23.0/190
 ## Informative failures
 
 - `dns_no_match` — DNS hard negative: expected abstention; baseline returned none with 0 accepted candidate(s)
-- `ambiguous_conclusive` — did not return an expected diagnosis key.
+- `init_crashloop` (`mixedbread_xsmall`) — accepted forbidden key(s): crashloop.
 
 ## Decision
 

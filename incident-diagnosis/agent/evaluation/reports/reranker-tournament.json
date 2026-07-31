@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-31T14:15:32.873800+00:00",
+  "generated_at": "2026-07-31T15:05:14.803180+00:00",
   "decision": "LOCAL_PASS",
   "recommendation": {
     "name": "minilm",
@@ -25,7 +25,7 @@
     "cpu_model": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
     "logical_core_count": 16,
     "total_ram_mb": 16016.73046875,
-    "git_commit": "fb883414243f2f007e0258740c05b2297dc70e18",
+    "git_commit": "750b4e0f932dc38fbfac9eb4cc20cfc2fb5c35f0",
     "fixture_sha256": "c5abe3d9587c5ebc3a418d5b3eb25aa16c5eedda01309ea9f235806d6f0fd19b",
     "fixture_case_count": 40,
     "model_hashes": {
@@ -1981,10 +1981,10 @@
       "operational": {
         "artifact_mb": 23.028539657592773,
         "estimated_container_delta_mb": 190.11096572875977,
-        "cold_load_ms": 2370.757000055164,
-        "p50_ms": 116.7484000325203,
-        "p95_ms": 278.7330000428483,
-        "peak_rss_mb": 189.26171875,
+        "cold_load_ms": 2313.1176000460982,
+        "p50_ms": 90.5691001098603,
+        "p95_ms": 415.2150000445545,
+        "peak_rss_mb": 189.65234375,
         "request_count": 0,
         "input_tokens": 0,
         "output_tokens": 0,
@@ -2179,7 +2179,7 @@
               "reason": "reranker score -10.608046 meets floor -inf"
             }
           ],
-          "latency_ms": 100.04689998459071,
+          "latency_ms": 201.48769998922944,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2262,7 +2262,7 @@
               "reason": "reranker score -6.744174 meets floor -inf"
             }
           ],
-          "latency_ms": 98.81470003165305,
+          "latency_ms": 229.39470002893358,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2368,7 +2368,7 @@
               "reason": "reranker score -11.230934 meets floor -inf"
             }
           ],
-          "latency_ms": 230.45589996036142,
+          "latency_ms": 331.98149991221726,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2411,7 +2411,7 @@
               "reason": "reranker score 3.884701 meets floor -inf"
             }
           ],
-          "latency_ms": 36.66700003668666,
+          "latency_ms": 89.70820007380098,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2494,7 +2494,7 @@
               "reason": "reranker score -9.962822 meets floor -inf"
             }
           ],
-          "latency_ms": 182.3217999190092,
+          "latency_ms": 403.30100001301616,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2610,7 +2610,7 @@
               "reason": "reranker score -10.793151 meets floor -inf"
             }
           ],
-          "latency_ms": 207.82910007983446,
+          "latency_ms": 300.7870999863371,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2649,7 +2649,7 @@
               "reason": "reranker score -5.733828 meets floor -inf"
             }
           ],
-          "latency_ms": 75.74460003525019,
+          "latency_ms": 74.31289996020496,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2710,7 +2710,7 @@
               "reason": "reranker score -4.685637 meets floor -inf"
             }
           ],
-          "latency_ms": 70.07730007171631,
+          "latency_ms": 86.99280000291765,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2802,7 +2802,7 @@
               "reason": "reranker score -9.621002 meets floor -inf"
             }
           ],
-          "latency_ms": 250.41960005182773,
+          "latency_ms": 252.3450000444427,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2894,7 +2894,7 @@
               "reason": "reranker score -10.669478 meets floor -inf"
             }
           ],
-          "latency_ms": 152.56059996318072,
+          "latency_ms": 265.26839996222407,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2957,7 +2957,7 @@
               "reason": "reranker score -10.833802 meets floor -inf"
             }
           ],
-          "latency_ms": 70.47780009452254,
+          "latency_ms": 139.93910001590848,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -2996,7 +2996,7 @@
               "reason": "reranker score -9.505563 meets floor -inf"
             }
           ],
-          "latency_ms": 61.690400005318224,
+          "latency_ms": 50.4752000560984,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -3035,7 +3035,7 @@
               "reason": "reranker score -10.355175 meets floor -inf"
             }
           ],
-          "latency_ms": 41.439799941144884,
+          "latency_ms": 56.97260005399585,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -3118,7 +3118,7 @@
               "reason": "reranker score -10.691344 meets floor -inf"
             }
           ],
-          "latency_ms": 123.66979999933392,
+          "latency_ms": 198.81730002816767,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -3228,7 +3228,7 @@
               "reason": "reranker score -8.337698 meets floor -inf"
             }
           ],
-          "latency_ms": 336.93119999952614,
+          "latency_ms": 530.9416999807581,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -3289,7 +3289,7 @@
               "reason": "reranker score -10.290275 meets floor -inf"
             }
           ],
-          "latency_ms": 131.22099998872727,
+          "latency_ms": 216.70560003258288,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -3350,7 +3350,7 @@
                 "reason": "reranker score 0.614813 is below floor 1.196189"
               }
             ],
-            "latency_ms": 136.4731000503525,
+            "latency_ms": 121.83820002246648,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3428,7 +3428,7 @@
                 "reason": "reranker score -11.273375 is below floor 1.196189"
               }
             ],
-            "latency_ms": 124.99889999162406,
+            "latency_ms": 172.9812000412494,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3488,7 +3488,7 @@
                 "reason": "reranker score -7.600123 is below floor 1.196189"
               }
             ],
-            "latency_ms": 126.52789999265224,
+            "latency_ms": 90.49560001585633,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3533,7 +3533,7 @@
                 "reason": "reranker score 5.202972 meets floor 1.196189"
               }
             ],
-            "latency_ms": 32.00580005068332,
+            "latency_ms": 22.05969998613,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3584,7 +3584,7 @@
                 "reason": "reranker score -8.056536 is below floor 1.196189"
               }
             ],
-            "latency_ms": 75.30999998562038,
+            "latency_ms": 82.38219993654639,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3628,7 +3628,7 @@
                 "reason": "reranker score 5.037560 meets floor 1.196189"
               }
             ],
-            "latency_ms": 63.12990002334118,
+            "latency_ms": 31.802500016056,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3673,7 +3673,7 @@
                 "reason": "reranker score 5.460810 meets floor 1.196189"
               }
             ],
-            "latency_ms": 52.42329998873174,
+            "latency_ms": 39.5448999479413,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3752,7 +3752,7 @@
                 "reason": "reranker score -11.077636 is below floor 1.196189"
               }
             ],
-            "latency_ms": 278.7330000428483,
+            "latency_ms": 415.2150000445545,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3810,7 +3810,7 @@
                 "reason": "reranker score -4.084797 is below floor 1.196189"
               }
             ],
-            "latency_ms": 176.1600999161601,
+            "latency_ms": 112.92360001243651,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3844,7 +3844,7 @@
                 "reason": "reranker score -7.831887 is below floor 1.196189"
               }
             ],
-            "latency_ms": 128.95499996375293,
+            "latency_ms": 90.5691001098603,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3883,7 +3883,7 @@
                 "reason": "reranker score 1.640600 meets floor 1.196189"
               }
             ],
-            "latency_ms": 116.7484000325203,
+            "latency_ms": 43.553999974392354,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3935,7 +3935,7 @@
                 "reason": "reranker score -9.851344 is below floor 1.196189"
               }
             ],
-            "latency_ms": 256.12070003990084,
+            "latency_ms": 152.12680003605783,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -3969,7 +3969,7 @@
                 "reason": "reranker score -1.354493 is below floor 1.196189"
               }
             ],
-            "latency_ms": 76.9952000118792,
+            "latency_ms": 83.14659993629903,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4063,7 +4063,7 @@
                 "reason": "reranker score -9.724775 is below floor 1.196189"
               }
             ],
-            "latency_ms": 250.59180008247495,
+            "latency_ms": 219.63009994942695,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4124,7 +4124,7 @@
                 "reason": "reranker score -8.833068 is below floor 1.196189"
               }
             ],
-            "latency_ms": 196.58099999651313,
+            "latency_ms": 208.17300002090633,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4149,7 +4149,7 @@
                 "reason": "reranker score -10.987827 is below floor 1.196189"
               }
             ],
-            "latency_ms": 131.10569992568344,
+            "latency_ms": 50.36969995126128,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4237,7 +4237,7 @@
                 "reason": "reranker score -11.120119 is below floor 1.196189"
               }
             ],
-            "latency_ms": 295.34710000734776,
+            "latency_ms": 714.3830999266356,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4280,7 +4280,7 @@
                 "reason": "reranker score -10.746195 is below floor 1.196189"
               }
             ],
-            "latency_ms": 115.59190007392317,
+            "latency_ms": 229.92880002129823,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4340,7 +4340,7 @@
                 "reason": "reranker score 0.614813 is below floor 1.196189"
               }
             ],
-            "latency_ms": 195.2527998946607,
+            "latency_ms": 212.05149998422712,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4418,7 +4418,7 @@
                 "reason": "reranker score -11.273375 is below floor 1.196189"
               }
             ],
-            "latency_ms": 237.77550004888326,
+            "latency_ms": 259.64840000960976,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4478,7 +4478,7 @@
                 "reason": "reranker score -7.600123 is below floor 1.196189"
               }
             ],
-            "latency_ms": 95.12180008459836,
+            "latency_ms": 159.4806999200955,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4523,7 +4523,7 @@
                 "reason": "reranker score 5.202972 meets floor 1.196189"
               }
             ],
-            "latency_ms": 42.09329991135746,
+            "latency_ms": 54.22719998750836,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4574,7 +4574,7 @@
                 "reason": "reranker score -8.056536 is below floor 1.196189"
               }
             ],
-            "latency_ms": 102.31220000423491,
+            "latency_ms": 90.500200050883,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4618,7 +4618,7 @@
                 "reason": "reranker score 5.037560 meets floor 1.196189"
               }
             ],
-            "latency_ms": 41.33419995196164,
+            "latency_ms": 28.278999961912632,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4663,7 +4663,7 @@
                 "reason": "reranker score 5.460810 meets floor 1.196189"
               }
             ],
-            "latency_ms": 36.34560003411025,
+            "latency_ms": 69.4435000186786,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4742,7 +4742,7 @@
                 "reason": "reranker score -11.077636 is below floor 1.196189"
               }
             ],
-            "latency_ms": 238.41240000911057,
+            "latency_ms": 245.23229990154505,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4800,7 +4800,7 @@
                 "reason": "reranker score -4.084797 is below floor 1.196189"
               }
             ],
-            "latency_ms": 136.19669992476702,
+            "latency_ms": 219.03470007237047,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4834,7 +4834,7 @@
                 "reason": "reranker score -7.831887 is below floor 1.196189"
               }
             ],
-            "latency_ms": 75.45360003132373,
+            "latency_ms": 74.58479993510991,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4873,7 +4873,7 @@
                 "reason": "reranker score 1.640600 meets floor 1.196189"
               }
             ],
-            "latency_ms": 53.5658000735566,
+            "latency_ms": 30.757199972867966,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4925,7 +4925,7 @@
                 "reason": "reranker score -9.851344 is below floor 1.196189"
               }
             ],
-            "latency_ms": 170.64689996186644,
+            "latency_ms": 173.81319997366518,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -4959,7 +4959,7 @@
                 "reason": "reranker score -1.354493 is below floor 1.196189"
               }
             ],
-            "latency_ms": 96.76330001093447,
+            "latency_ms": 103.99779991712421,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -5053,7 +5053,7 @@
                 "reason": "reranker score -9.724775 is below floor 1.196189"
               }
             ],
-            "latency_ms": 235.86330004036427,
+            "latency_ms": 306.51020002551377,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -5114,7 +5114,7 @@
                 "reason": "reranker score -8.833068 is below floor 1.196189"
               }
             ],
-            "latency_ms": 177.7956000296399,
+            "latency_ms": 315.4923999682069,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -5139,7 +5139,7 @@
                 "reason": "reranker score -10.987827 is below floor 1.196189"
               }
             ],
-            "latency_ms": 64.1152000753209,
+            "latency_ms": 55.75149995274842,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -5227,7 +5227,7 @@
                 "reason": "reranker score -11.120119 is below floor 1.196189"
               }
             ],
-            "latency_ms": 343.7669000122696,
+            "latency_ms": 457.1347999153659,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -5270,7 +5270,7 @@
                 "reason": "reranker score -10.746195 is below floor 1.196189"
               }
             ],
-            "latency_ms": 119.10050001461059,
+            "latency_ms": 199.85029997769743,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -5288,94 +5288,94 @@
         "estimated_container_delta_mb": 190.11096572875977,
         "container_delta_is_estimate": true,
         "container_delta_basis": "complete installed evaluation-only dependency closure absent from the base runtime plus recursive model/tokenizer/config footprint; no production image was built",
-        "cold_load_ms": 2370.757000055164,
+        "cold_load_ms": 2313.1176000460982,
         "latencies_ms": [
-          136.4731000503525,
-          124.99889999162406,
-          126.52789999265224,
-          32.00580005068332,
-          75.30999998562038,
-          63.12990002334118,
-          52.42329998873174,
-          278.7330000428483,
+          121.83820002246648,
+          172.9812000412494,
+          90.49560001585633,
+          22.05969998613,
+          82.38219993654639,
+          31.802500016056,
+          39.5448999479413,
+          415.2150000445545,
           0.0,
-          176.1600999161601,
-          128.95499996375293,
-          116.7484000325203,
-          256.12070003990084,
-          76.9952000118792,
+          112.92360001243651,
+          90.5691001098603,
+          43.553999974392354,
+          152.12680003605783,
+          83.14659993629903,
           0.0,
-          250.59180008247495,
-          196.58099999651313,
-          131.10569992568344,
-          295.34710000734776,
-          115.59190007392317,
-          195.2527998946607,
-          237.77550004888326,
-          95.12180008459836,
-          42.09329991135746,
-          102.31220000423491,
-          41.33419995196164,
-          36.34560003411025,
-          238.41240000911057,
+          219.63009994942695,
+          208.17300002090633,
+          50.36969995126128,
+          714.3830999266356,
+          229.92880002129823,
+          212.05149998422712,
+          259.64840000960976,
+          159.4806999200955,
+          54.22719998750836,
+          90.500200050883,
+          28.278999961912632,
+          69.4435000186786,
+          245.23229990154505,
           0.0,
-          136.19669992476702,
-          75.45360003132373,
-          53.5658000735566,
-          170.64689996186644,
-          96.76330001093447,
+          219.03470007237047,
+          74.58479993510991,
+          30.757199972867966,
+          173.81319997366518,
+          103.99779991712421,
           0.0,
-          235.86330004036427,
-          177.7956000296399,
-          64.1152000753209,
-          343.7669000122696,
-          119.10050001461059
+          306.51020002551377,
+          315.4923999682069,
+          55.75149995274842,
+          457.1347999153659,
+          199.85029997769743
         ],
-        "p50_ms": 116.7484000325203,
-        "p95_ms": 278.7330000428483,
-        "peak_rss_mb": 189.26171875,
+        "p50_ms": 90.5691001098603,
+        "p95_ms": 415.2150000445545,
+        "peak_rss_mb": 189.65234375,
         "rss_samples_mb": [
-          138.1328125,
-          148.1015625,
-          149.4375,
-          149.4765625,
-          149.484375,
-          149.5546875,
-          149.56640625,
-          149.5703125,
-          160.24609375,
-          160.24609375,
-          160.2578125,
-          160.27734375,
-          160.28125,
-          160.44921875,
-          160.45703125,
-          160.45703125,
-          165.359375,
-          165.69921875,
-          166.72265625,
-          173.94140625,
-          173.96484375,
-          173.9765625,
-          174.04296875,
-          174.125,
-          174.12890625,
-          174.13671875,
-          174.13671875,
-          174.13671875,
-          186.63671875,
-          186.63671875,
-          186.63671875,
-          186.63671875,
-          186.63671875,
-          186.6484375,
-          186.66796875,
-          186.66796875,
-          186.92578125,
-          189.08203125,
-          189.08203125,
-          189.26171875,
-          189.26171875
+          138.51953125,
+          148.51953125,
+          149.8203125,
+          149.86328125,
+          149.8671875,
+          149.91796875,
+          149.9296875,
+          149.93359375,
+          160.59375,
+          160.59375,
+          160.75,
+          160.75390625,
+          160.765625,
+          160.8984375,
+          160.90234375,
+          160.90234375,
+          165.859375,
+          166.29296875,
+          167.32421875,
+          174.43359375,
+          174.4375,
+          174.44140625,
+          174.44921875,
+          174.453125,
+          174.453125,
+          174.453125,
+          174.453125,
+          174.453125,
+          186.98828125,
+          186.98828125,
+          186.9921875,
+          186.9921875,
+          186.9921875,
+          187.0,
+          187.0,
+          187.0,
+          187.06640625,
+          189.3671875,
+          189.3671875,
+          189.64453125,
+          189.65234375
         ]
       }
     },
@@ -5422,10 +5422,10 @@
       "operational": {
         "artifact_mb": 93.80685138702393,
         "estimated_container_delta_mb": 260.8892774581909,
-        "cold_load_ms": 4273.484300007112,
-        "p50_ms": 247.00640002265573,
-        "p95_ms": 989.7343999473378,
-        "peak_rss_mb": 353.84375,
+        "cold_load_ms": 4183.8957000290975,
+        "p50_ms": 242.82899999525398,
+        "p95_ms": 724.977699923329,
+        "peak_rss_mb": 353.69140625,
         "request_count": 0,
         "input_tokens": 0,
         "output_tokens": 0,
@@ -5622,7 +5622,7 @@
               "reason": "reranker score -4.329197 meets floor -inf"
             }
           ],
-          "latency_ms": 285.9768000198528,
+          "latency_ms": 310.18010003026575,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -5705,7 +5705,7 @@
               "reason": "reranker score -3.294483 meets floor -inf"
             }
           ],
-          "latency_ms": 279.2917999904603,
+          "latency_ms": 290.58999998960644,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -5811,7 +5811,7 @@
               "reason": "reranker score -4.506042 meets floor -inf"
             }
           ],
-          "latency_ms": 510.68589999340475,
+          "latency_ms": 416.0128999501467,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -5854,7 +5854,7 @@
               "reason": "reranker score -1.763998 meets floor -inf"
             }
           ],
-          "latency_ms": 96.98840009514242,
+          "latency_ms": 74.01590002700686,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -5937,7 +5937,7 @@
               "reason": "reranker score -3.839088 meets floor -inf"
             }
           ],
-          "latency_ms": 403.6054000025615,
+          "latency_ms": 250.72380003985018,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6053,7 +6053,7 @@
               "reason": "reranker score -4.562183 meets floor -inf"
             }
           ],
-          "latency_ms": 605.1860000006855,
+          "latency_ms": 560.0854000076652,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6092,7 +6092,7 @@
               "reason": "reranker score -3.551266 meets floor -inf"
             }
           ],
-          "latency_ms": 93.94469996914268,
+          "latency_ms": 90.51310003269464,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6153,7 +6153,7 @@
               "reason": "reranker score -2.575816 meets floor -inf"
             }
           ],
-          "latency_ms": 148.16099999006838,
+          "latency_ms": 137.1553000062704,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6245,7 +6245,7 @@
               "reason": "reranker score -4.150854 meets floor -inf"
             }
           ],
-          "latency_ms": 369.3517999490723,
+          "latency_ms": 728.9047000231221,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6337,7 +6337,7 @@
               "reason": "reranker score -3.949977 meets floor -inf"
             }
           ],
-          "latency_ms": 420.53290002513677,
+          "latency_ms": 476.8137000501156,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6400,7 +6400,7 @@
               "reason": "reranker score -5.036153 meets floor -inf"
             }
           ],
-          "latency_ms": 159.85940000973642,
+          "latency_ms": 167.03790007159114,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6439,7 +6439,7 @@
               "reason": "reranker score -4.454492 meets floor -inf"
             }
           ],
-          "latency_ms": 83.34669994655997,
+          "latency_ms": 78.39869998861104,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6478,7 +6478,7 @@
               "reason": "reranker score -2.969465 meets floor -inf"
             }
           ],
-          "latency_ms": 49.36679999809712,
+          "latency_ms": 75.25969995185733,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6561,7 +6561,7 @@
               "reason": "reranker score -4.210735 meets floor -inf"
             }
           ],
-          "latency_ms": 193.2319999905303,
+          "latency_ms": 202.49519997742027,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6671,7 +6671,7 @@
               "reason": "reranker score -4.175568 meets floor -inf"
             }
           ],
-          "latency_ms": 516.2791999755427,
+          "latency_ms": 530.0401999847963,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6732,7 +6732,7 @@
               "reason": "reranker score -3.442749 meets floor -inf"
             }
           ],
-          "latency_ms": 193.31240002065897,
+          "latency_ms": 148.07350002229214,
           "error": null,
           "input_tokens": 0,
           "output_tokens": 0,
@@ -6792,7 +6792,7 @@
                 "reason": "reranker score -2.450361 meets floor -2.631855"
               }
             ],
-            "latency_ms": 274.1792999440804,
+            "latency_ms": 286.66560002602637,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -6870,7 +6870,7 @@
                 "reason": "reranker score -4.599193 is below floor -2.631855"
               }
             ],
-            "latency_ms": 397.6873999927193,
+            "latency_ms": 341.15430002566427,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -6930,7 +6930,7 @@
                 "reason": "reranker score -4.174986 is below floor -2.631855"
               }
             ],
-            "latency_ms": 223.0750999879092,
+            "latency_ms": 209.32970009744167,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -6975,7 +6975,7 @@
                 "reason": "reranker score -0.873315 meets floor -2.631855"
               }
             ],
-            "latency_ms": 96.30209999158978,
+            "latency_ms": 63.13430005684495,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7026,7 +7026,7 @@
                 "reason": "reranker score -3.191103 is below floor -2.631855"
               }
             ],
-            "latency_ms": 200.8225000463426,
+            "latency_ms": 256.3051999313757,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7070,7 +7070,7 @@
                 "reason": "reranker score -1.842122 meets floor -2.631855"
               }
             ],
-            "latency_ms": 66.49960007052869,
+            "latency_ms": 102.50859998632222,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7115,7 +7115,7 @@
                 "reason": "reranker score -0.390291 meets floor -2.631855"
               }
             ],
-            "latency_ms": 92.06539997830987,
+            "latency_ms": 157.52220002468675,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7194,7 +7194,7 @@
                 "reason": "reranker score -4.352013 is below floor -2.631855"
               }
             ],
-            "latency_ms": 1066.7859999230132,
+            "latency_ms": 724.977699923329,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7252,7 +7252,7 @@
                 "reason": "reranker score -2.977035 is below floor -2.631855"
               }
             ],
-            "latency_ms": 268.3849000604823,
+            "latency_ms": 226.48489999119192,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7286,7 +7286,7 @@
                 "reason": "reranker score -3.763970 is below floor -2.631855"
               }
             ],
-            "latency_ms": 289.26309989765286,
+            "latency_ms": 134.73659998271614,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7325,7 +7325,7 @@
                 "reason": "reranker score -2.318441 meets floor -2.631855"
               }
             ],
-            "latency_ms": 109.1253999620676,
+            "latency_ms": 117.3986999783665,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7377,7 +7377,7 @@
                 "reason": "reranker score -3.935303 is below floor -2.631855"
               }
             ],
-            "latency_ms": 652.4748000083491,
+            "latency_ms": 455.2337999921292,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7411,7 +7411,7 @@
                 "reason": "reranker score -2.952304 is below floor -2.631855"
               }
             ],
-            "latency_ms": 415.9765000222251,
+            "latency_ms": 213.21780001744628,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7505,7 +7505,7 @@
                 "reason": "reranker score -4.799098 is below floor -2.631855"
               }
             ],
-            "latency_ms": 1058.4236999275163,
+            "latency_ms": 854.3725999770686,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7566,7 +7566,7 @@
                 "reason": "reranker score -3.221040 is below floor -2.631855"
               }
             ],
-            "latency_ms": 668.5229999711737,
+            "latency_ms": 549.6837999671698,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7591,7 +7591,7 @@
                 "reason": "reranker score -4.071775 is below floor -2.631855"
               }
             ],
-            "latency_ms": 133.24450002983212,
+            "latency_ms": 138.66569998208433,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7679,7 +7679,7 @@
                 "reason": "reranker score -4.026046 is below floor -2.631855"
               }
             ],
-            "latency_ms": 989.7343999473378,
+            "latency_ms": 887.3687000013888,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7722,7 +7722,7 @@
                 "reason": "reranker score -4.053682 is below floor -2.631855"
               }
             ],
-            "latency_ms": 421.8315000180155,
+            "latency_ms": 309.51539997477084,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7781,7 +7781,7 @@
                 "reason": "reranker score -2.450361 meets floor -2.631855"
               }
             ],
-            "latency_ms": 389.71789996139705,
+            "latency_ms": 341.72420005779713,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7859,7 +7859,7 @@
                 "reason": "reranker score -4.599193 is below floor -2.631855"
               }
             ],
-            "latency_ms": 510.3706999216229,
+            "latency_ms": 441.6924000252038,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7919,7 +7919,7 @@
                 "reason": "reranker score -4.174986 is below floor -2.631855"
               }
             ],
-            "latency_ms": 447.21280003432184,
+            "latency_ms": 246.52529996819794,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -7964,7 +7964,7 @@
                 "reason": "reranker score -0.873315 meets floor -2.631855"
               }
             ],
-            "latency_ms": 114.85840007662773,
+            "latency_ms": 66.75690005067736,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8015,7 +8015,7 @@
                 "reason": "reranker score -3.191103 is below floor -2.631855"
               }
             ],
-            "latency_ms": 247.00640002265573,
+            "latency_ms": 242.82899999525398,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8059,7 +8059,7 @@
                 "reason": "reranker score -1.842122 meets floor -2.631855"
               }
             ],
-            "latency_ms": 86.57220005989075,
+            "latency_ms": 87.58649998344481,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8104,7 +8104,7 @@
                 "reason": "reranker score -0.390291 meets floor -2.631855"
               }
             ],
-            "latency_ms": 87.61970000341535,
+            "latency_ms": 106.43779998645186,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8183,7 +8183,7 @@
                 "reason": "reranker score -4.352013 is below floor -2.631855"
               }
             ],
-            "latency_ms": 619.977300055325,
+            "latency_ms": 624.2801999906078,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8241,7 +8241,7 @@
                 "reason": "reranker score -2.977035 is below floor -2.631855"
               }
             ],
-            "latency_ms": 229.34600000735372,
+            "latency_ms": 372.3545999964699,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8275,7 +8275,7 @@
                 "reason": "reranker score -3.763970 is below floor -2.631855"
               }
             ],
-            "latency_ms": 234.44150004070252,
+            "latency_ms": 392.732199979946,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8314,7 +8314,7 @@
                 "reason": "reranker score -2.318441 meets floor -2.631855"
               }
             ],
-            "latency_ms": 97.38370007835329,
+            "latency_ms": 161.59239993430674,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8366,7 +8366,7 @@
                 "reason": "reranker score -3.935303 is below floor -2.631855"
               }
             ],
-            "latency_ms": 546.4978000381961,
+            "latency_ms": 465.5389999970794,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8400,7 +8400,7 @@
                 "reason": "reranker score -2.952304 is below floor -2.631855"
               }
             ],
-            "latency_ms": 229.4764999533072,
+            "latency_ms": 218.25010003522038,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8494,7 +8494,7 @@
                 "reason": "reranker score -4.799098 is below floor -2.631855"
               }
             ],
-            "latency_ms": 564.4505999516696,
+            "latency_ms": 600.8696999633685,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8555,7 +8555,7 @@
                 "reason": "reranker score -3.221040 is below floor -2.631855"
               }
             ],
-            "latency_ms": 400.144400075078,
+            "latency_ms": 428.56570007279515,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8580,7 +8580,7 @@
                 "reason": "reranker score -4.071775 is below floor -2.631855"
               }
             ],
-            "latency_ms": 104.01430004276335,
+            "latency_ms": 137.04370008781552,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8668,7 +8668,7 @@
                 "reason": "reranker score -4.026046 is below floor -2.631855"
               }
             ],
-            "latency_ms": 766.6561000514776,
+            "latency_ms": 685.8258000575006,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8711,7 +8711,7 @@
                 "reason": "reranker score -4.053682 is below floor -2.631855"
               }
             ],
-            "latency_ms": 323.0851999251172,
+            "latency_ms": 290.5864999629557,
             "error": null,
             "input_tokens": 0,
             "output_tokens": 0,
@@ -8729,94 +8729,94 @@
         "estimated_container_delta_mb": 260.8892774581909,
         "container_delta_is_estimate": true,
         "container_delta_basis": "complete installed evaluation-only dependency closure absent from the base runtime plus recursive model/tokenizer/config footprint; no production image was built",
-        "cold_load_ms": 4273.484300007112,
+        "cold_load_ms": 4183.8957000290975,
         "latencies_ms": [
-          274.1792999440804,
-          397.6873999927193,
-          223.0750999879092,
-          96.30209999158978,
-          200.8225000463426,
-          66.49960007052869,
-          92.06539997830987,
-          1066.7859999230132,
+          286.66560002602637,
+          341.15430002566427,
+          209.32970009744167,
+          63.13430005684495,
+          256.3051999313757,
+          102.50859998632222,
+          157.52220002468675,
+          724.977699923329,
           0.0,
-          268.3849000604823,
-          289.26309989765286,
-          109.1253999620676,
-          652.4748000083491,
-          415.9765000222251,
+          226.48489999119192,
+          134.73659998271614,
+          117.3986999783665,
+          455.2337999921292,
+          213.21780001744628,
           0.0,
-          1058.4236999275163,
-          668.5229999711737,
-          133.24450002983212,
-          989.7343999473378,
-          421.8315000180155,
-          389.71789996139705,
-          510.3706999216229,
-          447.21280003432184,
-          114.85840007662773,
-          247.00640002265573,
-          86.57220005989075,
-          87.61970000341535,
-          619.977300055325,
+          854.3725999770686,
+          549.6837999671698,
+          138.66569998208433,
+          887.3687000013888,
+          309.51539997477084,
+          341.72420005779713,
+          441.6924000252038,
+          246.52529996819794,
+          66.75690005067736,
+          242.82899999525398,
+          87.58649998344481,
+          106.43779998645186,
+          624.2801999906078,
           0.0,
-          229.34600000735372,
-          234.44150004070252,
-          97.38370007835329,
-          546.4978000381961,
-          229.4764999533072,
+          372.3545999964699,
+          392.732199979946,
+          161.59239993430674,
+          465.5389999970794,
+          218.25010003522038,
           0.0,
-          564.4505999516696,
-          400.144400075078,
-          104.01430004276335,
-          766.6561000514776,
-          323.0851999251172
+          600.8696999633685,
+          428.56570007279515,
+          137.04370008781552,
+          685.8258000575006,
+          290.5864999629557
         ],
-        "p50_ms": 247.00640002265573,
-        "p95_ms": 989.7343999473378,
-        "peak_rss_mb": 353.84375,
+        "p50_ms": 242.82899999525398,
+        "p95_ms": 724.977699923329,
+        "peak_rss_mb": 353.69140625,
         "rss_samples_mb": [
-          302.2890625,
-          319.9765625,
-          330.25,
-          333.69921875,
-          333.71875,
-          333.765625,
-          333.81640625,
-          333.8359375,
-          345.11328125,
-          345.11328125,
-          345.12890625,
-          345.12890625,
-          345.140625,
-          345.21484375,
-          345.21875,
-          345.21875,
-          345.37109375,
-          345.390625,
-          345.40234375,
-          348.3671875,
-          353.33984375,
-          353.33984375,
-          353.35546875,
-          353.35546875,
-          353.35546875,
-          353.35546875,
-          353.35546875,
-          353.35546875,
+          301.63671875,
+          319.22265625,
+          329.59765625,
+          333.109375,
+          333.1484375,
+          333.203125,
+          333.23046875,
+          333.23828125,
+          344.62890625,
+          344.62890625,
+          344.640625,
+          344.6484375,
+          344.66015625,
+          344.71484375,
+          344.71484375,
+          344.71484375,
+          344.87890625,
+          344.921875,
+          344.92578125,
+          347.85546875,
+          352.828125,
+          352.828125,
+          352.91796875,
+          352.99609375,
+          352.99609375,
+          353.00390625,
+          353.01171875,
+          353.01171875,
+          353.23828125,
+          353.23828125,
+          353.25390625,
+          353.25390625,
+          353.26953125,
           353.36328125,
-          353.36328125,
-          353.3671875,
-          353.3671875,
-          353.3671875,
-          353.3671875,
-          353.3671875,
-          353.3671875,
-          353.484375,
-          353.6484375,
-          353.6796875,
-          353.84375,
-          353.84375
+          353.4140625,
+          353.4140625,
+          353.5546875,
+          353.61328125,
+          353.61328125,
+          353.6875,
+          353.69140625
         ]
       }
     }
@@ -8894,6 +8894,17 @@
       "observed_mode": "none",
       "selected_keys": [],
       "reason": "did not return an expected diagnosis key"
+    },
+    {
+      "case_id": "init_crashloop",
+      "system": "mixedbread_xsmall",
+      "failure_type": "forbidden_acceptance",
+      "expected_mode": "advisory",
+      "observed_mode": "advisory",
+      "selected_keys": [
+        "crashloop"
+      ],
+      "reason": "accepted forbidden key(s): crashloop"
     },
     {
       "case_id": "init_crashloop",
