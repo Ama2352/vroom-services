@@ -2,6 +2,7 @@ import hashlib
 import json
 
 import pytest
+import requests
 
 from evaluation.models import RankedCandidate, RetrievalCase, RetrievalOutcome
 from evaluation.llm_judge import (
@@ -178,3 +179,120 @@ def test_client_posts_only_the_pinned_groq_json_request(monkeypatch):
         },
         "timeout": 12,
     })]
+
+
+def test_http_error_trace_retains_response_telemetry(candidate_batch, monkeypatch):
+    class Response:
+        status_code = 429
+
+        def raise_for_status(self):
+            raise requests.HTTPError("rate limited")
+
+        def json(self):
+            return {"usage": {"prompt_tokens": 4, "completion_tokens": 2}}
+
+    monkeypatch.setattr("evaluation.llm_judge.requests.post", lambda *args, **kwargs: Response())
+
+    result = judge_candidates(candidate_batch, GroqJudgeClient("not-a-real-key"))
+
+    assert result.stable is False
+    assert result.majority.http_status == 429
+    assert result.majority.input_tokens == 4
+    assert result.majority.output_tokens == 2
+    assert result.majority.latency_ms >= 0
+    assert result.majority.parse_outcome == "error"
+
+
+def test_timeout_error_trace_retains_elapsed_telemetry(candidate_batch, monkeypatch):
+    monkeypatch.setattr(
+        "evaluation.llm_judge.requests.post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(requests.Timeout("timed out")),
+    )
+
+    result = judge_candidates(candidate_batch, GroqJudgeClient("not-a-real-key"))
+
+    assert result.stable is False
+    assert result.majority.http_status is None
+    assert result.majority.latency_ms >= 0
+    assert result.majority.parse_outcome == "error"
+
+
+def test_parse_error_trace_retains_successful_request_telemetry(candidate_batch, monkeypatch):
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "not-json"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+            }
+
+    monkeypatch.setattr("evaluation.llm_judge.requests.post", lambda *args, **kwargs: Response())
+
+    result = judge_candidates(candidate_batch, GroqJudgeClient("not-a-real-key"))
+
+    assert result.stable is False
+    assert result.majority.http_status == 200
+    assert result.majority.input_tokens == 5
+    assert result.majority.output_tokens == 3
+    assert result.majority.parse_outcome == "error"
+
+
+def test_preflight_returns_parsed_or_errored_telemetry_without_network(monkeypatch):
+    class Success:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": json.dumps({
+                    "decision": "no_supported_candidate", "selected_keys": [], "evaluations": [],
+                })}}],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+            }
+
+    monkeypatch.setattr("evaluation.llm_judge.requests.post", lambda *args, **kwargs: Success())
+    success = GroqJudgeClient("not-a-real-key").preflight()
+    assert success.error is None
+    assert success.http_status == 200
+    assert success.parse_outcome == "parsed"
+
+    monkeypatch.setattr(
+        "evaluation.llm_judge.requests.post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(requests.Timeout("timed out")),
+    )
+    failure = GroqJudgeClient("not-a-real-key").preflight()
+    assert failure.error is not None
+    assert failure.http_status is None
+    assert failure.latency_ms >= 0
+    assert failure.parse_outcome == "error"
+
+
+def test_preflight_parse_error_retains_successful_request_telemetry(monkeypatch):
+    class InvalidSchema:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "not-json"}}],
+                "usage": {"prompt_tokens": 6, "completion_tokens": 4},
+            }
+
+    monkeypatch.setattr("evaluation.llm_judge.requests.post", lambda *args, **kwargs: InvalidSchema())
+
+    result = GroqJudgeClient("not-a-real-key").preflight()
+
+    assert result.error is not None
+    assert result.http_status == 200
+    assert result.input_tokens == 6
+    assert result.output_tokens == 4
+    assert result.latency_ms >= 0
+    assert result.parse_outcome == "error"

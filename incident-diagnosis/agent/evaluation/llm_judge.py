@@ -50,8 +50,25 @@ class RepetitionResult:
     request_count: int
 
 
+@dataclass(frozen=True)
+class PreflightResult:
+    raw: str | None
+    latency_ms: float
+    error: str | None
+    input_tokens: int
+    output_tokens: int
+    http_status: int | None
+    parse_outcome: str
+
+
 class JudgeClient(Protocol):
     def judge(self, prompt: str) -> tuple[str, dict]: ...
+
+
+class JudgeRequestError(RuntimeError):
+    def __init__(self, cause: Exception, metadata: dict):
+        super().__init__(str(cause))
+        self.metadata = metadata
 
 
 class GroqJudgeClient:
@@ -63,33 +80,72 @@ class GroqJudgeClient:
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
 
-    def judge(self, prompt: str) -> tuple[str, dict]:
+    def _request(self, prompt: str) -> tuple[str, dict]:
         started = perf_counter()
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0,
-                "max_tokens": 900,
-                "response_format": {"type": "json_object"},
-            },
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        metadata = dict(payload.get("usage", {}))
-        metadata["http_status"] = response.status_code
-        metadata["latency_ms"] = (perf_counter() - started) * 1000
-        return payload["choices"][0]["message"]["content"], metadata
+        metadata: dict = {}
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0,
+                    "max_tokens": 900,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=self.timeout_seconds,
+            )
+            metadata["http_status"] = response.status_code
+            payload = response.json()
+            if isinstance(payload, dict) and isinstance(payload.get("usage"), dict):
+                metadata.update(payload["usage"])
+            response.raise_for_status()
+            return payload["choices"][0]["message"]["content"], metadata
+        except Exception as exc:
+            metadata["latency_ms"] = (perf_counter() - started) * 1000
+            raise JudgeRequestError(exc, metadata) from exc
+        finally:
+            metadata.setdefault("latency_ms", (perf_counter() - started) * 1000)
 
-    def preflight(self) -> tuple[str, dict]:
+    def judge(self, prompt: str) -> tuple[str, dict]:
+        return self._request(prompt)
+
+    def preflight(self) -> PreflightResult:
         """Exercise the pinned JSON endpoint before calibration starts."""
-        return self.judge(
-            "Return JSON only: {\"decision\":\"no_supported_candidate\","
-            "\"selected_keys\":[],\"evaluations\":[]}"
-        )
+        metadata: dict = {}
+        try:
+            raw, metadata = self.judge(
+                "Return JSON only: {\"decision\":\"no_supported_candidate\","
+                "\"selected_keys\":[],\"evaluations\":[]}"
+            )
+            payload = _load_json(raw)
+            _require_exact_keys(payload, {"decision", "selected_keys", "evaluations"}, "preflight")
+            if payload["decision"] != "no_supported_candidate":
+                raise ValueError("preflight must return no_supported_candidate")
+            if payload["selected_keys"] != [] or payload["evaluations"] != []:
+                raise ValueError("preflight must return empty selected_keys and evaluations")
+            return PreflightResult(
+                raw=raw,
+                latency_ms=float(metadata.get("latency_ms", 0.0)),
+                error=None,
+                input_tokens=int(metadata.get("prompt_tokens", 0) or 0),
+                output_tokens=int(metadata.get("completion_tokens", 0) or 0),
+                http_status=metadata.get("http_status"),
+                parse_outcome="parsed",
+            )
+        except Exception as exc:
+            if isinstance(exc, JudgeRequestError):
+                metadata = exc.metadata
+            return PreflightResult(
+                raw=None,
+                latency_ms=float(metadata.get("latency_ms", 0.0)),
+                error=f"{type(exc).__name__}: {exc}",
+                input_tokens=int(metadata.get("prompt_tokens", 0) or 0),
+                output_tokens=int(metadata.get("completion_tokens", 0) or 0),
+                http_status=metadata.get("http_status"),
+                parse_outcome="error",
+            )
 
 
 def build_prompt(batch: RerankBatch) -> str:
@@ -290,6 +346,8 @@ def judge_candidates(batch: RerankBatch, client: JudgeClient, repetitions: int =
                 prompt_sha256=prompt_sha256,
             ))
         except Exception as exc:  # provider, timeout, malformed response, or strict parse failure
+            if isinstance(exc, JudgeRequestError):
+                metadata = exc.metadata
             traces.append(_error_trace(
                 batch, exc, prompt_sha256, (perf_counter() - started) * 1000, metadata,
             ))
