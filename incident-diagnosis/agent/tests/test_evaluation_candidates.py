@@ -76,6 +76,24 @@ def test_candidate_serialization_uses_the_scored_document_text():
         "crashloop", 4.2, "knowledge", "crashloop", (), "cause", "fix",
         document_text="CrashLoopBackOff application exits during startup",
     )
-    serialized = serialize_candidate(candidate)
-    assert "knowledge_key: crashloop" in serialized
-    assert "document: CrashLoopBackOff application exits during startup" in serialized
+    assert serialize_candidate(candidate) == (
+        "knowledge_key: crashloop\n"
+        "document: CrashLoopBackOff application exits during startup\n"
+        "root_cause_pattern: cause\n"
+        "fix_action: fix"
+    )
+
+
+def test_candidate_serialization_cleans_values_in_fixed_field_order():
+    candidate = RankedCandidate(
+        "crash\x00loop", 4.2, "knowledge", "crashloop", (),
+        "cause\nwith spaces", "fix\t action", "approved\x00 context",
+        "document\n text",
+    )
+    assert serialize_candidate(candidate) == (
+        "knowledge_key: crash loop\n"
+        "document: document text\n"
+        "root_cause_pattern: cause with spaces\n"
+        "fix_action: fix action\n"
+        "approved_history_context: approved context"
+    )

@@ -35,6 +35,25 @@ def test_candidate_generation_preserves_unique_conclusive_exact_bypass():
     outcome = generate_bm25_candidates(seed_store(), _case("oom_exact"), CONFIG)
     assert outcome.mode == "exact"
     assert outcome.candidates[0].knowledge_key == "oom"
+    assert outcome.candidates[0].document_text == (
+        "OOMKilled Container exceeded its memory limit and was OOMKilled"
+    )
+
+
+def test_rank_bm25_applies_threshold_and_top_three_to_shared_candidates():
+    config = VariantConfig("rich_joined", "rich", "joined", threshold=1.9)
+    case = _case("outbox_not_draining")
+    raw = generate_bm25_candidates(seed_store(), case, config)
+    ranked = rank_bm25(seed_store(), case, config)
+
+    assert raw.mode == "advisory"
+    assert ranked.candidates == tuple(
+        candidate for candidate in raw.candidates if candidate.score >= 1.9
+    )[:3]
+    assert [candidate.knowledge_key for candidate in ranked.candidates] == [
+        "outbox_not_draining",
+        "failed_scheduling",
+    ]
 
 
 def test_multiple_conclusive_signals_fall_through_as_ambiguous():

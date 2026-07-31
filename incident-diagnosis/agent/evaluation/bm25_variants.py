@@ -94,24 +94,25 @@ def build_query(case: RetrievalCase, variant: str) -> str:
     return " ".join(str(part) for part in parts if part).strip()
 
 
+def _knowledge_document(entry: dict) -> _Document:
+    return _Document(
+        knowledge=entry,
+        source="knowledge",
+        source_id=entry["key"],
+        text=" ".join(filter(None, (
+            entry.get("trigger_waiting_reason", ""),
+            entry.get("root_cause_pattern", ""),
+        ))),
+    )
+
+
 def _documents(rdb, history_variant: str) -> list[_Document]:
     if history_variant not in {"plain", "joined"}:
         raise ValueError(f"unknown history variant: {history_variant}")
     knowledge_entries = {
         entry["key"]: entry for entry in memory.list_knowledge_entries(rdb)
     }
-    documents = [
-        _Document(
-            knowledge=entry,
-            source="knowledge",
-            source_id=entry["key"],
-            text=" ".join(filter(None, (
-                entry.get("trigger_waiting_reason", ""),
-                entry.get("root_cause_pattern", ""),
-            ))),
-        )
-        for entry in knowledge_entries.values()
-    ]
+    documents = [_knowledge_document(entry) for entry in knowledge_entries.values()]
     for history in memory.list_all_history_entries(rdb):
         knowledge = knowledge_entries.get(history.get("knowledge_key"))
         if not knowledge:
@@ -170,7 +171,7 @@ def generate_bm25_candidates(
     }
     if len(exact) == 1:
         knowledge = next(iter(exact.values()))
-        document = _Document(knowledge, "knowledge", knowledge["key"], "")
+        document = _knowledge_document(knowledge)
         return RetrievalOutcome(
             mode="exact",
             candidates=(_candidate(document, 1.0, ()),),
