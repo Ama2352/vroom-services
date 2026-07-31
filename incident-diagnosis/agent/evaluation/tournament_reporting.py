@@ -32,9 +32,10 @@ def _assert_no_secrets(value: Any, path: str = "result") -> None:
         for key, item in value.items():
             normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
             if (
-                normalized in {"groqkey", "openrouterkey", "authorization", "authorizationheader", "proxyauthorization"}
+                normalized in {"groqkey", "openrouterkey", "bearer", "basic"}
                 or normalized.endswith("apikey")
-                or normalized.startswith("authorization")
+                or normalized.endswith(("token", "credential", "credentials", "secret", "secrets"))
+                or "authorization" in normalized
             ):
                 raise ValueError(f"refusing to write sensitive field at {path}.{key}")
             _assert_no_secrets(item, f"{path}.{key}")

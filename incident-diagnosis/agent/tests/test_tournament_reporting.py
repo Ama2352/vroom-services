@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 
 import evaluation.tournament as tournament
+from evaluation.models import RankedCandidate, RetrievalOutcome
+from evaluation.tournament_models import DecisionTrace
 from evaluation.tournament_reporting import render_concise_markdown, write_reports
 
 
@@ -96,13 +98,69 @@ def test_markdown_caps_long_failure_reason_without_dropping_required_sections(re
     assert "## Reproduce" in markdown
 
 
-@pytest.mark.parametrize("key", ["GROQ_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "X-API-Key", "Authorization"])
+@pytest.mark.parametrize("key", [
+    "GROQ_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "X-API-Key",
+    "Authorization", "X-Auth-Token", "x_auth_token", "access_token",
+    "client_token", "credentials", "Bearer Authorization", "Basic Authorization",
+])
 def test_reports_reject_credential_key_variants_before_writing(tmp_path, result_factory, key):
     result = result_factory()
     result["environment"]["nested"] = {key: "do-not-write-this-secret"}
     with pytest.raises(ValueError):
         write_reports(result, tmp_path)
     assert not (tmp_path / "reranker-tournament.json").exists()
+
+
+def test_local_and_llm_per_case_failures_are_serialized_and_globally_prioritized():
+    forbidden = RankedCandidate(
+        "crashloop", 1.0, "knowledge", "test", (), "cause", "fix"
+    )
+
+    class LocalForbiddenAdapter:
+        def evaluate(self, batch, *, floor):
+            case, candidates = batch
+            if case.id == "oauth_expired_held_no_match":
+                return DecisionTrace(RetrievalOutcome("advisory", (forbidden,)))
+            return DecisionTrace(candidates)
+
+        def freeze(self, name, value):
+            pass
+
+    class LlmMissAdapter:
+        def evaluate(self, batch):
+            case, candidates = batch
+            if case.split == "held_out":
+                return DecisionTrace(RetrievalOutcome("none", ()))
+            return DecisionTrace(candidates)
+
+        def freeze(self, name, value):
+            pass
+
+    result = tournament.run_tournament(
+        Path(__file__).parents[1] / "evaluation/fixtures/retrieval_cases_v2.json",
+        adapters={"minilm": LocalForbiddenAdapter(), "llm": LlmMissAdapter()},
+        include_llm=True,
+    )
+    traces = result["informative_failures"]
+    assert any(
+        trace["system"] == "minilm" and trace["failure_type"] == "forbidden_acceptance"
+        for trace in traces
+    )
+    assert any(
+        trace["system"] == "llm" and trace["failure_type"] == "missed_positive"
+        for trace in traces
+    )
+    local_trace = next(
+        trace for trace in traces
+        if trace["system"] == "minilm" and trace["failure_type"] == "forbidden_acceptance"
+    )
+    result["informative_failures"] = [
+        {"case_id": "dns_no_match", "failure_type": "hard_negative", "reason": "abstained"},
+        {"case_id": "baseline_miss", "system": "baseline", "failure_type": "missed_positive", "reason": "missed"},
+        local_trace,
+    ]
+    failures = render_concise_markdown(result).split("## Informative failures", 1)[1].split("## Decision", 1)[0]
+    assert "`oauth_expired_held_no_match`" in failures
 
 
 def test_informative_failure_presentation_uses_required_priority(result_factory):

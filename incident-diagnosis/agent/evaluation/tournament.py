@@ -450,7 +450,7 @@ def _held_injected_local(state, held_out, batches, baseline_held):
         state["floor"], stable,
         passed, operational, tuple(dict.fromkeys(reasons)),
     )
-    return _system_payload(evaluation), evaluation
+    return _system_payload(evaluation), evaluation, runs[0]
 
 
 def _resolve_artifact(spec, cache_root: Path, prepare_models: bool) -> tuple[Path, Path]:
@@ -540,12 +540,13 @@ def _held_measured_local(state, held_out, batches, baseline_held):
         state["floor"], stable,
         passed, operational, tuple(dict.fromkeys(reasons)),
     )
-    return _system_payload(
+    payload = _system_payload(
         evaluation,
         resource_measurement={
             key: value for key, value in held_measurement.items() if key != "runs"
         },
-    ), evaluation
+    )
+    return payload, evaluation, runs[0]
 
 
 def _calibrate_llm(adapter, calibration, batches, prompt_revision_hook):
@@ -708,7 +709,7 @@ def _held_llm(state, held_out, batches, baseline_held, input_price, output_price
         }
         for case_id, value in by_case.items()
     }
-    return payload, evaluation, repetitions
+    return payload, evaluation, repetitions, majority_outcomes
 
 
 def _candidate_json(candidate: RankedCandidate) -> dict:
@@ -951,14 +952,15 @@ def run_tournament(
             continue
         try:
             if "adapter" in state:
-                payload, evaluation = _held_injected_local(
+                payload, evaluation, held_outcomes = _held_injected_local(
                     state, held_out, batches, baseline_held,
                 )
             else:
-                payload, evaluation = _held_measured_local(
+                payload, evaluation, held_outcomes = _held_measured_local(
                     state, held_out, batches, baseline_held,
                 )
             systems[name] = payload
+            outcomes_by_system[name] = held_outcomes
             evaluations.append(evaluation)
         except BaseException as exc:
             error = {"type": type(exc).__name__, "message": str(exc)}
@@ -969,11 +971,18 @@ def run_tournament(
 
     if llm_state is not None:
         try:
-            payload, evaluation, llm_repetitions = _held_llm(
+            payload, evaluation, llm_repetitions, held_outcomes = _held_llm(
                 llm_state, held_out, batches, baseline_held,
                 llm_input_usd_per_million, llm_output_usd_per_million,
             )
             systems["llm"] = payload
+            outcomes_by_system["llm"] = {
+                **{
+                    case_id: trace.outcome
+                    for case_id, trace in llm_state["calibration_traces"].items()
+                },
+                **held_outcomes,
+            }
             evaluations.append(evaluation)
         except BaseException as exc:
             error = {"type": type(exc).__name__, "message": str(exc)}
