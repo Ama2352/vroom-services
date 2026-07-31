@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -79,6 +80,61 @@ def test_report_prints_false_positive_counts_beside_rates(result_factory):
     markdown = render_concise_markdown(result_factory(false_positives=1, no_match_cases=10))
     assert "1/10" in markdown
     assert "10.0%" in markdown
+
+
+def test_markdown_caps_long_failure_reason_without_dropping_required_sections(result_factory):
+    result = result_factory()
+    result["informative_failures"] = [{
+        "case_id": "dns_no_match", "failure_type": "hard_negative",
+        "reason": "DNS abstained",
+    }, {
+        "case_id": "long_trace", "failure_type": "false_positive",
+        "reason": "evidence " * 2_000,
+    }]
+    markdown = render_concise_markdown(result)
+    assert len(markdown.split()) <= 1200
+    assert "## Reproduce" in markdown
+
+
+@pytest.mark.parametrize("key", ["GROQ_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "X-API-Key", "Authorization"])
+def test_reports_reject_credential_key_variants_before_writing(tmp_path, result_factory, key):
+    result = result_factory()
+    result["environment"]["nested"] = {key: "do-not-write-this-secret"}
+    with pytest.raises(ValueError):
+        write_reports(result, tmp_path)
+    assert not (tmp_path / "reranker-tournament.json").exists()
+
+
+def test_informative_failure_presentation_uses_required_priority(result_factory):
+    result = result_factory()
+    result["informative_failures"] = [
+        {"case_id": "false", "failure_type": "false_positive", "reason": "wrong advisory"},
+        {"case_id": "forbidden", "failure_type": "forbidden_acceptance", "reason": "forbidden key"},
+        {"case_id": "missed", "failure_type": "missed_positive", "reason": "abstained"},
+    ]
+    markdown = render_concise_markdown(result)
+    failures = markdown.split("## Informative failures", 1)[1].split("## Decision", 1)[0]
+    assert "`forbidden`" in failures
+    assert "`false`" not in failures
+
+
+def test_telemetry_distinguishes_malformed_llm_output_from_provider_failure(result_factory):
+    result = result_factory()
+    result["systems"]["llm"]["provider_failures"] = 0
+    result["llm_repetitions"] = {"case": {"runs": [
+        {"parse_outcome": "error", "error": "JSONDecodeError: invalid JSON"},
+        {"parse_outcome": "error", "error": "TimeoutError: provider timeout"},
+    ]}}
+    assert "1 malformed and 1 provider failure(s)" in render_concise_markdown(result)
+
+
+def test_tournament_serializes_dns_and_actual_per_case_failures():
+    result = tournament.run_tournament(
+        Path(__file__).parents[1] / "evaluation/fixtures/retrieval_cases_v2.json"
+    )
+    traces = result["informative_failures"]
+    assert any(trace["case_id"] == "dns_no_match" for trace in traces)
+    assert all("failure_type" in trace for trace in traces)
 
 
 def test_cli_returns_zero_only_for_local_pass(monkeypatch):

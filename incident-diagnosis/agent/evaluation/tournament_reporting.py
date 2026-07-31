@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -13,7 +14,8 @@ _TOP_LEVEL_ORDER = (
     "informative_failures", "failure_reasons", "reproduction",
 )
 _SYSTEM_ORDER = ("baseline", "bm25", "minilm", "mixedbread_xsmall", "llm")
-_SENSITIVE_KEYS = {"api_key", "apikey", "authorization", "authorization_header"}
+_MAX_MARKDOWN_WORDS = 1200
+_TRACE_REASON_WORDS = 120
 
 
 def _ordered_result(result: Mapping[str, Any]) -> dict[str, Any]:
@@ -28,8 +30,12 @@ def _ordered_result(result: Mapping[str, Any]) -> dict[str, Any]:
 def _assert_no_secrets(value: Any, path: str = "result") -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in _SENSITIVE_KEYS:
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if (
+                normalized in {"groqkey", "openrouterkey", "authorization", "authorizationheader", "proxyauthorization"}
+                or normalized.endswith("apikey")
+                or normalized.startswith("authorization")
+            ):
                 raise ValueError(f"refusing to write sensitive field at {path}.{key}")
             _assert_no_secrets(item, f"{path}.{key}")
     elif isinstance(value, (list, tuple)):
@@ -49,6 +55,13 @@ def _percent(value: Any) -> str:
     return "n/a" if value is None else f"{float(value) * 100:.1f}%"
 
 
+def _bounded_text(value: Any, limit: int) -> str:
+    words = str(value or "").split()
+    if len(words) <= limit:
+        return " ".join(words)
+    return " ".join(words[:limit]) + " …"
+
+
 def _system_row(name: str, systems: Mapping[str, Any]) -> str:
     system = systems.get(name) or {"status": "unavailable"}
     metrics = _metric(system)
@@ -66,6 +79,12 @@ def _system_row(name: str, systems: Mapping[str, Any]) -> str:
 
 
 def _dns_trace(result: Mapping[str, Any]) -> str:
+    for trace in result.get("informative_failures") or []:
+        if trace.get("case_id") == "dns_no_match":
+            return (
+                "- `dns_no_match` — DNS hard negative: "
+                f"{_bounded_text(trace.get('reason', 'expected abstention'), _TRACE_REASON_WORDS)}"
+            )
     candidates = ((result.get("shared_candidates") or {}).get("dns_no_match") or {}).get("candidates") or []
     return (
         f"- `dns_no_match` — DNS hard negative: expected abstention; shared retrieval "
@@ -74,29 +93,27 @@ def _dns_trace(result: Mapping[str, Any]) -> str:
 
 
 def _additional_trace(result: Mapping[str, Any]) -> str | None:
-    traces = result.get("informative_failures") or []
-    for trace in traces:
-        if trace.get("case_id") != "dns_no_match":
-            return f"- `{trace.get('case_id', trace.get('system', 'trace'))}` — {trace.get('reason', trace.get('message', 'recorded failure trace'))}."
-    systems = result.get("systems") or {}
-    priority = ("forbidden acceptance", "false positive", "missed positive", "unstable")
-    choices = []
-    for name, system in systems.items():
-        metrics = _metric(system)
-        reasons = " ".join(str(reason) for reason in system.get("failure_reasons", []))
-        if metrics.get("forbidden_acceptances", 0):
-            choices.append((0, name, "forbidden acceptance"))
-        elif metrics.get("false_positives", 0):
-            choices.append((1, name, "false positive"))
-        elif metrics.get("top1_correct", metrics.get("positive_cases", 0)) < metrics.get("positive_cases", 0):
-            choices.append((2, name, "missed positive"))
-        elif not system.get("stable", True):
-            choices.append((3, name, "unstable LLM" if system.get("kind") == "llm" else "unstable result"))
-        elif reasons:
-            choices.append((len(priority), name, reasons))
+    priority = {
+        "forbidden_acceptance": 0,
+        "false_positive": 1,
+        "missed_positive": 2,
+        "unstable_llm": 3,
+    }
+    choices = [
+        trace for trace in result.get("informative_failures") or []
+        if trace.get("case_id") != "dns_no_match"
+    ]
     if choices:
-        _, name, reason = min(choices)
-        return f"- `{name}` — {reason}."
+        trace = min(
+            choices,
+            key=lambda item: (priority.get(item.get("failure_type"), len(priority)), str(item.get("case_id", ""))),
+        )
+        label = _bounded_text(trace.get("case_id", trace.get("system", "trace")), 12)
+        reason = _bounded_text(
+            trace.get("reason", trace.get("message", "recorded failure trace")),
+            _TRACE_REASON_WORDS,
+        )
+        return f"- `{label}` — {reason}."
     return None
 
 
@@ -109,10 +126,16 @@ def _operational_line(systems: Mapping[str, Any], llm_repetitions: Mapping[str, 
         )
     llm = systems.get("llm") or {}
     operational = llm.get("operational") or {}
-    malformed = 0
+    malformed = provider = 0
     for case in llm_repetitions.values():
-        malformed += sum(trace.get("parse_outcome") not in {"parsed", "bypassed"} for trace in case.get("runs", []))
-    provider = llm.get("provider_failures", 0)
+        for trace in case.get("runs", []):
+            error = str(trace.get("error") or "").lower()
+            if trace.get("parse_outcome") in {"malformed", "invalid"} or error.startswith(("jsondecodeerror:", "valueerror:", "keyerror:", "typeerror:")):
+                malformed += 1
+            elif trace.get("error"):
+                provider += 1
+    if not llm_repetitions:
+        provider = int(llm.get("provider_failures", 0) or 0)
     return (
         "Operational telemetry: local artifact/estimated-container sizes: "
         f"{'; '.join(local)}; LLM {operational.get('request_count', 0)} request(s), "
@@ -127,21 +150,22 @@ def render_concise_markdown(result: Mapping[str, Any]) -> str:
     dataset = result.get("dataset") or {}
     systems = result.get("systems") or {}
     recommendation = result.get("recommendation") or {}
-    recommendation_name = recommendation.get("name", "none")
-    command = (result.get("reproduction") or {}).get(
+    decision = _bounded_text(result.get("decision", "INCOMPLETE"), 12) or "INCOMPLETE"
+    recommendation_name = _bounded_text(recommendation.get("name", "none"), 12) or "none"
+    command = _bounded_text((result.get("reproduction") or {}).get(
         "command", "python -m evaluation.tournament --report-dir evaluation/reports"
-    )
+    ), 30)
     lines = [
         "# Reranker Tournament",
         "",
-        f"Decision: **{result.get('decision', 'INCOMPLETE')}**; recommendation: **{recommendation_name}**.",
+        f"Decision: **{decision}**; recommendation: **{recommendation_name}**.",
         "",
         "## Why",
         "",
         (
-            f"Offline evidence compares frozen candidates across {dataset.get('case_count', 'n/a')} cases: "
-            f"{dataset.get('calibration_count', 'n/a')} calibration and {dataset.get('held_out_count', 'n/a')} held-out, "
-            f"with {dataset.get('positive_count', 'n/a')} positive and {dataset.get('no_match_count', 'n/a')} no-match cases."
+            f"Offline evidence compares frozen candidates across {_bounded_text(dataset.get('case_count', 'n/a'), 4)} cases: "
+            f"{_bounded_text(dataset.get('calibration_count', 'n/a'), 4)} calibration and {_bounded_text(dataset.get('held_out_count', 'n/a'), 4)} held-out, "
+            f"with {_bounded_text(dataset.get('positive_count', 'n/a'), 4)} positive and {_bounded_text(dataset.get('no_match_count', 'n/a'), 4)} no-match cases."
         ),
         "",
         "## Systems",
@@ -165,7 +189,7 @@ def render_concise_markdown(result: Mapping[str, Any]) -> str:
         "",
         "## Decision",
         "",
-        f"{result.get('decision', 'INCOMPLETE')} selects {recommendation_name}; only LOCAL_PASS permits a free local rollout candidate.",
+        f"{decision} selects {recommendation_name}; only LOCAL_PASS permits a free local rollout candidate.",
         "",
         "## Limitations",
         "",
@@ -180,7 +204,13 @@ def render_concise_markdown(result: Mapping[str, Any]) -> str:
         f"`{command}` — [reranker-tournament.json](reranker-tournament.json)",
         "",
     ])
-    return "\n".join(lines)
+    markdown = "\n".join(lines)
+    if len(markdown.split()) > _MAX_MARKDOWN_WORDS:
+        # All untrusted fields are bounded above; this deterministic fallback
+        # preserves every required section even if future fixed copy grows.
+        lines[lines.index(additional)] = "- Additional trace omitted to preserve the concise-report cap."
+        markdown = "\n".join(lines)
+    return markdown
 
 
 def write_reports(result: Mapping[str, Any], report_dir: Path) -> tuple[Path, Path]:

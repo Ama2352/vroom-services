@@ -115,9 +115,20 @@ def _invoke_llm(adapter, batch, prompt_template: str | None = None):
             prompt_template = _PROMPT_PATH.read_text(encoding="utf-8").rstrip("\n")
         prompt = build_prompt(batch, instructions=prompt_template)
         raw, metadata_values = adapter.judge(prompt)
-        parsed = parse_judgment(
-            raw, batch, prompt_sha256=_sha256_bytes(prompt.encode("utf-8"))
-        )
+        prompt_sha256 = _sha256_bytes(prompt.encode("utf-8"))
+        try:
+            parsed = parse_judgment(raw, batch, prompt_sha256=prompt_sha256)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            return JudgeTrace(
+                RetrievalOutcome("none", (), batch[1].exact_ambiguous),
+                latency_ms=float(metadata_values.get("latency_ms", (perf_counter() - started) * 1000)),
+                error=f"{type(exc).__name__}: {exc}",
+                input_tokens=int(metadata_values.get("prompt_tokens", 0) or 0),
+                output_tokens=int(metadata_values.get("completion_tokens", 0) or 0),
+                http_status=metadata_values.get("http_status"),
+                parse_outcome="malformed",
+                prompt_sha256=prompt_sha256,
+            )
         return JudgeTrace(
             parsed.outcome,
             parsed.decisions,
@@ -141,7 +152,7 @@ def _invoke_llm(adapter, batch, prompt_template: str | None = None):
             input_tokens=int(metadata_values.get("prompt_tokens", 0) or 0),
             output_tokens=int(metadata_values.get("completion_tokens", 0) or 0),
             http_status=metadata_values.get("http_status"),
-            parse_outcome="error",
+            parse_outcome="provider_error",
         )
 
 
@@ -650,7 +661,10 @@ def _held_llm(state, held_out, batches, baseline_held, input_price, output_price
     latencies = preflight_latencies + tuple(
         float(getattr(trace, "latency_ms", 0.0)) for trace in request_traces
     )
-    provider_failures = sum(getattr(trace, "error", None) is not None for trace in all_traces)
+    provider_failures = sum(
+        getattr(trace, "parse_outcome", "") == "provider_error"
+        for trace in all_traces
+    )
     operational = OperationalMetrics(
         p50_ms=nearest_rank_percentile(latencies, 0.50) if latencies else 0.0,
         p95_ms=nearest_rank_percentile(latencies, 0.95) if latencies else 0.0,
@@ -732,6 +746,65 @@ def _trace_json(trace) -> dict:
     }
 
 
+def _informative_failures(cases, outcomes_by_system, llm_repetitions) -> list[dict]:
+    """Serialize concise, actual per-case failures for report selection."""
+    records = []
+    for case in cases:
+        for system, outcomes in outcomes_by_system.items():
+            outcome = outcomes.get(case.id)
+            if outcome is None:
+                continue
+            keys = [candidate.knowledge_key for candidate in outcome.candidates]
+            if case.id == "dns_no_match" and system == "baseline":
+                records.append({
+                    "case_id": case.id,
+                    "system": system,
+                    "failure_type": "hard_negative",
+                    "expected_mode": "none",
+                    "observed_mode": outcome.mode,
+                    "selected_keys": keys,
+                    "reason": (
+                        f"expected abstention; {system} returned {outcome.mode} "
+                        f"with {len(keys)} accepted candidate(s)"
+                    ),
+                })
+            if case.expected_mode == "none" and keys:
+                forbidden = sorted(set(keys).intersection(case.forbidden_keys))
+                records.append({
+                    "case_id": case.id,
+                    "system": system,
+                    "failure_type": (
+                        "forbidden_acceptance" if forbidden else "false_positive"
+                    ),
+                    "expected_mode": "none",
+                    "observed_mode": outcome.mode,
+                    "selected_keys": keys,
+                    "reason": (
+                        f"accepted forbidden key(s): {', '.join(forbidden)}"
+                        if forbidden else f"accepted unsupported key(s): {', '.join(keys)}"
+                    ),
+                })
+            elif case.expected_mode != "none" and not set(keys).intersection(case.expected_keys):
+                records.append({
+                    "case_id": case.id,
+                    "system": system,
+                    "failure_type": "missed_positive",
+                    "expected_mode": case.expected_mode,
+                    "observed_mode": outcome.mode,
+                    "selected_keys": keys,
+                    "reason": "did not return an expected diagnosis key",
+                })
+    for case_id, repetition in llm_repetitions.items():
+        if not repetition.get("stable", True):
+            records.append({
+                "case_id": case_id,
+                "system": "llm",
+                "failure_type": "unstable_llm",
+                "reason": "three held-out LLM runs did not agree cleanly",
+            })
+    return records
+
+
 def run_tournament(
     cases_or_path=_DEFAULT_FIXTURES,
     *,
@@ -778,6 +851,7 @@ def run_tournament(
         "baseline", "baseline", baseline_cal, baseline_held, None, True, True
     )
     systems = {"baseline": _system_payload(baseline_eval)}
+    outcomes_by_system = {"baseline": baseline_all}
     evaluations = []
     failures = []
 
@@ -869,6 +943,7 @@ def run_tournament(
             "held_out": candidate_recall_at_8(held_out, raw_held),
         },
     )
+    outcomes_by_system["bm25"] = {**bm25_cal_outcomes, **bm25_held_outcomes}
 
     for name in ("minilm", "mixedbread_xsmall"):
         state = local_states.get(name)
@@ -949,7 +1024,9 @@ def run_tournament(
         },
         "systems": systems,
         "llm_repetitions": llm_repetitions,
-        "informative_failures": [],
+        "informative_failures": _informative_failures(
+            cases, outcomes_by_system, llm_repetitions
+        ),
         "failure_reasons": failures,
         "reproduction": {
             "command": "python -m evaluation.tournament --report-dir evaluation/reports",
