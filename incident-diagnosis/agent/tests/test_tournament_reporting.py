@@ -84,6 +84,26 @@ def test_report_prints_false_positive_counts_beside_rates(result_factory):
     assert "10.0%" in markdown
 
 
+def test_markdown_names_failed_and_unavailable_system_reasons(result_factory):
+    result = result_factory()
+    result["systems"]["mixedbread_xsmall"]["passed"] = False
+    result["systems"]["mixedbread_xsmall"]["failure_reasons"] = [
+        "forbidden candidate accepted"
+    ]
+    result["systems"]["llm"].update({
+        "status": "unavailable",
+        "error": {"type": "Unavailable", "message": "GROQ_KEY is required"},
+        "calibration": None,
+        "held_out": None,
+        "failure_reasons": ["GROQ_KEY is required"],
+    })
+
+    markdown = render_concise_markdown(result)
+
+    assert "mixedbread_xsmall failed: forbidden candidate accepted" in markdown
+    assert "llm unavailable: GROQ_KEY is required" in markdown
+
+
 def test_markdown_caps_long_failure_reason_without_dropping_required_sections(result_factory):
     result = result_factory()
     result["informative_failures"] = [{

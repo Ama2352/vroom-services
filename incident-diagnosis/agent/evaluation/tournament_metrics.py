@@ -1,3 +1,4 @@
+import math
 from typing import Iterable, Mapping
 
 from evaluation.models import MetricSummary, RetrievalCase, RetrievalOutcome
@@ -97,7 +98,7 @@ def select_score_floor(
     floors.update(
         candidate.score
         for outcome in unthresholded_outcomes.values() if outcome.mode != "exact"
-        for candidate in outcome.candidates if candidate.score > 0
+        for candidate in outcome.candidates if math.isfinite(candidate.score)
     )
     passing = []
     for floor in sorted(floors):

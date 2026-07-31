@@ -11,7 +11,7 @@ from evaluation.models import RankedCandidate, RetrievalOutcome
 from evaluation import resource_probe
 from evaluation.resource_probe import measure_local_adapter, nearest_rank_percentile
 from evaluation.tournament import parse_cli_args, run_tournament
-from evaluation.tournament_models import DecisionTrace, OperationalMetrics
+from evaluation.tournament_models import CandidateDecision, DecisionTrace, OperationalMetrics
 
 
 FIXTURE = Path(__file__).parents[1] / "evaluation/fixtures/retrieval_cases_v2.json"
@@ -159,6 +159,33 @@ def test_local_systems_repeat_held_out_and_require_identical_results(
     held_count = sum(case.split == "held_out" for case in v2_cases)
     assert fake_local_adapter.held_out_calls == held_count * 2
     assert result["systems"]["minilm"]["stable"] is True
+
+
+def test_local_system_serializes_calibration_and_both_held_out_runs(v2_cases, tmp_path):
+    class ScoredAdapter(FakeLocalAdapter):
+        def evaluate(self, batch, *, floor):
+            trace = super().evaluate(batch, floor=floor)
+            decisions = tuple(
+                CandidateDecision(candidate.knowledge_key, True, 0.75 - index / 10)
+                for index, candidate in enumerate(batch[1].candidates)
+            )
+            return DecisionTrace(trace.outcome, decisions, latency_ms=1.25)
+
+    result = run_tournament(
+        v2_cases,
+        adapters={"minilm": ScoredAdapter()},
+        model_cache=tmp_path / "empty",
+    )
+    system = result["systems"]["minilm"]
+    assert len(system["calibration_traces"]) == 20
+    assert len(system["held_out_runs"]) == 2
+    assert all(len(run) == 20 for run in system["held_out_runs"])
+    scored = next(
+        trace for trace in system["calibration_traces"].values()
+        if trace["decisions"]
+    )
+    assert scored["decisions"][0]["score"] == pytest.approx(0.75)
+    assert scored["latency_ms"] == pytest.approx(1.25)
 
 
 def test_local_stability_compares_ordered_outcomes(v2_cases):
@@ -322,11 +349,48 @@ def test_cli_defaults_do_not_prepare_models_or_enable_llm():
     assert args.llm_output_usd_per_million == 0.0
 
 
-def test_missing_llm_key_is_structured_unavailable(monkeypatch, v2_cases):
+def test_missing_llm_key_is_structured_unavailable(monkeypatch, v2_cases, tmp_path):
     monkeypatch.delenv("GROQ_KEY", raising=False)
-    result = run_tournament(v2_cases, adapters={}, include_llm=True)
+    result = run_tournament(
+        v2_cases, adapters={}, include_llm=True, model_cache=tmp_path / "empty"
+    )
     assert result["systems"]["llm"]["status"] == "unavailable"
     assert "GROQ_KEY" in result["systems"]["llm"]["failure_reasons"][0]
+    assert result["systems"]["llm"]["calibration"] is None
+    assert result["systems"]["llm"]["held_out"] is None
+
+
+def test_run_metadata_records_pricing_counts_and_exact_reproduction(fake_adapters):
+    result = run_tournament(
+        FIXTURE,
+        adapters=fake_adapters,
+        include_llm=True,
+        model_cache=Path("evaluation/.models"),
+        report_dir=Path("evaluation/reports"),
+        llm_input_usd_per_million=0.05,
+        llm_output_usd_per_million=0.08,
+        pricing_source_url="https://groq.com/pricing",
+        pricing_retrieved_at="2026-07-31",
+    )
+    assert result["dataset"]["held_out_no_match_cases"] == 10
+    assert result["environment"]["pricing_snapshot"] == {
+        "source_url": "https://groq.com/pricing",
+        "retrieved_at": "2026-07-31",
+        "provider": "groq",
+        "model_id": "llama-3.1-8b-instant",
+        "input_usd_per_million": 0.05,
+        "output_usd_per_million": 0.08,
+    }
+    command = result["reproduction"]["command"]
+    for fragment in (
+        "--fixtures", "--report-dir evaluation/reports",
+        "--model-cache evaluation/.models", "--include-llm",
+        "--llm-input-usd-per-million 0.05",
+        "--llm-output-usd-per-million 0.08",
+        "--pricing-source-url https://groq.com/pricing",
+        "--pricing-retrieved-at 2026-07-31",
+    ):
+        assert fragment in command
 
 
 def test_prompt_revision_hook_receives_calibration_only(fake_llm_adapter, v2_cases):
@@ -395,7 +459,9 @@ def test_held_out_judge_uses_frozen_revised_prompt_and_hash(v2_cases):
     assert result["environment"]["prompt"]["text"] == revised
 
 
-def test_bm25_control_cannot_create_semantic_pass(v2_cases):
-    result = run_tournament(v2_cases, adapters={}, include_llm=False)
+def test_bm25_control_cannot_create_semantic_pass(v2_cases, tmp_path):
+    result = run_tournament(
+        v2_cases, adapters={}, include_llm=False, model_cache=tmp_path / "empty"
+    )
     assert result["recommendation"] is None
     assert result["decision"] == "FAIL"

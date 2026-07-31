@@ -247,16 +247,24 @@ def _system_payload(system: SystemEvaluation, *, status="available", error=None,
 
 def _unavailable_system(name: str, kind: str, baseline_cal, baseline_held, error) -> dict:
     message = error if isinstance(error, str) else error.get("message", str(error))
-    system = SystemEvaluation(
-        name, kind, baseline_cal, baseline_held, None, False, False,
-        OperationalMetrics(), (message,),
-    )
     structured = (
         {"type": "Unavailable", "message": error}
         if isinstance(error, str)
         else error
     )
-    return _system_payload(system, status="unavailable", error=structured)
+    return {
+        "name": name,
+        "kind": kind,
+        "status": "unavailable",
+        "error": structured,
+        "calibration": None,
+        "held_out": None,
+        "threshold": None,
+        "stable": False,
+        "passed": False,
+        "operational": asdict(OperationalMetrics()),
+        "failure_reasons": [message],
+    }
 
 
 def _failed_reasons(candidate, baseline, stable, operational, kind) -> tuple[str, ...]:
@@ -413,6 +421,7 @@ def _calibrate_injected_local(name, adapter, calibration, batches, baseline_cal)
         "floor": floor,
         "frozen_floor": frozen_floor,
         "calibration_metrics": summarize_tournament(calibration, calibration_outcomes),
+        "calibration_traces": calibration_traces,
         "operational": _operational_from_adapter(adapter),
     }
 
@@ -422,14 +431,18 @@ def _held_injected_local(state, held_out, batches, baseline_held):
     adapter = state["adapter"]
     frozen_floor = state["frozen_floor"]
     runs = []
+    trace_runs = []
     traces = []
     for _ in range(2):
         run = {}
+        trace_run = {}
         for case in held_out:
             trace = _invoke_local(adapter, batches[case.id], frozen_floor)
             traces.append(trace)
+            trace_run[case.id] = trace
             run[case.id] = trace.outcome
         runs.append(run)
+        trace_runs.append(trace_run)
     stable = all(
         _outcome_signature(runs[0][case.id]) == _outcome_signature(runs[1][case.id])
         for case in held_out
@@ -450,7 +463,18 @@ def _held_injected_local(state, held_out, batches, baseline_held):
         state["floor"], stable,
         passed, operational, tuple(dict.fromkeys(reasons)),
     )
-    return _system_payload(evaluation), evaluation, runs[0]
+    payload = _system_payload(
+        evaluation,
+        calibration_traces={
+            case_id: _trace_json(trace)
+            for case_id, trace in state["calibration_traces"].items()
+        },
+        held_out_runs=[
+            {case_id: _trace_json(trace) for case_id, trace in run.items()}
+            for run in trace_runs
+        ],
+    )
+    return payload, evaluation, runs[0]
 
 
 def _resolve_artifact(spec, cache_root: Path, prepare_models: bool) -> tuple[Path, Path]:
@@ -500,6 +524,10 @@ def _calibrate_measured_local(
         "floor": floor,
         "frozen_floor": frozen_floor,
         "calibration_metrics": summarize_tournament(calibration, calibration_outcomes),
+        "calibration_traces": {
+            case_id: _as_trace(trace)
+            for case_id, trace in calibration_traces.items()
+        },
         "resource_measure": resource_measure,
     }
 
@@ -518,9 +546,13 @@ def _held_measured_local(state, held_out, batches, baseline_held):
             "message", "held-out worker failed"
         )
         raise RuntimeError(message)
-    runs = [
-        {case_id: _as_trace(trace).outcome for case_id, trace in run.items()}
+    trace_runs = [
+        {case_id: _as_trace(trace) for case_id, trace in run.items()}
         for run in held_measurement["runs"]
+    ]
+    runs = [
+        {case_id: trace.outcome for case_id, trace in run.items()}
+        for run in trace_runs
     ]
     stable = all(
         _outcome_signature(runs[0][case.id]) == _outcome_signature(runs[1][case.id])
@@ -542,6 +574,14 @@ def _held_measured_local(state, held_out, batches, baseline_held):
     )
     payload = _system_payload(
         evaluation,
+        calibration_traces={
+            case_id: _trace_json(trace)
+            for case_id, trace in state["calibration_traces"].items()
+        },
+        held_out_runs=[
+            {case_id: _trace_json(trace) for case_id, trace in run.items()}
+            for run in trace_runs
+        ],
         resource_measurement={
             key: value for key, value in held_measurement.items() if key != "runs"
         },
@@ -737,6 +777,18 @@ def _outcome_json(outcome: RetrievalOutcome) -> dict:
 def _trace_json(trace) -> dict:
     return {
         "outcome": _outcome_json(trace.outcome),
+        "decisions": [
+            {
+                "knowledge_key": decision.knowledge_key,
+                "accepted": decision.accepted,
+                "score": decision.score,
+                "grade": decision.grade,
+                "supporting_fields": list(decision.supporting_fields),
+                "conflicting_fields": list(decision.conflicting_fields),
+                "reason": decision.reason,
+            }
+            for decision in getattr(trace, "decisions", ())
+        ],
         "latency_ms": float(getattr(trace, "latency_ms", 0.0)),
         "error": getattr(trace, "error", None),
         "input_tokens": int(getattr(trace, "input_tokens", 0)),
@@ -812,9 +864,12 @@ def run_tournament(
     adapters: Mapping[str, object] | None = None,
     include_llm: bool = False,
     model_cache: Path | None = None,
+    report_dir: Path | None = None,
     prepare_models: bool = False,
     llm_input_usd_per_million: float = 0.0,
     llm_output_usd_per_million: float = 0.0,
+    pricing_source_url: str | None = None,
+    pricing_retrieved_at: str | None = None,
     resource_measure=measure_local_adapter,
     prompt_revision_hook=None,
 ) -> dict:
@@ -1004,12 +1059,24 @@ def run_tournament(
         "case_count": len(cases),
         "calibration_count": len(calibration),
         "held_out_count": len(held_out),
+        "held_out_no_match_cases": sum(
+            case.expected_mode == "none" for case in held_out
+        ),
         "positive_count": sum(case.expected_mode != "none" for case in cases),
         "no_match_count": sum(case.expected_mode == "none" for case in cases),
         "case_ids": {split: [case.id for case in cases if case.split == split]
                      for split in ("calibration", "held_out")},
     }
     environment = _environment(cases, fixture_bytes)
+    if pricing_source_url or pricing_retrieved_at:
+        environment["pricing_snapshot"] = {
+            "source_url": pricing_source_url,
+            "retrieved_at": pricing_retrieved_at,
+            "provider": "groq",
+            "model_id": "llama-3.1-8b-instant",
+            "input_usd_per_million": float(llm_input_usd_per_million),
+            "output_usd_per_million": float(llm_output_usd_per_million),
+        }
     if llm_state is not None:
         frozen = llm_state["frozen_identity"]
         environment["prompt"] = {
@@ -1038,7 +1105,17 @@ def run_tournament(
         ),
         "failure_reasons": failures,
         "reproduction": {
-            "command": "python -m evaluation.tournament --report-dir evaluation/reports",
+            "command": _reproduction_command(
+                cases_or_path=cases_or_path,
+                report_dir=report_dir or _DEFAULT_REPORT_DIR,
+                model_cache=cache_root,
+                prepare_models=prepare_models,
+                include_llm=include_llm,
+                input_price=llm_input_usd_per_million,
+                output_price=llm_output_usd_per_million,
+                pricing_source_url=pricing_source_url,
+                pricing_retrieved_at=pricing_retrieved_at,
+            ),
             "production_changed": False,
             "network_or_download_requires_explicit_flag": True,
             "prepare_models": bool(prepare_models),
@@ -1057,6 +1134,36 @@ def run_tournament(
     }
 
 
+def _reproduction_command(
+    *, cases_or_path, report_dir, model_cache, prepare_models, include_llm,
+    input_price, output_price, pricing_source_url, pricing_retrieved_at,
+) -> str:
+    fixtures = (
+        Path(cases_or_path)
+        if isinstance(cases_or_path, (str, Path))
+        else _DEFAULT_FIXTURES
+    )
+    arguments = [
+        "python", "-m", "evaluation.tournament",
+        "--fixtures", fixtures.as_posix(),
+        "--report-dir", Path(report_dir).as_posix(),
+        "--model-cache", Path(model_cache).as_posix(),
+    ]
+    if prepare_models:
+        arguments.append("--prepare-models")
+    if include_llm:
+        arguments.extend([
+            "--include-llm",
+            "--llm-input-usd-per-million", str(float(input_price)),
+            "--llm-output-usd-per-million", str(float(output_price)),
+        ])
+    if pricing_source_url:
+        arguments.extend(["--pricing-source-url", pricing_source_url])
+    if pricing_retrieved_at:
+        arguments.extend(["--pricing-retrieved-at", pricing_retrieved_at])
+    return subprocess.list2cmdline(arguments)
+
+
 def build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the offline reranker tournament")
     parser.add_argument("--fixtures", type=Path, default=_DEFAULT_FIXTURES)
@@ -1066,6 +1173,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-llm", action="store_true")
     parser.add_argument("--llm-input-usd-per-million", type=float, default=0.0)
     parser.add_argument("--llm-output-usd-per-million", type=float, default=0.0)
+    parser.add_argument("--pricing-source-url")
+    parser.add_argument("--pricing-retrieved-at")
     return parser
 
 
@@ -1080,9 +1189,12 @@ def main(argv=None) -> int:
         cases_or_path=parsed.fixtures,
         include_llm=parsed.include_llm,
         model_cache=parsed.model_cache,
+        report_dir=parsed.report_dir,
         prepare_models=parsed.prepare_models,
         llm_input_usd_per_million=parsed.llm_input_usd_per_million,
         llm_output_usd_per_million=parsed.llm_output_usd_per_million,
+        pricing_source_url=parsed.pricing_source_url,
+        pricing_retrieved_at=parsed.pricing_retrieved_at,
     )
     decision = result.get("decision", "INCOMPLETE")
     if decision in {"LOCAL_PASS", "LLM_ONLY_PASS", "FAIL"}:

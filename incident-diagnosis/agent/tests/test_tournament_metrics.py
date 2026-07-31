@@ -107,6 +107,19 @@ def test_score_floor_uses_calibration_and_prefers_highest_equal_floor(case_facto
     assert select_score_floor(cases, outcomes, summary_factory()) == 1.0
 
 
+def test_score_floor_considers_observed_negative_logits(case_factory, summary_factory):
+    cases = (
+        case_factory("positive", keys=("right",), mode="advisory", split="calibration"),
+        case_factory("negative", mode="none", split="calibration"),
+    )
+    outcomes = {
+        "positive": RetrievalOutcome("advisory", (_candidate("right", -0.2),)),
+        "negative": RetrievalOutcome("advisory", (_candidate("wrong", -0.5),)),
+    }
+
+    assert select_score_floor(cases, outcomes, summary_factory()) == -0.2
+
+
 def test_recommendation_excludes_bm25_control_and_failed_challengers(system_factory):
     bm25 = system_factory("bm25", "bm25")
     failed = system_factory("failed", "local", passed=False)

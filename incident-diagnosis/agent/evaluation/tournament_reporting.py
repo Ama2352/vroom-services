@@ -146,6 +146,21 @@ def _operational_line(systems: Mapping[str, Any], llm_repetitions: Mapping[str, 
     )
 
 
+def _system_status_lines(systems: Mapping[str, Any]) -> list[str]:
+    lines = []
+    for name in _SYSTEM_ORDER:
+        system = systems.get(name) or {}
+        status = system.get("status", "unavailable")
+        reasons = system.get("failure_reasons") or []
+        error = system.get("error") or {}
+        reason = reasons[0] if reasons else error.get("message")
+        if status == "unavailable":
+            lines.append(f"- {name} unavailable: {_bounded_text(reason, 40)}.")
+        elif not system.get("passed", False) and reason:
+            lines.append(f"- {name} failed: {_bounded_text(reason, 40)}.")
+    return lines
+
+
 def render_concise_markdown(result: Mapping[str, Any]) -> str:
     """Render the bounded human summary from the exact JSON-shaped result."""
     dataset = result.get("dataset") or {}
@@ -178,6 +193,8 @@ def render_concise_markdown(result: Mapping[str, Any]) -> str:
         "## Results",
         "",
         _operational_line(systems, result.get("llm_repetitions") or {}),
+        "",
+        *_system_status_lines(systems),
         "",
         "## Informative failures",
         "",
