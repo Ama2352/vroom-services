@@ -40,6 +40,7 @@ from evaluation.tournament_models import (
     OperationalMetrics,
     SystemEvaluation,
 )
+from evaluation.tournament_reporting import write_reports
 
 
 _AGENT_DIR = Path(__file__).resolve().parents[1]
@@ -951,6 +952,7 @@ def run_tournament(
         "informative_failures": [],
         "failure_reasons": failures,
         "reproduction": {
+            "command": "python -m evaluation.tournament --report-dir evaluation/reports",
             "production_changed": False,
             "network_or_download_requires_explicit_flag": True,
             "prepare_models": bool(prepare_models),
@@ -985,14 +987,27 @@ def parse_cli_args(argv=None) -> argparse.Namespace:
     return build_cli_parser().parse_args(argv)
 
 
-if __name__ == "__main__":
-    parsed = parse_cli_args(sys.argv[1:])
+def main(argv=None) -> int:
+    """Run the isolated experiment, persist completed evidence, and map its decision."""
+    parsed = parse_cli_args(argv)
     result = run_tournament(
-        parsed.fixtures,
+        cases_or_path=parsed.fixtures,
         include_llm=parsed.include_llm,
         model_cache=parsed.model_cache,
         prepare_models=parsed.prepare_models,
         llm_input_usd_per_million=parsed.llm_input_usd_per_million,
         llm_output_usd_per_million=parsed.llm_output_usd_per_million,
     )
-    print(json.dumps({"decision": result["decision"]}, indent=2))
+    decision = result.get("decision", "INCOMPLETE")
+    if decision in {"LOCAL_PASS", "LLM_ONLY_PASS", "FAIL"}:
+        try:
+            write_reports(result, parsed.report_dir)
+        except Exception as exc:
+            print(f"Report write failed: {exc}", file=sys.stderr)
+            return 2
+    print(json.dumps({"decision": decision}, indent=2))
+    return 0 if decision == "LOCAL_PASS" else 1 if decision in {"LLM_ONLY_PASS", "FAIL"} else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
