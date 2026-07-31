@@ -97,18 +97,22 @@ def _invoke_local(adapter, batch, floor: float):
     raise TypeError("local adapter must be callable or expose evaluate/rerank")
 
 
-def _invoke_llm(adapter, batch):
+def _invoke_llm(adapter, batch, prompt_template: str | None = None):
     if hasattr(adapter, "evaluate"):
         return _as_trace(adapter.evaluate(batch))
     if callable(adapter) and not hasattr(adapter, "judge"):
         return _as_trace(adapter(batch))
     if not hasattr(adapter, "judge"):
         raise TypeError("LLM adapter must be callable or expose evaluate/judge")
+    if batch[1].mode == "exact" or not batch[1].candidates:
+        return JudgeTrace(batch[1], parse_outcome="bypassed")
 
     started = perf_counter()
     metadata_values: dict = {}
     try:
-        prompt = build_prompt(batch)
+        if prompt_template is None:
+            prompt_template = _PROMPT_PATH.read_text(encoding="utf-8").rstrip("\n")
+        prompt = build_prompt(batch, instructions=prompt_template)
         raw, metadata_values = adapter.judge(prompt)
         parsed = parse_judgment(
             raw, batch, prompt_sha256=_sha256_bytes(prompt.encode("utf-8"))
@@ -539,17 +543,34 @@ def _calibrate_llm(adapter, calibration, batches, prompt_revision_hook):
         if getattr(preflight, "error", None):
             raise RuntimeError(f"LLM preflight failed: {preflight.error}")
 
+    calibration_prompt = _PROMPT_PATH.read_text(encoding="utf-8").rstrip("\n")
     calibration_traces = {
-        case.id: _invoke_llm(adapter, batches[case.id]) for case in calibration
+        case.id: _invoke_llm(adapter, batches[case.id], calibration_prompt)
+        for case in calibration
     }
     calibration_outcomes = {
         case_id: trace.outcome for case_id, trace in calibration_traces.items()
     }
-    if prompt_revision_hook is not None:
+    revision = (
         prompt_revision_hook(calibration, calibration_traces)
-    prompt_hash = _sha256_bytes(_PROMPT_PATH.read_bytes())
+        if prompt_revision_hook is not None else None
+    )
+    if revision is None:
+        active_prompt = calibration_prompt
+    elif not isinstance(revision, str):
+        raise TypeError("prompt revision hook must return a string or None")
+    elif not revision:
+        raise ValueError("prompt revision hook returned an empty prompt")
+    elif not hasattr(adapter, "judge"):
+        raise ValueError(
+            "prompt revision requires an adapter with an explicit judge prompt boundary"
+        )
+    else:
+        active_prompt = revision
+    prompt_hash = _sha256_bytes(active_prompt.encode("utf-8"))
     frozen_identity = {
         "prompt_sha256": prompt_hash,
+        "prompt_text": active_prompt,
         "provider": getattr(adapter, "provider", "groq"),
         "model_id": getattr(adapter, "model", "llama-3.1-8b-instant"),
     }
@@ -560,6 +581,7 @@ def _calibrate_llm(adapter, calibration, batches, prompt_revision_hook):
         "calibration_traces": calibration_traces,
         "calibration_metrics": summarize_tournament(calibration, calibration_outcomes),
         "frozen_identity": frozen_identity,
+        "active_prompt": active_prompt,
     }
 
 
@@ -569,7 +591,10 @@ def _held_llm(state, held_out, batches, baseline_held, input_price, output_price
     by_case = {}
     all_traces = list(state["calibration_traces"].values())
     for case in held_out:
-        case_traces = tuple(_invoke_llm(adapter, batches[case.id]) for _ in range(3))
+        case_traces = tuple(
+            _invoke_llm(adapter, batches[case.id], state["active_prompt"])
+            for _ in range(3)
+        )
         all_traces.extend(case_traces)
         signatures = [_outcome_signature(trace.outcome) for trace in case_traces]
         majority_signature, agreement = Counter(signatures).most_common(1)[0]
@@ -899,6 +924,15 @@ def run_tournament(
         "case_ids": {split: [case.id for case in cases if case.split == split]
                      for split in ("calibration", "held_out")},
     }
+    environment = _environment(cases, fixture_bytes)
+    if llm_state is not None:
+        frozen = llm_state["frozen_identity"]
+        environment["prompt"] = {
+            "provider": frozen["provider"],
+            "model_id": frozen["model_id"],
+            "text": frozen["prompt_text"],
+            "sha256": frozen["prompt_sha256"],
+        }
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -907,7 +941,7 @@ def run_tournament(
             {"name": recommendation.name, "kind": recommendation.kind}
             if recommendation else None
         ),
-        "environment": _environment(cases, fixture_bytes),
+        "environment": environment,
         "dataset": dataset,
         "shared_candidates": {
             case_id: _outcome_json(outcome) for case_id, outcome in shared.items()

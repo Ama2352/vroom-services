@@ -11,13 +11,24 @@ from queue import Empty
 from time import perf_counter
 from typing import Callable
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
-_RERANKER_DISTRIBUTIONS = (
+
+_EVALUATION_ROOT_DISTRIBUTIONS = (
     "huggingface-hub",
     "numpy",
     "onnxruntime",
     "psutil",
     "transformers",
+)
+_BASE_ROOT_DISTRIBUTIONS = (
+    "fakeredis",
+    "flask",
+    "flask-cors",
+    "rank-bm25",
+    "redis",
+    "requests",
 )
 
 
@@ -32,14 +43,39 @@ def nearest_rank_percentile(values: tuple[float, ...], percentile: float) -> flo
     return ordered[rank - 1]
 
 
-def _distribution_size_mb() -> float:
-    """Best-effort installed size for evaluation-only runtime dependencies."""
-    total = 0
-    seen: set[Path] = set()
-    for name in _RERANKER_DISTRIBUTIONS:
+def _dependency_closure(roots: tuple[str, ...]) -> dict[str, object]:
+    pending = [canonicalize_name(name) for name in roots]
+    closure = {}
+    while pending:
+        name = pending.pop()
+        if name in closure:
+            continue
         try:
             distribution = importlib.metadata.distribution(name)
         except importlib.metadata.PackageNotFoundError:
+            continue
+        closure[name] = distribution
+        for raw_requirement in distribution.requires or ():
+            requirement = Requirement(raw_requirement)
+            if requirement.marker and not requirement.marker.evaluate({"extra": ""}):
+                continue
+            dependency = canonicalize_name(requirement.name)
+            if dependency not in closure:
+                pending.append(dependency)
+    return closure
+
+
+def _distribution_size_mb(
+    evaluation_roots: tuple[str, ...] = _EVALUATION_ROOT_DISTRIBUTIONS,
+    base_roots: tuple[str, ...] = _BASE_ROOT_DISTRIBUTIONS,
+) -> float:
+    """Installed evaluation dependency closure absent from the base closure."""
+    evaluation = _dependency_closure(evaluation_roots)
+    base = _dependency_closure(base_roots)
+    total = 0
+    seen: set[Path] = set()
+    for name, distribution in evaluation.items():
+        if name in base:
             continue
         for relative in distribution.files or ():
             path = Path(distribution.locate_file(relative))
@@ -50,6 +86,17 @@ def _distribution_size_mb() -> float:
                     total += resolved.stat().st_size
             except OSError:
                 continue
+    return total / (1024 * 1024)
+
+
+def _model_footprint_mb(model_dir: Path) -> float:
+    total = 0
+    for path in Path(model_dir).rglob("*"):
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            continue
     return total / (1024 * 1024)
 
 
@@ -111,21 +158,32 @@ def _spawn_process_probe(request: dict) -> dict:
     queue = context.Queue()
     process = context.Process(target=_worker, args=(queue, request))
     process.start()
-    process.join(request["timeout_seconds"])
-    if process.is_alive():
-        process.terminate()
-        process.join(5)
-        raise TimeoutError(
-            f"resource worker exceeded {request['timeout_seconds']} seconds"
-        )
+    timeout_seconds = float(request["timeout_seconds"])
+    started = perf_counter()
     try:
-        payload = queue.get(timeout=1)
+        # Drain while the child is alive. Joining first can deadlock when the
+        # Queue feeder blocks on an oversized payload and waits for a reader.
+        payload = queue.get(timeout=timeout_seconds)
     except Empty as exc:
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+            queue.close()
+            raise TimeoutError(
+                f"resource worker exceeded {timeout_seconds} seconds"
+            ) from exc
+        queue.close()
         raise RuntimeError(
             f"resource worker exited {process.exitcode} without a result"
         ) from exc
-    finally:
+    remaining = max(0.0, timeout_seconds - (perf_counter() - started))
+    process.join(remaining)
+    if process.is_alive():
+        process.terminate()
+        process.join(5)
         queue.close()
+        raise TimeoutError(f"resource worker exceeded {timeout_seconds} seconds")
+    queue.close()
     return payload
 
 
@@ -161,7 +219,7 @@ def measure_local_adapter(
             raise ValueError("repetitions must be positive")
         if not artifact_path.is_file():
             raise FileNotFoundError(f"model artifact is missing: {artifact_path}")
-        artifact_mb = artifact_path.stat().st_size / (1024 * 1024)
+        artifact_mb = _model_footprint_mb(Path(model_dir))
         dependency_mb = float(dependency_size_probe())
         request = {
             "name": name,
@@ -189,8 +247,9 @@ def measure_local_adapter(
                 "estimated_container_delta_mb": artifact_mb + dependency_mb,
                 "container_delta_is_estimate": True,
                 "container_delta_basis": (
-                    "evaluation-only installed dependencies plus model artifact; "
-                    "no production image was built"
+                    "complete installed evaluation-only dependency closure absent "
+                    "from the base runtime plus recursive model/tokenizer/config "
+                    "footprint; no production image was built"
                 ),
                 "runs": [],
             }
@@ -203,8 +262,9 @@ def measure_local_adapter(
             "estimated_container_delta_mb": artifact_mb + dependency_mb,
             "container_delta_is_estimate": True,
             "container_delta_basis": (
-                "evaluation-only installed dependencies plus model artifact; "
-                "no production image was built"
+                "complete installed evaluation-only dependency closure absent "
+                "from the base runtime plus recursive model/tokenizer/config "
+                "footprint; no production image was built"
             ),
             "cold_load_ms": float(payload.get("cold_load_ms", 0.0)),
             "latencies_ms": list(latencies),
@@ -229,8 +289,9 @@ def measure_local_adapter(
             ),
             "container_delta_is_estimate": True,
             "container_delta_basis": (
-                "evaluation-only installed dependencies plus model artifact; "
-                "no production image was built"
+                "complete installed evaluation-only dependency closure absent "
+                "from the base runtime plus recursive model/tokenizer/config "
+                "footprint; no production image was built"
             ),
             "runs": [],
         }

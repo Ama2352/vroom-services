@@ -1,10 +1,14 @@
 from dataclasses import replace
+import hashlib
+import json
 from pathlib import Path
+import re
 
 import pytest
 
 from evaluation.fixture_loader import load_cases
-from evaluation.models import RetrievalOutcome
+from evaluation.models import RankedCandidate, RetrievalOutcome
+from evaluation import resource_probe
 from evaluation.resource_probe import measure_local_adapter, nearest_rank_percentile
 from evaluation.tournament import parse_cli_args, run_tournament
 from evaluation.tournament_models import DecisionTrace, OperationalMetrics
@@ -124,6 +128,30 @@ def test_llm_runs_held_out_three_times(fake_llm_adapter, v2_cases):
     assert fake_llm_adapter.held_out_calls == held_count * 3
 
 
+def test_real_judge_adapter_bypasses_exact_without_provider_call(v2_cases):
+    exact = next(case for case in v2_cases if case.expected_mode == "exact")
+
+    class NeverCalledJudge:
+        def __init__(self):
+            self.calls = 0
+
+        def judge(self, prompt):
+            self.calls += 1
+            raise AssertionError("exact retrieval must bypass the provider")
+
+    from evaluation.tournament import _invoke_llm
+
+    outcome = RetrievalOutcome(
+        "exact",
+        (RankedCandidate("exact-key", 1.0, "knowledge", "exact-key", (), "cause", "fix"),),
+    )
+    judge = NeverCalledJudge()
+    trace = _invoke_llm(judge, (exact, outcome), "FROZEN TEMPLATE")
+    assert trace.outcome is outcome
+    assert trace.parse_outcome == "bypassed"
+    assert judge.calls == 0
+
+
 def test_local_systems_repeat_held_out_and_require_identical_results(
     fake_local_adapter, v2_cases
 ):
@@ -155,8 +183,11 @@ def test_nearest_rank_percentile_uses_ceiling_rank():
 
 
 def test_measurement_uses_injected_probe_and_serializes_metrics(tmp_path):
-    artifact = tmp_path / "model.onnx"
+    model_dir = tmp_path / "model"
+    artifact = model_dir / "onnx" / "model.onnx"
+    artifact.parent.mkdir(parents=True)
     artifact.write_bytes(b"1234")
+    (model_dir / "tokenizer.json").write_bytes(b"56")
 
     def probe(request):
         assert request["repetitions"] == 2
@@ -172,7 +203,7 @@ def test_measurement_uses_injected_probe_and_serializes_metrics(tmp_path):
     result = measure_local_adapter(
         name="fake",
         artifact_path=artifact,
-        model_dir=tmp_path,
+        model_dir=model_dir,
         spec=None,
         batches=(),
         floor=0.0,
@@ -181,9 +212,9 @@ def test_measurement_uses_injected_probe_and_serializes_metrics(tmp_path):
         dependency_size_probe=lambda: 6.0,
     )
     assert result["available"] is True
-    assert result["artifact_mb"] == pytest.approx(4 / (1024 * 1024))
+    assert result["artifact_mb"] == pytest.approx(6 / (1024 * 1024))
     assert result["estimated_container_delta_mb"] == pytest.approx(
-        6.0 + 4 / (1024 * 1024)
+        6.0 + 6 / (1024 * 1024)
     )
     assert result["container_delta_is_estimate"] is True
     assert result["p50_ms"] == 2.0
@@ -212,6 +243,75 @@ def test_measurement_worker_error_marks_only_system_unavailable(tmp_path):
     assert result["available"] is False
     assert result["error"]["type"] == "RuntimeError"
     assert "worker exploded" in result["error"]["message"]
+
+
+def test_spawn_probe_drains_oversized_payload_before_join(monkeypatch):
+    state = {"drained": False}
+    payload = {"available": True, "padding": "x" * (4 * 1024 * 1024)}
+
+    class FakeQueue:
+        def get(self, timeout):
+            state["drained"] = True
+            return payload
+
+        def close(self):
+            pass
+
+    class FakeProcess:
+        exitcode = 0
+
+        def start(self):
+            pass
+
+        def join(self, timeout):
+            assert state["drained"], "joining before queue drain can deadlock"
+
+        def is_alive(self):
+            return False
+
+    class FakeContext:
+        def Queue(self):
+            return FakeQueue()
+
+        def Process(self, target, args):
+            return FakeProcess()
+
+    monkeypatch.setattr(
+        resource_probe.multiprocessing, "get_context", lambda method: FakeContext()
+    )
+    assert resource_probe._spawn_process_probe({"timeout_seconds": 2}) is payload
+
+
+def test_dependency_footprint_includes_transitive_but_excludes_base_closure(
+    monkeypatch, tmp_path
+):
+    class FakeDistribution:
+        def __init__(self, name, requires, size):
+            self.requires = requires
+            self.files = (Path(f"{name}.bin"),)
+            self.path = tmp_path / f"{name}.bin"
+            self.path.write_bytes(b"x" * size)
+
+        def locate_file(self, relative):
+            return self.path
+
+    distributions = {
+        "eval-root": FakeDistribution(
+            "eval-root", ["transitive>=1", "base-shared>=1"], 2
+        ),
+        "transitive": FakeDistribution("transitive", [], 3),
+        "base": FakeDistribution("base", ["base-shared>=1"], 7),
+        "base-shared": FakeDistribution("base-shared", [], 5),
+    }
+    monkeypatch.setattr(
+        resource_probe.importlib.metadata,
+        "distribution",
+        lambda name: distributions[name],
+    )
+    measured = resource_probe._distribution_size_mb(
+        evaluation_roots=("eval-root",), base_roots=("base",)
+    )
+    assert measured == pytest.approx(5 / (1024 * 1024))
 
 
 def test_cli_defaults_do_not_prepare_models_or_enable_llm():
@@ -243,6 +343,56 @@ def test_prompt_revision_hook_receives_calibration_only(fake_llm_adapter, v2_cas
         prompt_revision_hook=revise,
     )
     assert observed and set(observed) == {"calibration"}
+
+
+def test_held_out_judge_uses_frozen_revised_prompt_and_hash(v2_cases):
+    class RecordingJudge:
+        provider = "fake-provider"
+        model = "fake-model"
+
+        def __init__(self):
+            self.prompts = []
+            self.frozen_at = None
+            self.frozen = None
+
+        def judge(self, prompt):
+            self.prompts.append(prompt)
+            keys = re.findall(r"^knowledge_key: (.+)$", prompt, re.MULTILINE)
+            payload = {
+                "decision": "no_supported_candidate",
+                "selected_keys": [],
+                "evaluations": [
+                    {
+                        "key": key,
+                        "supported": False,
+                        "relevance": 0,
+                        "supporting_fields": [],
+                        "conflicting_fields": [],
+                        "reason": "not supported",
+                    }
+                    for key in keys
+                ],
+            }
+            return json.dumps(payload), {"latency_ms": 1.0}
+
+        def freeze(self, name, frozen):
+            self.frozen_at = len(self.prompts)
+            self.frozen = frozen
+
+    judge = RecordingJudge()
+    revised = "REVISED FROZEN RETRIEVAL TEMPLATE"
+    result = run_tournament(
+        v2_cases,
+        adapters={"llm": judge},
+        include_llm=True,
+        prompt_revision_hook=lambda cases, traces: revised,
+    )
+    held_prompts = judge.prompts[judge.frozen_at :]
+    assert held_prompts and all(prompt.startswith(revised) for prompt in held_prompts)
+    assert judge.frozen["prompt_text"] == revised
+    assert judge.frozen["prompt_sha256"] == hashlib.sha256(revised.encode()).hexdigest()
+    assert result["systems"]["llm"]["frozen_identity"] == judge.frozen
+    assert result["environment"]["prompt"]["text"] == revised
 
 
 def test_bm25_control_cannot_create_semantic_pass(v2_cases):

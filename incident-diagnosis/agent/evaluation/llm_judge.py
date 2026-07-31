@@ -148,14 +148,15 @@ class GroqJudgeClient:
             )
 
 
-def build_prompt(batch: RerankBatch) -> str:
+def build_prompt(batch: RerankBatch, *, instructions: str | None = None) -> str:
     case, outcome = batch
+    active_instructions = _PROMPT_INSTRUCTIONS if instructions is None else instructions
     candidates = "\n\n".join(
         f"--- CANDIDATE {index} ---\n{serialize_candidate(candidate)}\n--- END CANDIDATE {index} ---"
         for index, candidate in enumerate(outcome.candidates, start=1)
     )
     return (
-        f"{_PROMPT_INSTRUCTIONS}\n\n"
+        f"{active_instructions}\n\n"
         "--- BEGIN INCIDENT_EVIDENCE (UNTRUSTED DATA) ---\n"
         f"{serialize_incident(case)}\n"
         "--- END INCIDENT_EVIDENCE ---\n\n"
