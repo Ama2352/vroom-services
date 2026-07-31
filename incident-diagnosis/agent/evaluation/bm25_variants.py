@@ -143,10 +143,18 @@ def _candidate(document: _Document, score: float, matched_terms: tuple[str, ...]
         root_cause_pattern=knowledge["root_cause_pattern"],
         fix_action=knowledge["fix_action"],
         context_notes=document.context_notes,
+        document_text=document.text,
     )
 
 
-def rank_bm25(rdb, case: RetrievalCase, config: VariantConfig) -> RetrievalOutcome:
+def generate_bm25_candidates(
+    rdb,
+    case: RetrievalCase,
+    config: VariantConfig,
+    limit: int = 8,
+) -> RetrievalOutcome:
+    if limit < 1:
+        raise ValueError("limit must be positive")
     if config.query_variant not in {"baseline", "rich"}:
         raise ValueError(f"unknown query variant: {config.query_variant}")
     if config.history_variant not in {"plain", "joined"}:
@@ -195,13 +203,24 @@ def rank_bm25(rdb, case: RetrievalCase, config: VariantConfig) -> RetrievalOutco
     collapsed = {}
     for candidate in ranked:
         collapsed.setdefault(candidate.knowledge_key, candidate)
+    candidates = tuple(collapsed.values())[:limit]
+    return RetrievalOutcome(
+        mode="advisory" if candidates else "none",
+        candidates=candidates,
+        exact_ambiguous=exact_ambiguous,
+    )
+
+
+def rank_bm25(rdb, case: RetrievalCase, config: VariantConfig) -> RetrievalOutcome:
+    raw = generate_bm25_candidates(rdb, case, config, limit=8)
+    if raw.mode == "exact":
+        return raw
     candidates = tuple(
-        candidate
-        for candidate in collapsed.values()
+        candidate for candidate in raw.candidates
         if candidate.score >= config.threshold
     )[:3]
     return RetrievalOutcome(
         mode="advisory" if candidates else "none",
         candidates=candidates,
-        exact_ambiguous=exact_ambiguous,
+        exact_ambiguous=raw.exact_ambiguous,
     )

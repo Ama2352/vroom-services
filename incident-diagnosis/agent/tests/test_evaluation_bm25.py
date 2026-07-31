@@ -2,7 +2,11 @@ from dataclasses import replace
 from pathlib import Path
 
 from evaluation.baseline import seed_store
-from evaluation.bm25_variants import collect_canonical_signals, rank_bm25
+from evaluation.bm25_variants import (
+    collect_canonical_signals,
+    generate_bm25_candidates,
+    rank_bm25,
+)
 from evaluation.fixture_loader import load_cases
 from evaluation.models import VariantConfig
 
@@ -23,6 +27,12 @@ def test_signal_collection_keeps_multiple_observations():
 
 def test_unique_conclusive_signal_returns_exact():
     outcome = rank_bm25(seed_store(), _case("oom_exact"), CONFIG)
+    assert outcome.mode == "exact"
+    assert outcome.candidates[0].knowledge_key == "oom"
+
+
+def test_candidate_generation_preserves_unique_conclusive_exact_bypass():
+    outcome = generate_bm25_candidates(seed_store(), _case("oom_exact"), CONFIG)
     assert outcome.mode == "exact"
     assert outcome.candidates[0].knowledge_key == "oom"
 

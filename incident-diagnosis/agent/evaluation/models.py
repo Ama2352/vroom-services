@@ -31,6 +31,7 @@ class RankedCandidate:
     root_cause_pattern: str
     fix_action: str
     context_notes: str = ""
+    document_text: str = ""
 
 
 @dataclass(frozen=True)
