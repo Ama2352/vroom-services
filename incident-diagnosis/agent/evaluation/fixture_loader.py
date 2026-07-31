@@ -50,3 +50,19 @@ def load_cases(path: Path) -> tuple[RetrievalCase, ...]:
             rationale=str(item.get("rationale") or ""),
         ))
     return tuple(cases)
+
+
+def validate_tournament_catalog(cases: tuple[RetrievalCase, ...]) -> None:
+    positives = tuple(case for case in cases if case.expected_mode != "none")
+    negatives = tuple(case for case in cases if case.expected_mode == "none")
+    held_negatives = tuple(
+        case for case in negatives if case.split == "held_out"
+    )
+    if len(cases) != 40:
+        raise ValueError("tournament catalog requires exactly 40 cases")
+    if len(positives) != 20:
+        raise ValueError("tournament catalog requires exactly 20 positive cases")
+    if len(negatives) != 20:
+        raise ValueError("tournament catalog requires exactly 20 no-match cases")
+    if len(held_negatives) != 10:
+        raise ValueError("tournament catalog requires exactly 10 held-out no-match cases")
