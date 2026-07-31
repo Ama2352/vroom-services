@@ -66,6 +66,15 @@ def test_parser_rejects_unknown_candidate_key(candidate_batch):
         parse_judgment(raw, candidate_batch)
 
 
+def test_parser_normalizes_explicit_candidate_supported_decision_alias(candidate_batch):
+    raw = _accepted().replace('"decision": "accepted"', '"decision": "candidate_2_supported"')
+
+    trace = parse_judgment(raw, candidate_batch)
+
+    assert trace.outcome.mode == "advisory"
+    assert [candidate.knowledge_key for candidate in trace.outcome.candidates] == ["dns"]
+
+
 @pytest.mark.parametrize("raw", [
     '```json\n{"decision":"no_supported_candidate","selected_keys":[],"evaluations":[]}\n```',
     '{"decision":"accepted","decision":"accepted","selected_keys":["dns"],"evaluations":[]}',

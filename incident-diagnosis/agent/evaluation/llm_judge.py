@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -222,6 +223,20 @@ def parse_judgment(raw: str, batch: RerankBatch, *, prompt_sha256: str = "") -> 
     payload = _load_json(raw)
     _require_exact_keys(payload, {"decision", "selected_keys", "evaluations"}, "judgment")
     decision = payload["decision"]
+    if decision not in {"accepted", "no_supported_candidate"}:
+        alias = re.fullmatch(r"candidate_(\d+)_supported", str(decision))
+        if alias is None:
+            raise ValueError("decision must be accepted or no_supported_candidate")
+        alias_index = int(alias.group(1)) - 1
+        selected_keys = payload.get("selected_keys")
+        if (
+            not isinstance(selected_keys, list)
+            or alias_index < 0
+            or alias_index >= len(known_keys)
+            or known_keys[alias_index] not in selected_keys
+        ):
+            raise ValueError("candidate-supported decision alias does not identify its selected candidate")
+        decision = "accepted"
     if decision not in {"accepted", "no_supported_candidate"}:
         raise ValueError("decision must be accepted or no_supported_candidate")
     selected_keys = _string_list(payload["selected_keys"], "selected_keys")
