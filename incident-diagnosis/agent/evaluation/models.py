@@ -50,6 +50,8 @@ class MetricSummary:
     false_positives: int
     forbidden_acceptances: int
     exact_failures: int
+    reciprocal_rank_sum: float = 0.0
+    correct_abstentions: int = 0
 
     @property
     def top1_accuracy(self) -> float:
@@ -62,6 +64,14 @@ class MetricSummary:
     @property
     def false_positive_rate(self) -> float:
         return self.false_positives / self.no_match_cases if self.no_match_cases else 0.0
+
+    @property
+    def mean_reciprocal_rank(self) -> float:
+        return self.reciprocal_rank_sum / self.positive_cases if self.positive_cases else 1.0
+
+    @property
+    def abstention_accuracy(self) -> float:
+        return self.correct_abstentions / self.no_match_cases if self.no_match_cases else 1.0
 
 
 @dataclass(frozen=True)
