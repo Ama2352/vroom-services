@@ -12,17 +12,17 @@ Offline evidence compares frozen candidates across 40 cases: 20 calibration and 
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | baseline | 40.0% | 40.0% | 0.400 | 0/10 (0.0%) | 0 | 1 | true | n/a ms | n/a MB |
 | bm25 | 30.0% | 30.0% | 0.300 | 0/10 (0.0%) | 0 | 0 | true | n/a ms | n/a MB |
-| minilm | 80.0% | 80.0% | 0.800 | 0/10 (0.0%) | 0 | 0 | true | 461.7 ms | 187.5 MB |
-| mixedbread_xsmall | 0.0% | 0.0% | 0.000 | 0/10 (0.0%) | 0 | 0 | true | 893.4 ms | 350.8 MB |
-| llm | unavailable | unavailable | unavailable | unavailable | unavailable | unavailable | unavailable | n/a | n/a |
+| minilm | 80.0% | 80.0% | 0.800 | 0/10 (0.0%) | 0 | 0 | true | 278.7 ms | 189.3 MB |
+| mixedbread_xsmall | 70.0% | 70.0% | 0.700 | 0/10 (0.0%) | 1 | 0 | true | 989.7 ms | 353.8 MB |
+| llm | n/a | n/a | n/a | n/a | n/a | n/a | false | n/a ms | n/a MB |
 
 ## Results
 
 Operational telemetry: local artifact/estimated-container sizes: minilm 23.0/190.1 MB; mixedbread_xsmall 93.8/260.9 MB; LLM 0 request(s), 0 malformed and 0 provider failure(s), 0 input + 0 output tokens, paid-equivalent $n/a.
 
-- MiniLM passed with 8/10 held-out top-1 cases, 0/10 false positives, 461.7 ms p95 latency, and 187.5 MB peak RSS.
-- Mixedbread failed: no calibration score floor passed, and held-out top-1 and recall@3 regressed to 0/10.
-- The LLM comparator was unavailable because neither `GROQ_KEY` nor `GROQ_API_KEY` was present; no provider request was attempted. The official Groq snapshot retrieved from <https://groq.com/pricing> on 2026-07-31 was $0.05/M input tokens and $0.08/M output tokens for `llama-3.1-8b-instant`.
+- bm25 failed: top-1 accuracy regressed.
+- mixedbread_xsmall failed: forbidden candidate accepted.
+- llm unavailable: GROQ_KEY is required when --include-llm is enabled.
 
 ## Informative failures
 
@@ -35,7 +35,7 @@ LOCAL_PASS selects minilm; only LOCAL_PASS permits a free local rollout candidat
 
 ## Limitations
 
-This is an offline, fixed-fixture experiment. The unavailable LLM is not quality evidence; production remains unchanged pending a separate design for the selected free local reranker.
+This is an offline, fixed-fixture experiment; unavailable systems and provider failures are evidence, not production changes.
 
 ## Interview explanation
 
@@ -43,4 +43,4 @@ Candidate generation freezes the same BM25 top-eight candidates for every challe
 
 ## Reproduce
 
-`python -m evaluation.tournament --fixtures evaluation/fixtures/retrieval_cases_v2.json --report-dir evaluation/reports --model-cache evaluation/.models --include-llm --llm-input-usd-per-million 0.05 --llm-output-usd-per-million 0.08` — [reranker-tournament.json](reranker-tournament.json)
+`python -m evaluation.tournament --fixtures evaluation/fixtures/retrieval_cases_v2.json --report-dir evaluation/reports --model-cache evaluation/.models --include-llm --llm-input-usd-per-million 0.05 --llm-output-usd-per-million 0.08 --pricing-source-url https://groq.com/pricing --pricing-retrieved-at 2026-07-31` — [reranker-tournament.json](reranker-tournament.json)
