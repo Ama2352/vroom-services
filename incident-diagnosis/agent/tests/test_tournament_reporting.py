@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 
 import evaluation.tournament as tournament
+import evaluation.tournament_reporting as tournament_reporting
 from evaluation.models import RankedCandidate, RetrievalOutcome
-from evaluation.tournament_models import DecisionTrace
+from evaluation.tournament_models import DecisionTrace, OperationalMetrics
 from evaluation.tournament_reporting import render_concise_markdown, write_reports
 
 
@@ -172,7 +173,9 @@ def test_local_and_llm_per_case_failures_are_serialized_and_globally_prioritized
     )
     local_trace = next(
         trace for trace in traces
-        if trace["system"] == "minilm" and trace["failure_type"] == "forbidden_acceptance"
+        if trace["case_id"] == "oauth_expired_held_no_match"
+        and trace["system"] == "minilm"
+        and trace["failure_type"] == "forbidden_acceptance"
     )
     result["informative_failures"] = [
         {"case_id": "dns_no_match", "failure_type": "hard_negative", "reason": "abstained"},
@@ -180,7 +183,45 @@ def test_local_and_llm_per_case_failures_are_serialized_and_globally_prioritized
         local_trace,
     ]
     failures = render_concise_markdown(result).split("## Informative failures", 1)[1].split("## Decision", 1)[0]
-    assert "`oauth_expired_held_no_match`" in failures
+    assert "`oauth_expired_held_no_match` (`minilm`)" in failures
+
+
+def test_positive_forbidden_acceptance_is_serialized_and_prioritized(tmp_path):
+    forbidden = RankedCandidate(
+        "crashloop", 1.0, "knowledge", "test", (), "cause", "fix"
+    )
+
+    class MixedbreadForbiddenAdapter:
+        operational = OperationalMetrics(p95_ms=5.0, peak_rss_mb=50.0)
+
+        def evaluate(self, batch, *, floor):
+            case, candidates = batch
+            if case.id == "init_crashloop":
+                return DecisionTrace(RetrievalOutcome("advisory", (forbidden,)))
+            return DecisionTrace(candidates)
+
+        def freeze(self, name, value):
+            pass
+
+    result = tournament.run_tournament(
+        Path(__file__).parents[1] / "evaluation/fixtures/retrieval_cases_v2.json",
+        adapters={"mixedbread_xsmall": MixedbreadForbiddenAdapter()},
+        model_cache=tmp_path / "empty",
+    )
+    trace = next(
+        item for item in result["informative_failures"]
+        if item["case_id"] == "init_crashloop"
+        and item["system"] == "mixedbread_xsmall"
+        and item["failure_type"] == "forbidden_acceptance"
+    )
+    assert trace["expected_mode"] == "advisory"
+    assert trace["selected_keys"] == ["crashloop"]
+
+    failures = render_concise_markdown(result).split(
+        "## Informative failures", 1
+    )[1].split("## Decision", 1)[0]
+    assert "`init_crashloop` (`mixedbread_xsmall`)" in failures
+    assert "`ambiguous_conclusive`" not in failures
 
 
 def test_informative_failure_presentation_uses_required_priority(result_factory):
@@ -194,6 +235,20 @@ def test_informative_failure_presentation_uses_required_priority(result_factory)
     failures = markdown.split("## Informative failures", 1)[1].split("## Decision", 1)[0]
     assert "`forbidden`" in failures
     assert "`false`" not in failures
+
+
+def test_word_cap_fallback_handles_missing_secondary_trace(monkeypatch, result_factory):
+    result = result_factory()
+    result["informative_failures"] = [{
+        "case_id": "dns_no_match",
+        "failure_type": "hard_negative",
+        "reason": "abstained",
+    }]
+    monkeypatch.setattr(tournament_reporting, "_MAX_MARKDOWN_WORDS", 1)
+
+    markdown = render_concise_markdown(result)
+
+    assert "## Reproduce" in markdown
 
 
 def test_telemetry_distinguishes_malformed_llm_output_from_provider_failure(result_factory):

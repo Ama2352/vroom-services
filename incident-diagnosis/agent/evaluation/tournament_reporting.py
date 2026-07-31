@@ -114,7 +114,8 @@ def _additional_trace(result: Mapping[str, Any]) -> str | None:
             trace.get("reason", trace.get("message", "recorded failure trace")),
             _TRACE_REASON_WORDS,
         )
-        return f"- `{label}` — {reason}."
+        system = _bounded_text(trace.get("system", "unknown"), 12)
+        return f"- `{label}` (`{system}`) — {reason}."
     return None
 
 
@@ -223,7 +224,7 @@ def render_concise_markdown(result: Mapping[str, Any]) -> str:
         "",
     ])
     markdown = "\n".join(lines)
-    if len(markdown.split()) > _MAX_MARKDOWN_WORDS:
+    if len(markdown.split()) > _MAX_MARKDOWN_WORDS and additional:
         # All untrusted fields are bounded above; this deterministic fallback
         # preserves every required section even if future fixed copy grows.
         lines[lines.index(additional)] = "- Additional trace omitted to preserve the concise-report cap."

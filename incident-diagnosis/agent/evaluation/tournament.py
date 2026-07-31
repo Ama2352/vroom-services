@@ -808,6 +808,17 @@ def _informative_failures(cases, outcomes_by_system, llm_repetitions) -> list[di
             if outcome is None:
                 continue
             keys = [candidate.knowledge_key for candidate in outcome.candidates]
+            forbidden = sorted(set(keys).intersection(case.forbidden_keys))
+            if forbidden:
+                records.append({
+                    "case_id": case.id,
+                    "system": system,
+                    "failure_type": "forbidden_acceptance",
+                    "expected_mode": case.expected_mode,
+                    "observed_mode": outcome.mode,
+                    "selected_keys": keys,
+                    "reason": f"accepted forbidden key(s): {', '.join(forbidden)}",
+                })
             if case.id == "dns_no_match" and system == "baseline":
                 records.append({
                     "case_id": case.id,
@@ -821,21 +832,15 @@ def _informative_failures(cases, outcomes_by_system, llm_repetitions) -> list[di
                         f"with {len(keys)} accepted candidate(s)"
                     ),
                 })
-            if case.expected_mode == "none" and keys:
-                forbidden = sorted(set(keys).intersection(case.forbidden_keys))
+            if case.expected_mode == "none" and keys and not forbidden:
                 records.append({
                     "case_id": case.id,
                     "system": system,
-                    "failure_type": (
-                        "forbidden_acceptance" if forbidden else "false_positive"
-                    ),
+                    "failure_type": "false_positive",
                     "expected_mode": "none",
                     "observed_mode": outcome.mode,
                     "selected_keys": keys,
-                    "reason": (
-                        f"accepted forbidden key(s): {', '.join(forbidden)}"
-                        if forbidden else f"accepted unsupported key(s): {', '.join(keys)}"
-                    ),
+                    "reason": f"accepted unsupported key(s): {', '.join(keys)}",
                 })
             elif case.expected_mode != "none" and not set(keys).intersection(case.expected_keys):
                 records.append({
