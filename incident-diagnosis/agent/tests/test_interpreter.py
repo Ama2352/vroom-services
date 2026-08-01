@@ -6,6 +6,28 @@ from interpreter import (
     _quality_check, _build_refine_prompt, _is_grounded,
     GROUNDING_RULE, REQUIRED_KEYS,
 )
+from retrieval.models import RetrievalDocument, RetrievalResult, RankedCandidate
+
+
+def _exact_retrieval():
+    return RetrievalResult.exact_conclusive(RetrievalDocument(
+        knowledge_key="postgres-timeout", source="knowledge", source_id="postgres-timeout",
+        trigger="CrashLoopBackOff", conclusive=True,
+        root_cause_pattern="postgres unreachable", fix_action="check postgres",
+        document_text="CrashLoopBackOff postgres unreachable", context_notes="",
+    ), corpus_version=1)
+
+
+def _advisory_retrieval():
+    doc = RetrievalDocument(
+        knowledge_key="postgres-timeout", source="history", source_id="h1",
+        trigger="dial tcp", conclusive=False,
+        root_cause_pattern="postgres unreachable", fix_action="check postgres",
+        document_text="dial tcp postgres unreachable", context_notes="seen in load test",
+    )
+    return RetrievalResult.accepted_advisory(
+        RankedCandidate(doc, 1.2), 1.8, corpus_version=1,
+    )
 
 SAMPLE_FACTS = {
     "pods_available": 0, "pods_desired": 1,
@@ -122,24 +144,21 @@ class TestBuildGroundedPrompt:
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "rps=0.0 err=0.00%", "", "")
         assert "rps=0.0" in prompt
 
-    def test_includes_memory_context_when_present(self):
-        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
-                                        "[1] past incident → root cause: postgres unreachable", "")
-        assert "past incident" in prompt
+    def test_includes_conclusive_retrieval_context(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", _exact_retrieval(), "")
+        assert "Conclusive approved knowledge" in prompt
+        assert "postgres unreachable" in prompt
 
-    def test_includes_trusted_match_framing_when_context_present(self):
-        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
-                                        "Known failure pattern: postgres unreachable", "")
-        assert "Trusted match from the knowledge base" in prompt
+    def test_includes_advisory_retrieval_context_as_hypothesis(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", _advisory_retrieval(), "")
+        assert "Approved advisory memory" in prompt
+        assert "hypothesis" in prompt.lower()
+        assert "Current evidence remains authoritative" in prompt
 
-    def test_includes_trusted_match_usage_instruction_when_context_present(self):
-        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "",
-                                        "Known failure pattern: postgres unreachable", "")
-        assert "use it as the basis for your root_cause" in prompt.lower()
-
-    def test_omits_trusted_match_framing_when_no_context(self):
-        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")
-        assert "Trusted match from the knowledge base" not in prompt
+    def test_omits_retrieval_context_when_no_result(self):
+        prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", RetrievalResult.none(), "")
+        assert "approved knowledge" not in prompt.lower()
+        assert "advisory memory" not in prompt.lower()
 
     def test_ends_with_json_instruction(self):
         prompt = _build_grounded_prompt("Alert", "ride", "vroom-dev", SAMPLE_FACTS, "", "", "")

@@ -18,6 +18,20 @@ agent_app.rdb = _FAKE_REDIS
 agent_app.OPENROUTER_KEY = "fake-key"
 
 import pytest
+from retrieval.models import RetrievalDocument, RetrievalResult
+
+
+def _none_retrieval():
+    return RetrievalResult.none(corpus_version=1)
+
+
+def _exact_retrieval():
+    return RetrievalResult.exact_conclusive(RetrievalDocument(
+        source="knowledge", source_id="oom", knowledge_key="oom",
+        trigger="CrashLoopBackOff", conclusive=True,
+        root_cause_pattern="OOM", fix_action="increase limit",
+        document_text="CrashLoopBackOff OOM", context_notes="",
+    ), corpus_version=1)
 
 @pytest.fixture
 def client():
@@ -108,7 +122,7 @@ def test_investigate_includes_trusted_match_field(client):
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.collect_provenance",      return_value=None), \
-         patch("app.find_trusted_match",     return_value=None), \
+         patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -128,7 +142,7 @@ def test_investigate_trusted_match_true_omits_related_incidents(client):
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.collect_provenance",      return_value=None), \
-         patch("app.find_trusted_match",     return_value=fake_match), \
+         patch("app.retrieval_service.retrieve", return_value=_exact_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -148,7 +162,7 @@ def test_investigate_stores_incident_and_returns_incident_id(client):
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.collect_provenance",      return_value=None), \
-         patch("app.find_trusted_match",     return_value=None), \
+         patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -168,7 +182,7 @@ def test_investigate_records_step_events_in_timeline(client):
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.collect_provenance",      return_value=None), \
-         patch("app.find_trusted_match",     return_value=None), \
+         patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=dict(_FAKE_DIAGNOSIS)), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -297,7 +311,7 @@ def test_investigate_no_old_fields_in_response(client):
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.collect_provenance",      return_value=None), \
-         patch("app.find_trusted_match",     return_value=None), \
+         patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -424,9 +438,9 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
         call_order.append("collect_diagnostics")
         return _FAKE_FACTS
 
-    def fake_find_trusted_match(rdb, facts, query):
-        call_order.append("find_trusted_match")
-        return None
+    def fake_retrieve(alert_name, facts):
+        call_order.append("retrieve")
+        return _none_retrieval()
 
     def fake_search_memory_items(rdb, query, limit=3):
         call_order.append("search_memory_items")
@@ -437,7 +451,7 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.collect_provenance",      return_value=None), \
-         patch("app.find_trusted_match",     side_effect=fake_find_trusted_match), \
+         patch("app.retrieval_service.retrieve", side_effect=fake_retrieve), \
          patch("app.search_memory_items",    side_effect=fake_search_memory_items), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -446,23 +460,23 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
 
-    assert call_order.index("collect_diagnostics") < call_order.index("find_trusted_match")
-    assert call_order.index("find_trusted_match") < call_order.index("search_memory_items")
+    assert call_order.index("collect_diagnostics") < call_order.index("retrieve")
+    assert call_order.index("retrieve") < call_order.index("search_memory_items")
 
 
 def test_investigate_query_includes_waiting_reason_and_log_error(client):
     captured = {}
 
-    def fake_find_trusted_match(rdb, facts, query):
-        captured["query"] = query
-        return None
+    def fake_retrieve(alert_name, facts):
+        captured["facts"] = facts
+        return _none_retrieval()
 
     with patch("app.collect_bundle",         side_effect=_fake_bundle), \
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.collect_provenance",      return_value=None), \
-         patch("app.find_trusted_match",     side_effect=fake_find_trusted_match), \
+         patch("app.retrieval_service.retrieve", side_effect=fake_retrieve), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         client.post("/investigate",
@@ -470,36 +484,8 @@ def test_investigate_query_includes_waiting_reason_and_log_error(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
 
-    assert _FAKE_FACTS["waiting_reason"] in captured["query"]
-    assert _FAKE_FACTS["log_error"] in captured["query"]
-
-
-def test_format_trusted_match_includes_root_cause_and_fix():
-    ctx = agent_app._format_trusted_match({
-        "source": "knowledge", "knowledge_key": "oom",
-        "root_cause_pattern": "Container OOMKilled", "fix_action": "increase memory limit",
-        "context_notes": "",
-    })
-    assert "Container OOMKilled" in ctx
-    assert "increase memory limit" in ctx
-
-
-def test_format_trusted_match_includes_context_notes_when_present():
-    ctx = agent_app._format_trusted_match({
-        "source": "history", "knowledge_key": "oom",
-        "root_cause_pattern": "Container OOMKilled", "fix_action": "increase memory limit",
-        "context_notes": "seen during load test",
-    })
-    assert "seen during load test" in ctx
-
-
-def test_format_trusted_match_omits_context_notes_when_empty():
-    ctx = agent_app._format_trusted_match({
-        "source": "knowledge", "knowledge_key": "oom",
-        "root_cause_pattern": "Container OOMKilled", "fix_action": "increase memory limit",
-        "context_notes": "",
-    })
-    assert "Notes from a similar past occurrence" not in ctx
+    assert captured["facts"]["waiting_reason"] == _FAKE_FACTS["waiting_reason"]
+    assert captured["facts"]["log_error"] == _FAKE_FACTS["log_error"]
 
 
 def test_reflect_and_store_writes_pending_suggestion_in_mock_mode():
