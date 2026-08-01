@@ -1,5 +1,6 @@
 FROM python:3.12-slim AS model
 WORKDIR /build
+ENV PYTHONPATH=/build
 COPY requirements.txt .
 RUN pip install --no-cache-dir "huggingface-hub>=0.36.2,<1.0"
 COPY retrieval/ retrieval/
