@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
+
 	"vroom-mvp/dispatch/internal/service"
+	dispatchtelemetry "vroom-mvp/dispatch/internal/telemetry"
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 )
 
@@ -33,6 +38,7 @@ type RideEventConsumer struct {
 	streamName      string
 	groupName       string
 	consumerID      string
+	logger          *slog.Logger
 }
 
 func NewRideEventConsumer(redisClient *redis.Client, dispatchService *service.DispatchService, streamName, groupName, consumerID string) *RideEventConsumer {
@@ -42,6 +48,7 @@ func NewRideEventConsumer(redisClient *redis.Client, dispatchService *service.Di
 		streamName:      streamName,
 		groupName:       groupName,
 		consumerID:      consumerID,
+		logger:          slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "dispatch-service"),
 	}
 }
 
@@ -152,23 +159,33 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 	}
 }
 
-
 func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessage) {
+	ctx = extractMessageContext(ctx, msg)
+	eventType := stringValue(msg.Values["type"])
+	ctx, span := otel.Tracer("dispatch-consumer").Start(ctx, "dispatch.consume."+eventType)
+	defer span.End()
+
 	retryKey := "event:retry:" + msg.ID
 	retries, _ := c.redisClient.Incr(ctx, retryKey).Result()
 	c.redisClient.Expire(ctx, retryKey, 24*time.Hour)
 
 	c.handleMessage(ctx, msg)
 
-	eventType := ""
-	if v, ok := msg.Values["type"]; ok {
-		eventType = v.(string)
-	}
 	known := eventType == "Trip.Requested" || eventType == "Trip.OfferRejected" ||
 		eventType == "Trip.Accepted" || eventType == "Trip.Cancelled" ||
 		eventType == "Trip.Completed" || eventType == "Trip.Matched" ||
 		eventType == "Trip.MatchFailed"
 
+	if !known {
+		err := fmt.Errorf("unknown event type %q", eventType)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		logger := c.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		dispatchtelemetry.LogError(ctx, logger, "dispatch.consume", err, "event_id", msg.ID, "retry", retries)
+	}
 	if !known && retries >= maxEventRetries {
 		payload := ""
 		if v, ok := msg.Values["payload"]; ok {
@@ -191,24 +208,6 @@ func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessa
 }
 
 func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) {
-	// Extract trace context propagated from the Outbox publisher
-	tracer := otel.Tracer("dispatch-consumer")
-	carrier := propagation.MapCarrier{}
-	if tp, ok := msg.Values["traceparent"]; ok && tp != nil {
-		carrier["traceparent"] = tp.(string)
-	}
-	if ts, ok := msg.Values["tracestate"]; ok && ts != nil {
-		carrier["tracestate"] = ts.(string)
-	}
-	remoteCtx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
-
-	eventType := ""
-	if v, ok := msg.Values["type"]; ok {
-		eventType = v.(string)
-	}
-	ctx, span := tracer.Start(remoteCtx, "dispatch.consume."+eventType)
-	defer span.End()
-
 	// Robust field extraction
 	getVal := func(key string) string {
 		if val, ok := msg.Values[key]; ok {
@@ -217,7 +216,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		return ""
 	}
 
-	eventType = getVal("type")
+	eventType := getVal("type")
 	aggregateType := getVal("aggregate")
 	aggregateID := getVal("aggregate_id")
 	if aggregateID == "" {
@@ -227,7 +226,6 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 
 	correlationID := getVal("correlation_id")
 	log.Printf("[DEBUG] [%s] Dispatch Consumer: Received %s for %s (%s)", correlationID, eventType, aggregateType, aggregateID)
-
 
 	if eventType == "Trip.Requested" || eventType == "Trip.OfferRejected" {
 		var data map[string]interface{}
@@ -400,6 +398,22 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			}
 		}
 	}
+}
+
+func stringValue(value any) string {
+	valueString, _ := value.(string)
+	return valueString
+}
+
+func extractMessageContext(ctx context.Context, msg redis.XMessage) context.Context {
+	carrier := propagation.MapCarrier{}
+	if value := stringValue(msg.Values["traceparent"]); value != "" {
+		carrier["traceparent"] = value
+	}
+	if value := stringValue(msg.Values["tracestate"]); value != "" {
+		carrier["tracestate"] = value
+	}
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
 }
 
 // ConsumeOnce runs a single consume cycle — used by integration tests for deterministic control.
