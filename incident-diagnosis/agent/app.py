@@ -1,4 +1,5 @@
 import os, json, uuid, threading, time, re
+from datetime import datetime, timezone
 from pathlib import Path
 import redis as redis_lib
 import requests
@@ -17,7 +18,10 @@ from memory import (search_memory as memory_search,
                     delete_knowledge_entry, list_history_entries_for_knowledge,
                     get_history_entry, update_history_entry, delete_history_entry,
                     store_knowledge_entry, list_all_history_entries)
-from collector import collect_bundle
+from collector import collect_bundle, collect_impact
+from alerting import normalize_alert, incident_window
+from correlation import collect_log_evidence, correlate_trace
+from confidence import assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
@@ -313,6 +317,7 @@ def set_models():
 @app.route("/investigate", methods=["POST"])
 def investigate():
     data       = request.get_json(silent=True) or {}
+    normalized = normalize_alert(data)
     alert_name = data.get("alert_name", "UnknownAlert")
     service    = data.get("service", "unknown")
     namespace  = data.get("namespace", "vroom-dev")
@@ -322,6 +327,21 @@ def investigate():
     seed_if_empty(rdb)
 
     steps = []
+
+    impact = {"status": "unavailable", "window": "5m", "request_rate": None,
+              "error_rate_percent": None, "p99_seconds": None,
+              "errors": ["alert has no starts_at; incident window unavailable"]}
+    log_evidence = {"status": "unavailable", "errors": ["alert has no starts_at"]}
+    trace_handoff = {"status": "unavailable"}
+    if data.get("starts_at"):
+        try:
+            start_s, end_s = incident_window(data["starts_at"], datetime.now(timezone.utc))
+            impact = collect_impact(service, namespace)
+            log_evidence = collect_log_evidence(service, namespace, start_s, end_s)
+            trace_handoff = correlate_trace(log_evidence)
+        except (TypeError, ValueError) as exc:
+            impact["errors"] = [str(exc)]
+    diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {})
 
     def _step(name: str, started_at: float, finished_at: float, **metadata) -> None:
         steps.append({
@@ -403,6 +423,8 @@ def investigate():
         "dev_action":     diagnosis["dev_action"],
         "kubectl_hint":   diagnosis["kubectl_hint"],
         "low_confidence": diagnosis.get("low_confidence", False),
+        "impact": impact, "log_evidence": log_evidence,
+        "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
     }
     t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
@@ -436,6 +458,8 @@ def investigate():
         "retrieval_support": retrieval.to_api_dict(debug=debug),
         **({"related_incidents_unconfirmed": related_incidents_unconfirmed} if not retrieval.accepted else {}),
         "low_confidence":   diagnosis.get("low_confidence", False),
+        "impact": impact, "log_evidence": log_evidence,
+        "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         **({"debug": {
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),

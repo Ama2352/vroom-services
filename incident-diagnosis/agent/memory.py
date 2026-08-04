@@ -360,11 +360,16 @@ _INCIDENT_EVIDENCE_FIELDS = [
     "pods_available", "pods_desired", "pods_running", "pods_ready", "waiting_reason", "last_terminated_reason",
     "restarts", "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
     "log_error", "event_reason", "event_message", "event_object",
+    "impact", "log_evidence", "trace_handoff", "diagnosis_confidence",
 ]
 
 
 def _evidence_snapshot(occurrence: dict) -> dict:
     return {f: occurrence.get(f, "") for f in _INCIDENT_EVIDENCE_FIELDS}
+
+
+def _serialize_evidence(value):
+    return json.dumps(value) if isinstance(value, (dict, list)) else value
 
 
 def append_incident_timeline(rdb: redis_lib.Redis, iid: str, entry: dict) -> None:
@@ -385,7 +390,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         existing = get_incident(rdb, oid_str)
         if (existing and existing.get("service") == occurrence["service"]
                 and existing.get("alert_name") == occurrence["alert_name"]):
-            mapping = {f: occurrence.get(f, "") for f in _INCIDENT_EVIDENCE_FIELDS}
+            mapping = {f: _serialize_evidence(occurrence.get(f, "")) for f in _INCIDENT_EVIDENCE_FIELDS}
             mapping.update({
                 "root_cause":     occurrence.get("root_cause", ""),
                 "dev_action":     occurrence.get("dev_action", ""),
@@ -419,7 +424,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         "resolved_at":  "",
         "resolved_by":  "",
     }
-    mapping.update(_evidence_snapshot(occurrence))
+    mapping.update({f: _serialize_evidence(occurrence.get(f, "")) for f in _INCIDENT_EVIDENCE_FIELDS})
     rdb.hset(f"incident:{iid}", mapping=mapping)
     rdb.sadd(INDEX_KEY, iid)
     rdb.sadd(OPEN_INDEX, iid)
@@ -439,6 +444,12 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
     d["low_confidence"] = _to_bool(d.get("low_confidence"))
     for f in ("pods_available", "pods_desired", "pods_running", "pods_ready", "restarts", "init_restarts"):
         d[f] = int(d.get(f) or 0)
+    for f in ("impact", "log_evidence", "trace_handoff", "diagnosis_confidence"):
+        if isinstance(d.get(f), str) and d[f]:
+            try:
+                d[f] = json.loads(d[f])
+            except json.JSONDecodeError:
+                pass
     d["template_diff"] = json.loads(d["template_diff"]) if "template_diff" in d else None
     d["dependency"] = json.loads(d["dependency"]) if "dependency" in d else None
     d["provenance"] = json.loads(d["provenance"]) if "provenance" in d else None
