@@ -496,3 +496,8 @@ POST /admin/models
   1. Prometheus trả về trạng thái container là `waiting_reason: ImagePullBackOff`.
   2. Kubernetes Events API ghi nhận Warning event: `Failed to pull image`.
   3. LLM kết luận do lỗi tag ảnh hoặc chứng thư Registry và gợi ý kiểm tra lại tên Docker image và quyền của ImagePullSecrets.
+## Current observability contract
+
+Investigations are anchored to the Alertmanager fingerprint and alert start time. Prometheus returns `available`, `no_data`, or `unavailable` impact evidence using the emitted `gin_*` metrics. Loki is queried only for the alert-relative window and structured error records. Tempo is fetched only by the exact valid `trace_id` from the selected log; service/time-window searches are representative evidence, never causal evidence.
+
+Confidence is deterministic: high requires measured impact, a scoped error log with a valid trace ID, and an agreeing Tempo error span; medium has measured impact with partial supporting evidence; low has weak specific evidence; unknown represents unavailable or conflicting evidence. The agent preserves `dev_action`, `kubectl_hint`, and knowledge suggestions, but the executor performs no mutation. A human verifies the trace in Grafana and chooses remediation.
