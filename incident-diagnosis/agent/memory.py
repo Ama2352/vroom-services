@@ -1,31 +1,11 @@
-import json, time, uuid, re, math
+import json, time, uuid
 import redis as redis_lib
-from rank_bm25 import BM25Okapi
+from retrieval.bm25 import PositiveIdfBM25, tokenize
 
 INDEX_KEY = "incidents:index"
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
-
-
-class _BM25(BM25Okapi):
-    """BM25Okapi with Lucene/ATIRE-style idf smoothing (log(1 + ...)) instead of the
-    library's default epsilon-floor on negative idf. The default formula can produce
-    zero or negative idf for any term appearing in half or more of the corpus's
-    documents — a routine occurrence for this project's small incident/runbook stores
-    (e.g. a single stored incident, or two incidents sharing one alert_name token),
-    which silently zeroes out or inverts genuine relevance signal instead of scoring
-    an exact match highly. This smoothing keeps idf strictly positive for any term
-    with 1 <= freq <= corpus_size, while a term entirely absent from every document
-    is simply missing from `idf` (get(...) defaults to 0 contribution), preserving
-    the "zero shared tokens -> zero score" floor this module's callers rely on."""
-
-    def _calc_idf(self, nd):
-        for word, freq in nd.items():
-            self.idf[word] = math.log(1 + (self.corpus_size - freq + 0.5) / (freq + 0.5))
-
-
-def _tokenize(text: str) -> list:
-    return _TOKEN_RE.findall(text.lower())
+_BM25 = PositiveIdfBM25
+_tokenize = tokenize
 
 
 def connect(url: str) -> redis_lib.Redis:
@@ -42,6 +22,20 @@ def build_symptom_text(alert_name: str, waiting_reason: str = "", log_error: str
 
 
 KNOWLEDGE_INDEX = "knowledge:index"
+CORPUS_VERSION_KEY = "knowledge:corpus_version"
+
+
+def get_corpus_version(rdb: redis_lib.Redis) -> int:
+    raw = rdb.get(CORPUS_VERSION_KEY)
+    if raw is None:
+        return 0
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    return int(raw)
+
+
+def bump_corpus_version(rdb: redis_lib.Redis) -> int:
+    return int(rdb.incr(CORPUS_VERSION_KEY))
 
 
 def _hash_to_dict(raw: dict) -> dict:
@@ -72,6 +66,7 @@ def store_knowledge_entry(rdb: redis_lib.Redis, entry: dict) -> str:
         "last_modified_at":       entry.get("last_modified_at", ""),
     })
     rdb.sadd(KNOWLEDGE_INDEX, key)
+    bump_corpus_version(rdb)
     return key
 
 
@@ -112,6 +107,7 @@ def update_knowledge_entry(rdb: redis_lib.Redis, key: str, fields: dict) -> bool
         mapping["last_modified_at"] = str(int(time.time()))
     if mapping:
         rdb.hset(f"knowledge:entry:{key}", mapping=mapping)
+        bump_corpus_version(rdb)
     return True
 
 
@@ -122,6 +118,7 @@ def delete_knowledge_entry(rdb: redis_lib.Redis, key: str) -> str:
         return "has_history"
     rdb.delete(f"knowledge:entry:{key}")
     rdb.srem(KNOWLEDGE_INDEX, key)
+    bump_corpus_version(rdb)
     return "deleted"
 
 
@@ -142,6 +139,7 @@ def store_history_entry(rdb: redis_lib.Redis, entry: dict) -> str:
         "last_modified_at":  entry.get("last_modified_at", ""),
     })
     rdb.sadd(HISTORY_INDEX, hid)
+    bump_corpus_version(rdb)
     return hid
 
 
@@ -186,6 +184,7 @@ def update_history_entry(rdb: redis_lib.Redis, hid: str, fields: dict) -> bool:
         mapping["last_modified_at"] = str(int(time.time()))
     if mapping:
         rdb.hset(f"history:entry:{hid}", mapping=mapping)
+        bump_corpus_version(rdb)
     return True
 
 
@@ -194,21 +193,17 @@ def delete_history_entry(rdb: redis_lib.Redis, hid: str) -> bool:
         return False
     rdb.delete(f"history:entry:{hid}")
     rdb.srem(HISTORY_INDEX, hid)
+    bump_corpus_version(rdb)
     return True
 
 
+# Compatibility surface for the offline evaluation harness. Production callers use
+# retrieval.RetrievalService; these helpers preserve the historical baseline so the
+# tournament can compare old and new behavior in one aligned branch.
 KNOWLEDGE_MATCH_THRESHOLD = 0.5
 
 
 def _derive_reason_signal(facts: dict) -> str:
-    """Normalize the many facts fields that can indicate a K8s failure state into one
-    comparable string. Priority order favors the most specific signal (an init-container
-    failure is more precise than the generic 'PodInitializing' state it also produces on
-    the main container). See D4 in the knowledge/history redesign spec.
-
-    "Unknown" is a genuine kube-state-metrics enum value for last_terminated_reason —
-    it means the container runtime couldn't classify the exit reason, not a real signal —
-    so it's treated the same as empty and falls through to the next check."""
     if facts.get("init_last_terminated_reason") and facts["init_last_terminated_reason"] != "Unknown":
         return f"Init:{facts['init_last_terminated_reason']}"
     if facts.get("init_waiting_reason"):
@@ -216,86 +211,50 @@ def _derive_reason_signal(facts: dict) -> str:
     if facts.get("last_terminated_reason") and facts["last_terminated_reason"] != "Unknown":
         return facts["last_terminated_reason"]
     if facts.get("waiting_reason"):
-        wr = facts["waiting_reason"]
-        return "ImagePullBackOff" if wr == "ErrImagePull" else wr
+        return "ImagePullBackOff" if facts["waiting_reason"] == "ErrImagePull" else facts["waiting_reason"]
     if facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0:
         return "ZeroReplicas"
-
-    dep = facts.get("dependency")
-    if dep and isinstance(dep, dict):
-        if dep.get("pods_desired") == 0:
-            return f"Dependency:{dep.get('name')}:ZeroReplicas"
-        elif dep.get("waiting_reason"):
-            return f"Dependency:{dep.get('name')}:{dep.get('waiting_reason')}"
-        elif dep.get("pods_available") != dep.get("pods_desired"):
-            return f"Dependency:{dep.get('name')}:Unhealthy"
-
     if facts.get("event_reason"):
         return facts["event_reason"]
-
     return ""
 
 
 def _token_coverage(query: str, text: str) -> float:
-    q_tokens = set(_tokenize(query))
-    if not q_tokens:
+    query_tokens = set(_tokenize(query))
+    if not query_tokens:
         return 0.0
-    t_tokens = set(_tokenize(text))
-    return len(q_tokens & t_tokens) / len(q_tokens)
+    return len(query_tokens & set(_tokenize(text))) / len(query_tokens)
 
 
 def find_trusted_match(rdb: redis_lib.Redis, facts: dict, query: str) -> dict | None:
-    signal            = _derive_reason_signal(facts)
-    knowledge_entries = list_knowledge_entries(rdb)
-
-    # Step 1 — deterministic short-circuit (exact-match, conclusive only)
-    if signal:
-        for entry in knowledge_entries:
-            if entry.get("trigger_waiting_reason") == signal and entry.get("conclusive"):
-                return {
-                    "source":             "knowledge",
-                    "knowledge_key":      entry["key"],
+    signal = _derive_reason_signal(facts)
+    entries = list_knowledge_entries(rdb)
+    for entry in entries:
+        if signal and entry.get("trigger_waiting_reason") == signal and entry.get("conclusive"):
+            return {"source": "knowledge", "knowledge_key": entry["key"],
                     "root_cause_pattern": entry["root_cause_pattern"],
-                    "fix_action":         entry["fix_action"],
-                    "context_notes":      "",
-                }
-
-    # Step 2 — combined candidate pool
+                    "fix_action": entry["fix_action"], "context_notes": ""}
     candidates = []
-    for h in list_all_history_entries(rdb):
-        candidates.append((_token_coverage(query, h.get("symptom", "")), "history", h))
-    if signal:
-        for entry in knowledge_entries:
-            if entry.get("trigger_waiting_reason") == signal and not entry.get("conclusive"):
-                candidates.append(
-                    (_token_coverage(query, entry.get("root_cause_pattern", "")), "knowledge", entry))
-
-    # Step 3 — threshold floor
-    candidates = [c for c in candidates if c[0] >= KNOWLEDGE_MATCH_THRESHOLD]
+    for history in list_all_history_entries(rdb):
+        candidates.append((_token_coverage(query, history.get("symptom", "")), "history", history))
+    for entry in entries:
+        if signal and entry.get("trigger_waiting_reason") == signal and not entry.get("conclusive"):
+            candidates.append((_token_coverage(query, entry.get("root_cause_pattern", "")), "knowledge", entry))
+    candidates = [candidate for candidate in candidates if candidate[0] >= KNOWLEDGE_MATCH_THRESHOLD]
     if not candidates:
         return None
-
-    # Step 4 — resolve highest scorer
-    candidates.sort(key=lambda c: c[0], reverse=True)
-    _, kind, obj = candidates[0]
+    _, kind, item = max(candidates, key=lambda candidate: candidate[0])
     if kind == "history":
-        k = get_knowledge_entry(rdb, obj["knowledge_key"])
-        if not k:
+        knowledge = get_knowledge_entry(rdb, item["knowledge_key"])
+        if not knowledge:
             return None
-        return {
-            "source":             "history",
-            "knowledge_key":      obj["knowledge_key"],
-            "root_cause_pattern": k["root_cause_pattern"],
-            "fix_action":         k["fix_action"],
-            "context_notes":      obj.get("context_notes", ""),
-        }
-    return {
-        "source":             "knowledge",
-        "knowledge_key":      obj["key"],
-        "root_cause_pattern": obj["root_cause_pattern"],
-        "fix_action":         obj["fix_action"],
-        "context_notes":      "",
-    }
+        return {"source": "history", "knowledge_key": item["knowledge_key"],
+                "root_cause_pattern": knowledge["root_cause_pattern"],
+                "fix_action": knowledge["fix_action"],
+                "context_notes": item.get("context_notes", "")}
+    return {"source": "knowledge", "knowledge_key": item["key"],
+            "root_cause_pattern": item["root_cause_pattern"],
+            "fix_action": item["fix_action"], "context_notes": ""}
 
 
 PENDING_INDEX = "pending:index"
@@ -401,11 +360,16 @@ _INCIDENT_EVIDENCE_FIELDS = [
     "pods_available", "pods_desired", "pods_running", "pods_ready", "waiting_reason", "last_terminated_reason",
     "restarts", "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
     "log_error", "event_reason", "event_message", "event_object",
+    "impact", "log_evidence", "trace_handoff", "diagnosis_confidence",
 ]
 
 
 def _evidence_snapshot(occurrence: dict) -> dict:
     return {f: occurrence.get(f, "") for f in _INCIDENT_EVIDENCE_FIELDS}
+
+
+def _serialize_evidence(value):
+    return json.dumps(value) if isinstance(value, (dict, list)) else value
 
 
 def append_incident_timeline(rdb: redis_lib.Redis, iid: str, entry: dict) -> None:
@@ -426,7 +390,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         existing = get_incident(rdb, oid_str)
         if (existing and existing.get("service") == occurrence["service"]
                 and existing.get("alert_name") == occurrence["alert_name"]):
-            mapping = {f: occurrence.get(f, "") for f in _INCIDENT_EVIDENCE_FIELDS}
+            mapping = {f: _serialize_evidence(occurrence.get(f, "")) for f in _INCIDENT_EVIDENCE_FIELDS}
             mapping.update({
                 "root_cause":     occurrence.get("root_cause", ""),
                 "dev_action":     occurrence.get("dev_action", ""),
@@ -460,7 +424,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         "resolved_at":  "",
         "resolved_by":  "",
     }
-    mapping.update(_evidence_snapshot(occurrence))
+    mapping.update({f: _serialize_evidence(occurrence.get(f, "")) for f in _INCIDENT_EVIDENCE_FIELDS})
     rdb.hset(f"incident:{iid}", mapping=mapping)
     rdb.sadd(INDEX_KEY, iid)
     rdb.sadd(OPEN_INDEX, iid)
@@ -480,6 +444,12 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
     d["low_confidence"] = _to_bool(d.get("low_confidence"))
     for f in ("pods_available", "pods_desired", "pods_running", "pods_ready", "restarts", "init_restarts"):
         d[f] = int(d.get(f) or 0)
+    for f in ("impact", "log_evidence", "trace_handoff", "diagnosis_confidence"):
+        if isinstance(d.get(f), str) and d[f]:
+            try:
+                d[f] = json.loads(d[f])
+            except json.JSONDecodeError:
+                pass
     d["template_diff"] = json.loads(d["template_diff"]) if "template_diff" in d else None
     d["dependency"] = json.loads(d["dependency"]) if "dependency" in d else None
     d["provenance"] = json.loads(d["provenance"]) if "provenance" in d else None

@@ -5,16 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	"vroom-mvp/notification/internal/repository"
 	"vroom-mvp/notification/internal/service"
+	notificationtelemetry "vroom-mvp/notification/internal/telemetry"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 )
 
@@ -35,6 +39,7 @@ type NotificationWorker struct {
 	groupName   string
 	consumerID  string
 	hub         *service.Hub
+	logger      *slog.Logger
 }
 
 func NewNotificationWorker(redisClient *redis.Client, repo repository.NotificationRepository, streamName, groupName, consumerID string, hub *service.Hub) *NotificationWorker {
@@ -45,6 +50,7 @@ func NewNotificationWorker(redisClient *redis.Client, repo repository.Notificati
 		groupName:   groupName,
 		consumerID:  consumerID,
 		hub:         hub,
+		logger:      slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "notification-service"),
 	}
 }
 
@@ -108,22 +114,33 @@ func (w *NotificationWorker) consume(ctx context.Context) {
 }
 
 func (w *NotificationWorker) processWithDLQ(ctx context.Context, msg redis.XMessage) {
+	ctx = extractMessageContext(ctx, msg)
+	eventType := stringValue(msg.Values["type"])
+	ctx, span := otel.Tracer("notification-consumer").Start(ctx, "notification.consume."+eventType)
+	defer span.End()
+
 	retryKey := "event:notif:retry:" + msg.ID
 	retries, _ := w.redisClient.Incr(ctx, retryKey).Result()
 	w.redisClient.Expire(ctx, retryKey, 24*time.Hour)
 
 	w.handleMessage(ctx, msg)
 
-	eventType := ""
-	if v, ok := msg.Values["type"]; ok && v != nil {
-		eventType = v.(string)
-	}
 	aggregateID := ""
 	if v, ok := msg.Values["aggregate_id"]; ok && v != nil {
 		aggregateID = v.(string)
 	}
 
 	isMalformed := eventType == "" || aggregateID == ""
+	if isMalformed {
+		err := fmt.Errorf("malformed event: missing event type or aggregate id")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		logger := w.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		notificationtelemetry.LogError(ctx, logger, "notification.consume", err, "event_id", msg.ID, "retry", retries)
+	}
 	if isMalformed && retries >= notifMaxEventRetries {
 		payload := ""
 		if v, ok := msg.Values["payload"]; ok {
@@ -146,23 +163,6 @@ func (w *NotificationWorker) processWithDLQ(ctx context.Context, msg redis.XMess
 }
 
 func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessage) {
-	tracer := otel.Tracer("notification-consumer")
-	carrier := propagation.MapCarrier{}
-	if tp, ok := msg.Values["traceparent"]; ok && tp != nil {
-		carrier["traceparent"] = tp.(string)
-	}
-	if ts, ok := msg.Values["tracestate"]; ok && ts != nil {
-		carrier["tracestate"] = ts.(string)
-	}
-	remoteCtx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
-
-	eventType := ""
-	if v, ok := msg.Values["type"]; ok && v != nil {
-		eventType = v.(string)
-	}
-	ctx, span := tracer.Start(remoteCtx, "notification.consume."+eventType)
-	defer span.End()
-
 	// Existing getVal helper follows:
 	getVal := func(key string) string {
 		if val, ok := msg.Values[key]; ok && val != nil {
@@ -171,7 +171,7 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 		return ""
 	}
 
-	eventType = getVal("type")
+	eventType := getVal("type")
 	aggregateType := getVal("aggregate")
 	aggregateID := getVal("aggregate_id")
 	payload := getVal("payload")
@@ -219,12 +219,11 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 
 	// 3. Fallback to Broadcast if not targeted or for core demo events
 	// We always broadcast core lifecycle events so the multi-view demo dashboard stays in sync
-	isCoreEvent := eventType == "Trip.Requested" || eventType == "Trip.Matched" || 
+	isCoreEvent := eventType == "Trip.Requested" || eventType == "Trip.Matched" ||
 		eventType == "Trip.MatchFailed" ||
-		eventType == "Trip.Started" || eventType == "Trip.Completed" || 
-		eventType == "Trip.Cancelled" || 
+		eventType == "Trip.Started" || eventType == "Trip.Completed" ||
+		eventType == "Trip.Cancelled" ||
 		eventType == "Trip.OfferRejected"
-
 
 	if !targeted || isCoreEvent {
 		log.Printf("[BROADCAST] Event %s (ID: %s) to all clients", eventType, msg.ID)
@@ -245,4 +244,20 @@ func (w *NotificationWorker) handleMessage(ctx context.Context, msg redis.XMessa
 	default:
 		log.Printf("[NOTIFICATION] Received event: %s", eventType)
 	}
+}
+
+func stringValue(value any) string {
+	valueString, _ := value.(string)
+	return valueString
+}
+
+func extractMessageContext(ctx context.Context, msg redis.XMessage) context.Context {
+	carrier := propagation.MapCarrier{}
+	if value := stringValue(msg.Values["traceparent"]); value != "" {
+		carrier["traceparent"] = value
+	}
+	if value := stringValue(msg.Values["tracestate"]); value != "" {
+		carrier["tracestate"] = value
+	}
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
 }

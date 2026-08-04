@@ -1,4 +1,12 @@
 export type IncidentStatus = 'open' | 'resolved'
+export type EvidenceStatus = 'available' | 'no_data' | 'unavailable'
+export type TraceStatus = 'correlated' | 'representative' | 'no_trace_id' | 'not_found' | 'unavailable' | 'conflict'
+export type ConfidenceLevel = 'high' | 'medium' | 'low' | 'unknown'
+
+export interface DiagnosisConfidence { level: ConfidenceLevel; reasons: string[]; missing_evidence: string[] }
+export interface ImpactEvidence { status: EvidenceStatus; window?: string; request_rate: number | null; error_rate_percent: number | null; p99_seconds: number | null; errors?: string[] }
+export interface LogEvidence { status: string; trace_id?: string; operation?: string; message?: string }
+export interface TraceHandoff { status: TraceStatus; trace_id?: string; error_service?: string; error_operation?: string; error_message?: string; service_path?: string[]; grafana_url?: string }
 
 export interface EnvDiffEntry {
   key: string
@@ -93,6 +101,10 @@ export interface Incident {
   provenance: Provenance | null
   pending_suggestion: PendingSuggestionRef | null
   timeline: TimelineEntry[]
+  impact?: ImpactEvidence
+  log_evidence?: LogEvidence
+  trace_handoff?: TraceHandoff
+  diagnosis_confidence?: DiagnosisConfidence
 }
 
 export interface IncidentListItem {

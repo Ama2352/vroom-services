@@ -14,6 +14,11 @@ def client():
 
 AUTH = {"Authorization": "Bearer test-token"}
 
+def test_diagnostic_executor_exposes_no_mutation_or_tempo_routes(client):
+    assert client.post("/tools/scale", headers=AUTH).status_code == 404
+    assert client.post("/tools/restart", headers=AUTH).status_code == 404
+    assert client.get("/tools/traces?service=ride-service", headers=AUTH).status_code == 404
+
 def mock_kubectl(stdout="ok", returncode=0):
     result = MagicMock()
     result.stdout = stdout
@@ -45,12 +50,14 @@ def test_logs_success(client):
     assert r.status_code == 200
     assert "log line" in r.get_json()["stdout"]
 
+@pytest.mark.skip(reason="mutation routes removed from diagnostic-only executor")
 def test_restart_rejects_invalid_deployment(client):
     r = client.post("/tools/restart",
         data=json.dumps({"deployment": "../etc", "namespace": "vroom-dev"}),
         content_type="application/json", headers=AUTH)
     assert r.status_code == 400
 
+@pytest.mark.skip(reason="mutation routes removed from diagnostic-only executor")
 def test_restart_success(client):
     with patch("subprocess.run", return_value=mock_kubectl("deployment.apps/dispatch-service restarted")):
         r = client.post("/tools/restart",
@@ -59,12 +66,14 @@ def test_restart_success(client):
     assert r.status_code == 200
     assert "restarted" in r.get_json()["stdout"]
 
+@pytest.mark.skip(reason="Tempo lookup belongs to the incident agent correlation layer")
 def test_traces_unavailable_on_timeout(client):
     with patch("requests.get", side_effect=Exception("timeout")):
         r = client.get("/tools/traces?service=ride-service", headers=AUTH)
     assert r.status_code == 200
     assert "unavailable" in r.get_json()["stdout"]
 
+@pytest.mark.skip(reason="Tempo lookup belongs to the incident agent correlation layer")
 def test_traces_success(client):
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -95,6 +104,7 @@ def test_describe_rejects_missing_pod(client):
     r = client.get("/tools/describe?namespace=vroom-dev", headers=AUTH)
     assert r.status_code == 400
 
+@pytest.mark.skip(reason="mutation routes removed from diagnostic-only executor")
 def test_scale_success(client):
     with patch("subprocess.run", return_value=mock_kubectl("deployment.apps/ride-service scaled")):
         r = client.post("/tools/scale",
@@ -103,12 +113,14 @@ def test_scale_success(client):
     assert r.status_code == 200
     assert "scaled" in r.get_json()["stdout"]
 
+@pytest.mark.skip(reason="mutation routes removed from diagnostic-only executor")
 def test_scale_rejects_invalid_replicas(client):
     r = client.post("/tools/scale",
         data=json.dumps({"deployment": "ride-service", "namespace": "vroom-dev", "replicas": 99}),
         content_type="application/json", headers=AUTH)
     assert r.status_code == 400
 
+@pytest.mark.skip(reason="mutation routes removed from diagnostic-only executor")
 def test_scale_rejects_invalid_deployment(client):
     r = client.post("/tools/scale",
         data=json.dumps({"deployment": "../etc", "namespace": "vroom-dev", "replicas": 1}),
@@ -148,6 +160,7 @@ def _make_span_resp():
     return m
 
 
+@pytest.mark.skip(reason="Tempo lookup belongs to the incident agent correlation layer")
 def test_traces_enriched_with_error_span_detail(client):
     with patch("requests.get", side_effect=[_make_search_resp(), _make_span_resp()]):
         r = client.get("/tools/traces?service=ride-service", headers=AUTH)
@@ -157,6 +170,7 @@ def test_traces_enriched_with_error_span_detail(client):
     assert "connection refused to postgresql" in body["stdout"]
 
 
+@pytest.mark.skip(reason="Tempo lookup belongs to the incident agent correlation layer")
 def test_traces_fallback_to_summary_when_span_fetch_fails(client):
     err_resp = MagicMock()
     err_resp.status_code = 500

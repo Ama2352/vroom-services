@@ -1,6 +1,8 @@
 import re, json, time
 import requests as http_requests
 
+from retrieval.models import RetrievalMode, RetrievalResult
+
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -40,7 +42,8 @@ REQUIRED_KEYS = {"root_cause", "dev_action", "kubectl_hint"}
 
 
 def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
-                            facts: dict, bundle: str, memory_context: str,
+                            facts: dict, bundle: str,
+                            retrieval_result: RetrievalResult | None,
                             pod: str) -> str:
     lines = [
         f"Alert: {alert_name}",
@@ -93,15 +96,40 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
         lines.append(dep_line)
     if bundle:
         lines.append(f"  Service metrics (5 min): {bundle}")
-    if memory_context:
+    if (
+        isinstance(retrieval_result, RetrievalResult)
+        and retrieval_result.accepted
+        and retrieval_result.candidate is not None
+    ):
+        document = retrieval_result.candidate.document
+        if retrieval_result.mode is RetrievalMode.EXACT_CONCLUSIVE:
+            heading = "Conclusive approved knowledge:"
+            instruction = (
+                "This is a unique human-approved conclusive signal match. Use it as the "
+                "basis for your root_cause and dev_action unless the Evidence section "
+                "above clearly contradicts it."
+            )
+        else:
+            heading = "Approved advisory memory (hypothesis only):"
+            instruction = (
+                "This was selected from approved history by BM25 and semantic reranking. "
+                "Current evidence remains authoritative. Use it only where the evidence "
+                "supports it; do not treat it as conclusive."
+            )
+        memory_lines = [
+            f"Known failure pattern: {document.root_cause_pattern}",
+            f"Approved fix: {document.fix_action}",
+        ]
+        if document.context_notes:
+            memory_lines.append(
+                f"Notes from a similar past occurrence: {document.context_notes}"
+            )
         lines += [
             "",
-            "Trusted match from the knowledge base (human-approved — use as your basis):",
-            memory_context,
+            heading,
+            "\n".join(memory_lines),
             "",
-            "This is a previously confirmed failure pattern whose K8s state matches the current "
-            "evidence. Use it as the basis for your root_cause and dev_action unless the Evidence "
-            "section above clearly contradicts it.",
+            instruction,
         ]
     lines += [
         "",
@@ -282,12 +310,12 @@ def _call_llm(messages: list, model_entry: dict,
 
 def interpret(
     alert_name: str, service: str, namespace: str,
-    facts: dict, bundle: str, memory_context: str,
+    facts: dict, bundle: str, retrieval_result: RetrievalResult | None,
     models: list, groq_key: str = "", openrouter_key: str = "",
     pod: str = "", _llm=None,
 ) -> dict:
     prompt   = _build_grounded_prompt(alert_name, service, namespace,
-                                      facts, bundle, memory_context, pod)
+                                      facts, bundle, retrieval_result, pod)
     messages = [{"role": "user", "content": prompt}]
     step_log = []
 

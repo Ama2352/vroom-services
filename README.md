@@ -343,6 +343,12 @@ Kargo Warehouse (vroom-gitops) polls GHCR for new tags → creates Freight
 
 Everything after `publish` — dev/staging/prod promotion, verification, approval — lives in [vroom-gitops](https://github.com/Ama2352/vroom-gitops) (`delivery/`), not here.
 
+## Incident diagnosis evidence path
+
+Prometheus impact alert → Alertmanager fingerprint and start time → n8n expands every alert → the agent collects typed impact metrics, a scoped structured Loki error, and the exact Tempo trace named by that log → grounded diagnosis plus advisory suggestions and deterministic confidence → Slack/dashboard → a human verifies the Grafana waterfall and decides remediation.
+
+Metrics detect impact; the structured error log is the bridge to the exact trace. A trace is called `correlated` only when its ID came from the selected log and its error span agrees with the log service, operation, or diagnostic message. Missing or conflicting telemetry lowers confidence rather than becoming a healthy zero. The kubectl executor is read-only; suggestions remain advisory.
+
 Required CI variables (GitLab Settings → CI/CD → Variables):
 
 | Variable | Purpose |

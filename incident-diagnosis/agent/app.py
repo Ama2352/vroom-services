@@ -1,4 +1,6 @@
 import os, json, uuid, threading, time, re
+from datetime import datetime, timezone
+from pathlib import Path
 import redis as redis_lib
 import requests
 from flask import Flask, request, jsonify
@@ -7,7 +9,7 @@ from flask_cors import CORS
 from memory import (search_memory as memory_search,
                     search_memory_items, format_incidents,
                     connect as redis_connect, build_symptom_text,
-                    find_trusted_match, store_pending_suggestion, KNOWLEDGE_INDEX,
+                    store_pending_suggestion, KNOWLEDGE_INDEX,
                     record_incident_occurrence, get_incident, list_incidents,
                     get_latest_incident, get_incident_timeline, append_incident_timeline, resolve_incident,
                     list_pending_suggestions, get_pending_suggestion,
@@ -15,13 +17,17 @@ from memory import (search_memory as memory_search,
                     list_knowledge_entries, get_knowledge_entry, update_knowledge_entry,
                     delete_knowledge_entry, list_history_entries_for_knowledge,
                     get_history_entry, update_history_entry, delete_history_entry,
-                    store_knowledge_entry, list_all_history_entries,
-                    _derive_reason_signal)
-from collector import collect_bundle
+                    store_knowledge_entry, list_all_history_entries)
+from collector import collect_bundle, collect_impact
+from alerting import normalize_alert, incident_window
+from correlation import collect_log_evidence, correlate_trace
+from confidence import assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
+from retrieval.models import RetrievalMode
+from retrieval.service import create_retrieval_service
 
 app = Flask(__name__)
 CORS(app)  # the dashboard is a separate browser origin (its own NodePort)
@@ -31,6 +37,14 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 GROQ_KEY       = os.environ.get("GROQ_API_KEY", "")
 
 rdb = redis_connect(REDIS_URL)
+retrieval_service = create_retrieval_service(
+    rdb,
+    Path(os.environ.get("RERANKER_MODEL_DIR", "/opt/models/minilm")),
+)
+
+
+def _invalidate_retrieval_snapshot() -> None:
+    retrieval_service.corpus.invalidate()
 
 _MODELS_KEY    = "config:models"
 _KNOWLEDGE_KEY_RE = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -62,14 +76,6 @@ def _background_seed():
 threading.Thread(target=_background_seed, daemon=True).start()
 
 
-def _format_trusted_match(match: dict) -> str:
-    lines = [f"Known failure pattern: {match['root_cause_pattern']}",
-             f"Fix: {match['fix_action']}"]
-    if match.get("context_notes"):
-        lines.append(f"Notes from a similar past occurrence: {match['context_notes']}")
-    return "\n".join(lines)
-
-
 _REFLECT_PROMPT = """\
 You are analyzing a resolved incident to propose a knowledge-base update.
 Existing knowledge keys: {existing_keys}
@@ -93,7 +99,8 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
     )) or "(none yet)"
 
     incident_full = get_incident(rdb, incident.get("id")) if incident.get("id") else None
-    trigger_waiting_reason = _derive_reason_signal(incident_full) if incident_full else ""
+    from retrieval.signals import select_unique_signal
+    trigger_waiting_reason = select_unique_signal(incident_full) if incident_full else ""
 
     _mock_mode = os.environ.get("LLM_MOCK", "").lower() == "true"
     if _mock_mode:
@@ -310,6 +317,7 @@ def set_models():
 @app.route("/investigate", methods=["POST"])
 def investigate():
     data       = request.get_json(silent=True) or {}
+    normalized = normalize_alert(data)
     alert_name = data.get("alert_name", "UnknownAlert")
     service    = data.get("service", "unknown")
     namespace  = data.get("namespace", "vroom-dev")
@@ -319,6 +327,21 @@ def investigate():
     seed_if_empty(rdb)
 
     steps = []
+
+    impact = {"status": "unavailable", "window": "5m", "request_rate": None,
+              "error_rate_percent": None, "p99_seconds": None,
+              "errors": ["alert has no starts_at; incident window unavailable"]}
+    log_evidence = {"status": "unavailable", "errors": ["alert has no starts_at"]}
+    trace_handoff = {"status": "unavailable"}
+    if data.get("starts_at"):
+        try:
+            start_s, end_s = incident_window(data["starts_at"], datetime.now(timezone.utc))
+            impact = collect_impact(service, namespace)
+            log_evidence = collect_log_evidence(service, namespace, start_s, end_s)
+            trace_handoff = correlate_trace(log_evidence)
+        except (TypeError, ValueError) as exc:
+            impact["errors"] = [str(exc)]
+    diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {})
 
     def _step(name: str, started_at: float, finished_at: float, **metadata) -> None:
         steps.append({
@@ -361,25 +384,29 @@ def investigate():
           f"init_restarts={facts['init_restarts']} "
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
-    query = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
-
     t2            = time.time()
-    match         = find_trusted_match(rdb, facts, query)
-    trusted_match = match is not None
-    memory_ctx    = _format_trusted_match(match) if match else ""
+    retrieval     = retrieval_service.retrieve(alert_name, facts)
+    trusted_match = retrieval.mode is RetrievalMode.EXACT_CONCLUSIVE
     t3            = time.time()
-    _step("trusted_match_check", t2, t3, trusted_match=trusted_match)
+    _step(
+        "trusted_match_check", t2, t3,
+        trusted_match=trusted_match,
+        retrieval_mode=retrieval.mode.value,
+        retrieval_accepted=retrieval.accepted,
+    )
 
     related_incidents_unconfirmed = []
-    if not trusted_match:
+    if not retrieval.accepted:
+        query = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
         related_incidents_unconfirmed = search_memory_items(rdb, query, limit=3)
 
     print(f"[memory] trusted_match={trusted_match} "
+          f"retrieval_mode={retrieval.mode.value} "
           f"related_incidents={len(related_incidents_unconfirmed)}", flush=True)
 
     diagnosis = interpret(
         alert_name, service, namespace,
-        facts, bundle, memory_ctx,
+        facts, bundle, retrieval,
         models=_current_models,
         groq_key=GROQ_KEY,
         openrouter_key=OPENROUTER_KEY,
@@ -396,6 +423,8 @@ def investigate():
         "dev_action":     diagnosis["dev_action"],
         "kubectl_hint":   diagnosis["kubectl_hint"],
         "low_confidence": diagnosis.get("low_confidence", False),
+        "impact": impact, "log_evidence": log_evidence,
+        "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
     }
     t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
@@ -426,11 +455,14 @@ def investigate():
         "kubectl_hint":     diagnosis["kubectl_hint"],
         "evidence_snippet": evidence,
         "trusted_match":    trusted_match,
-        **({"related_incidents_unconfirmed": related_incidents_unconfirmed} if not trusted_match else {}),
+        "retrieval_support": retrieval.to_api_dict(debug=debug),
+        **({"related_incidents_unconfirmed": related_incidents_unconfirmed} if not retrieval.accepted else {}),
         "low_confidence":   diagnosis.get("low_confidence", False),
+        "impact": impact, "log_evidence": log_evidence,
+        "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         **({"debug": {
             "bundle":         bundle,
-            "memory_context": memory_ctx or "(none)",
+            "retrieval_support": retrieval.to_api_dict(debug=True),
             "facts":          facts,
         }} if debug else {}),
     })
@@ -515,6 +547,7 @@ def approve_pending_route(pid):
     )
     if hid is None:
         return jsonify({"error": "not found"}), 404
+    _invalidate_retrieval_snapshot()
     return jsonify({"approved": True, "history_id": hid})
 
 
@@ -549,6 +582,7 @@ def create_knowledge_route():
         "source":             "manual",
         "created_by":         actor,
     })
+    _invalidate_retrieval_snapshot()
     return jsonify({"created": True, "key": key}), 201
 
 
@@ -585,6 +619,7 @@ def update_knowledge_route(key):
     ok = update_knowledge_entry(rdb, key, fields)
     if not ok:
         return jsonify({"error": "not found"}), 404
+    _invalidate_retrieval_snapshot()
     return jsonify({"updated": True})
 
 
@@ -595,6 +630,7 @@ def delete_knowledge_route(key):
         return jsonify({"error": "not found"}), 404
     if result == "has_history":
         return jsonify({"error": "cannot delete: history entries reference this key"}), 409
+    _invalidate_retrieval_snapshot()
     return jsonify({"deleted": True})
 
 
@@ -623,6 +659,7 @@ def update_history_route(hid):
     ok = update_history_entry(rdb, hid, fields)
     if not ok:
         return jsonify({"error": "not found"}), 404
+    _invalidate_retrieval_snapshot()
     return jsonify({"updated": True})
 
 
@@ -630,6 +667,7 @@ def update_history_route(hid):
 def delete_history_route(hid):
     if not delete_history_entry(rdb, hid):
         return jsonify({"error": "not found"}), 404
+    _invalidate_retrieval_snapshot()
     return jsonify({"deleted": True})
 
 
