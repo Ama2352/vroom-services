@@ -1,4 +1,5 @@
 from unittest.mock import patch, MagicMock
+import requests
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import collector
@@ -93,3 +94,32 @@ def test_bundle_graceful_on_prometheus_failure():
     assert "service=ride-service" in bundle
     assert "rps=0" in bundle
     assert "traces_errored=0" in bundle
+
+
+def test_collect_impact_uses_emitted_gin_metrics():
+    with patch("requests.get", side_effect=[_prom_ok(20), _prom_ok(4), _prom_ok(1.25)]) as mock_get:
+        impact = collector.collect_impact("ride-service", "vroom-dev")
+    queries = [call.kwargs["params"]["query"] for call in mock_get.call_args_list]
+    assert all('service="ride-service"' in query for query in queries)
+    assert all('namespace="vroom-dev"' in query for query in queries)
+    assert "gin_requests_total" in queries[0]
+    assert impact == {
+        "status": "available", "window": "5m",
+        "request_rate": 20.0, "error_rate_percent": 20.0,
+        "p99_seconds": 1.25, "errors": [],
+    }
+
+
+def test_collect_impact_does_not_turn_timeout_into_zero():
+    with patch("requests.get", side_effect=Exception("prometheus timeout")):
+        impact = collector.collect_impact("ride-service", "vroom-dev")
+    assert impact["status"] == "unavailable"
+    assert impact["request_rate"] is None
+    assert impact["error_rate_percent"] is None
+    assert impact["p99_seconds"] is None
+
+
+def test_collect_impact_distinguishes_no_data():
+    with patch("requests.get", return_value=_prom_empty()):
+        impact = collector.collect_impact("ride-service", "vroom-dev")
+    assert impact["status"] == "no_data"

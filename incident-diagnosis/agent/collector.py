@@ -14,6 +14,65 @@ TEMPO_URL = os.environ.get(
     "http://tempo.monitoring.svc.cluster.local:3100"
 )
 
+
+def _prom_value(query: str):
+    """Return (value, status, error) without converting missing data to zero."""
+    try:
+        response = requests.get(PROMETHEUS_URL, params={"query": query}, timeout=5)
+        if not response.ok:
+            return None, "unavailable", f"Prometheus returned HTTP {response.status_code}"
+        results = response.json()["data"]["result"]
+        if not results:
+            return None, "no_data", None
+        return float(results[0]["value"][1]), "available", None
+    except Exception as exc:
+        return None, "unavailable", str(exc)
+
+
+def collect_impact(service: str, namespace: str, window: str = "5m") -> dict:
+    """Collect truthful, service-scoped impact evidence from emitted Gin metrics."""
+    total_query = (
+        f'sum(rate(gin_requests_total{{service="{service}",namespace="{namespace}"}}[{window}]))'
+    )
+    error_query = (
+        f'sum(rate(gin_requests_total{{service="{service}",namespace="{namespace}",code=~"5.."}}[{window}]))'
+    )
+    p99_query = (
+        "histogram_quantile(0.99, sum by (le) "
+        f'(rate(gin_request_duration_seconds_bucket{{service="{service}",namespace="{namespace}"}}[{window}])))'
+    )
+
+    values = []
+    errors = []
+    for name, query in (("request_rate", total_query), ("error_rate", error_query), ("p99_seconds", p99_query)):
+        value, status, error = _prom_value(query)
+        values.append((name, value, status))
+        if error:
+            errors.append(f"{name}: {error}")
+
+    statuses = {status for _, _, status in values}
+    if "unavailable" in statuses:
+        status = "unavailable"
+    elif "no_data" in statuses:
+        status = "no_data"
+    else:
+        status = "available"
+
+    parsed = {name: value for name, value, _ in values}
+    total = parsed["request_rate"]
+    error_rate = parsed["error_rate"]
+    error_percent = None if total is None or error_rate is None else (
+        0.0 if total == 0.0 else error_rate / total * 100
+    )
+    return {
+        "status": status,
+        "window": window,
+        "request_rate": total,
+        "error_rate_percent": error_percent,
+        "p99_seconds": parsed["p99_seconds"],
+        "errors": errors,
+    }
+
 def _prom(query: str) -> float:
     try:
         r = requests.get(PROMETHEUS_URL, params={"query": query}, timeout=5)
