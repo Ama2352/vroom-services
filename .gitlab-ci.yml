@@ -62,7 +62,9 @@ test-dashboard-build:
     - docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
   script:
     - export IMAGE="$IMG_PREFIX-$SERVICE_NAME"
-    - export IMAGE_TAG="v${VERSION}-build.${CI_PIPELINE_IID}-${CI_COMMIT_SHORT_SHA}"
+    # Keep the pipeline ID as its own numeric SemVer prerelease identifier.
+    # The `z` prefix makes this new series sort above legacy `build.52-<sha>` tags.
+    - export IMAGE_TAG="v${VERSION}-build.z.${CI_PIPELINE_IID}.${CI_COMMIT_SHORT_SHA}"
     - cd "$SERVICE_PATH"
     - docker build --build-arg BASE_IMAGE_PREFIX="public.ecr.aws/docker/library/" -t "$IMAGE:$CI_COMMIT_SHORT_SHA" .
     - docker tag "$IMAGE:$CI_COMMIT_SHORT_SHA" "$IMAGE:latest"
