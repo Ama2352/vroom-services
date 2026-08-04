@@ -1,0 +1,202 @@
+[
+  {
+    "id": "oom_exact",
+    "split": "calibration",
+    "alert_name": "KubePodContainerTerminated",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "OOMKilled", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "exit code 137 memory limit exceeded", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["oom"],
+    "expected_mode": "exact",
+    "forbidden_keys": [],
+    "rationale": "OOMKilled is an approved conclusive canonical state."
+  },
+  {
+    "id": "init_oom_exact",
+    "split": "calibration",
+    "alert_name": "KubePodContainerTerminated",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "OOMKilled", "pods_available": 0, "pods_desired": 1, "log_error": "", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["init_oom"],
+    "expected_mode": "exact",
+    "forbidden_keys": [],
+    "rationale": "An init-container OOMKilled termination is conclusive."
+  },
+  {
+    "id": "config_error_exact",
+    "split": "calibration",
+    "alert_name": "KubePodContainerWaiting",
+    "facts": {"waiting_reason": "CreateContainerConfigError", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "", "event_reason": "Failed", "event_message": "missing Secret", "dependency": null, "template_diff": null},
+    "expected_keys": ["config_error"],
+    "expected_mode": "exact",
+    "forbidden_keys": [],
+    "rationale": "CreateContainerConfigError with a missing Secret is conclusive."
+  },
+  {
+    "id": "image_pull_advisory",
+    "split": "calibration",
+    "alert_name": "KubePodContainerWaiting",
+    "facts": {"waiting_reason": "ImagePullBackOff", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "manifest tag not found", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["image_pull"],
+    "expected_mode": "advisory",
+    "forbidden_keys": ["oom"],
+    "rationale": "Image pull evidence should retrieve image guidance, not OOM guidance."
+  },
+  {
+    "id": "failed_scheduling_advisory",
+    "split": "calibration",
+    "alert_name": "KubePodNotScheduled",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "", "event_reason": "FailedScheduling", "event_message": "insufficient CPU and taint", "dependency": null, "template_diff": null},
+    "expected_keys": ["failed_scheduling"],
+    "expected_mode": "advisory",
+    "forbidden_keys": ["crashloop"],
+    "rationale": "Scheduling evidence should retrieve scheduling guidance."
+  },
+  {
+    "id": "outbox_not_draining",
+    "split": "calibration",
+    "alert_name": "OutboxBacklog",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "outbox_events PENDING no PUBLISHED rows", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["outbox_not_draining"],
+    "expected_mode": "advisory",
+    "forbidden_keys": [],
+    "rationale": "Pending outbox events should retrieve the outbox backlog pattern."
+  },
+  {
+    "id": "driver_geo_empty",
+    "split": "calibration",
+    "alert_name": "DriverMatchFailure",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "GeoSearch drivers:available returns empty", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["driver_matching_returns_0_results"],
+    "expected_mode": "advisory",
+    "forbidden_keys": [],
+    "rationale": "An empty driver geosearch should retrieve the matching-zero-results pattern."
+  },
+  {
+    "id": "generic_crashloop",
+    "split": "calibration",
+    "alert_name": "KubePodContainerWaiting",
+    "facts": {"waiting_reason": "CrashLoopBackOff", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "startup failed missing environment variable", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["crashloop"],
+    "expected_mode": "advisory",
+    "forbidden_keys": ["oom"],
+    "rationale": "A generic startup crash should retrieve crashloop guidance without claiming OOM."
+  },
+  {
+    "id": "tls_no_match",
+    "split": "calibration",
+    "alert_name": "KubePodContainerWaiting",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "x509 certificate expired TLS handshake failure", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": [],
+    "expected_mode": "none",
+    "forbidden_keys": ["crashloop", "image_pull"],
+    "rationale": "The catalog has no approved TLS certificate diagnosis."
+  },
+  {
+    "id": "disk_no_match",
+    "split": "calibration",
+    "alert_name": "KubeNodeCondition",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "no space left on device inode exhaustion", "event_reason": "DiskPressure", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": [],
+    "expected_mode": "none",
+    "forbidden_keys": ["oom"],
+    "rationale": "The catalog has no approved disk-pressure diagnosis."
+  },
+  {
+    "id": "init_crashloop",
+    "split": "held_out",
+    "alert_name": "KubePodContainerWaiting",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "CrashLoopBackOff", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "init log startup failure", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["init_crashloop"],
+    "expected_mode": "advisory",
+    "forbidden_keys": ["crashloop"],
+    "rationale": "Init-container crash evidence should retrieve the init-specific pattern."
+  },
+  {
+    "id": "scaled_to_zero",
+    "split": "held_out",
+    "alert_name": "ServiceDown",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 0, "log_error": "0 rps no traffic", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["deployment_scaled_to_zero", "zero_replica"],
+    "expected_mode": "advisory",
+    "forbidden_keys": [],
+    "rationale": "Zero desired and available replicas admits either approved zero-replica key."
+  },
+  {
+    "id": "xautoclaim_backlog",
+    "split": "held_out",
+    "alert_name": "ConsumerBacklog",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "XAUTOCLAIM pending entries list messages not acknowledged", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["xautoclaim_pel_backlog"],
+    "expected_mode": "advisory",
+    "forbidden_keys": [],
+    "rationale": "Unacknowledged pending entries should retrieve the XAUTOCLAIM backlog pattern."
+  },
+  {
+    "id": "trip_timeout_storm",
+    "split": "held_out",
+    "alert_name": "TripFailure",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "trips CANCELLED immediately after REQUESTED offer deadline", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["trip_offer_timeout_storm"],
+    "expected_mode": "advisory",
+    "forbidden_keys": [],
+    "rationale": "Immediate post-request cancellations should retrieve the offer-timeout pattern."
+  },
+  {
+    "id": "argocd_outofsync",
+    "split": "held_out",
+    "alert_name": "ArgoCDAppOutOfSync",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "", "event_reason": "OutOfSync", "event_message": "vroom-infrastructure OutOfSync perpetually", "dependency": null, "template_diff": null},
+    "expected_keys": ["argocd_app_stuck_outofsync"],
+    "expected_mode": "advisory",
+    "forbidden_keys": ["kargo_verification_failing"],
+    "rationale": "Persistent Argo CD drift should retrieve the Argo CD pattern."
+  },
+  {
+    "id": "kargo_analysis_failed",
+    "split": "held_out",
+    "alert_name": "KargoVerificationFailed",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "", "event_reason": "Failed", "event_message": "AnalysisRun prometheus-checks Failed promotion blocked", "dependency": null, "template_diff": null},
+    "expected_keys": ["kargo_verification_failing"],
+    "expected_mode": "advisory",
+    "forbidden_keys": ["argocd_app_stuck_outofsync"],
+    "rationale": "A failed promotion analysis should retrieve the Kargo verification pattern."
+  },
+  {
+    "id": "high_error_rate",
+    "split": "held_out",
+    "alert_name": "HighErrorRate",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "http_requests_total status 5xx above 1 percent", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["high_error_rate_on_ride_service"],
+    "expected_mode": "advisory",
+    "forbidden_keys": [],
+    "rationale": "Elevated ride-service 5xx traffic should retrieve the high-error-rate pattern."
+  },
+  {
+    "id": "dns_no_match",
+    "split": "held_out",
+    "alert_name": "KubePodContainerWaiting",
+    "facts": {"waiting_reason": "CrashLoopBackOff", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 1, "log_error": "lookup unknown.external.example no such host", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": [],
+    "expected_mode": "none",
+    "forbidden_keys": ["oom", "config_error"],
+    "rationale": "DNS failure has no approved catalog diagnosis despite the generic wait state."
+  },
+  {
+    "id": "sparse_no_match",
+    "split": "held_out",
+    "alert_name": "UnclassifiedAlert",
+    "facts": {"waiting_reason": "", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "", "pods_available": 0, "pods_desired": 0, "log_error": "", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": [],
+    "expected_mode": "none",
+    "forbidden_keys": ["oom", "crashloop"],
+    "rationale": "An alert name without supporting facts must not produce an approved diagnosis."
+  },
+  {
+    "id": "ambiguous_conclusive",
+    "split": "held_out",
+    "alert_name": "KubePodContainerWaiting",
+    "facts": {"waiting_reason": "CreateContainerConfigError", "last_terminated_reason": "", "init_waiting_reason": "", "init_last_terminated_reason": "OOMKilled", "pods_available": 0, "pods_desired": 1, "log_error": "", "event_reason": "", "event_message": "", "dependency": null, "template_diff": null},
+    "expected_keys": ["init_oom", "config_error"],
+    "expected_mode": "advisory",
+    "forbidden_keys": [],
+    "rationale": "Two competing conclusive states require advisory handling."
+  }
+]

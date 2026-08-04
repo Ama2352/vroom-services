@@ -1,0 +1,713 @@
+{
+  "status": "FAIL",
+  "baseline": {
+    "calibration": {
+      "positive_cases": 8,
+      "no_match_cases": 2,
+      "top1_correct": 5,
+      "top3_correct": 5,
+      "false_positives": 0,
+      "forbidden_acceptances": 0,
+      "exact_failures": 0,
+      "top1_accuracy": 0.625,
+      "recall_at_3": 0.625,
+      "false_positive_rate": 0.0
+    },
+    "held_out": {
+      "positive_cases": 8,
+      "no_match_cases": 2,
+      "top1_correct": 4,
+      "top3_correct": 4,
+      "false_positives": 0,
+      "forbidden_acceptances": 0,
+      "exact_failures": 1,
+      "top1_accuracy": 0.5,
+      "recall_at_3": 0.5,
+      "false_positive_rate": 0.0
+    }
+  },
+  "variants": [
+    {
+      "name": "baseline_plain",
+      "query_variant": "baseline",
+      "history_variant": "plain",
+      "calibrated": true,
+      "threshold": 12.792813657432989,
+      "uncalibrated_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 6,
+        "top3_correct": 7,
+        "false_positives": 1,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.75,
+        "recall_at_3": 0.875,
+        "false_positive_rate": 0.5
+      },
+      "calibration_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 5,
+        "top3_correct": 5,
+        "false_positives": 0,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.625,
+        "recall_at_3": 0.625,
+        "false_positive_rate": 0.0
+      }
+    },
+    {
+      "name": "baseline_joined",
+      "query_variant": "baseline",
+      "history_variant": "joined",
+      "calibrated": true,
+      "threshold": 3.7249771912130707,
+      "uncalibrated_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 6,
+        "top3_correct": 7,
+        "false_positives": 1,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.75,
+        "recall_at_3": 0.875,
+        "false_positive_rate": 0.5
+      },
+      "calibration_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 6,
+        "top3_correct": 7,
+        "false_positives": 0,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.75,
+        "recall_at_3": 0.875,
+        "false_positive_rate": 0.0
+      }
+    },
+    {
+      "name": "rich_plain",
+      "query_variant": "rich",
+      "history_variant": "plain",
+      "calibrated": true,
+      "threshold": 4.421570276219816,
+      "uncalibrated_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 7,
+        "top3_correct": 8,
+        "false_positives": 1,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.875,
+        "recall_at_3": 1.0,
+        "false_positive_rate": 0.5
+      },
+      "calibration_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 6,
+        "top3_correct": 6,
+        "false_positives": 0,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.75,
+        "recall_at_3": 0.75,
+        "false_positive_rate": 0.0
+      }
+    },
+    {
+      "name": "rich_joined",
+      "query_variant": "rich",
+      "history_variant": "joined",
+      "calibrated": true,
+      "threshold": 3.7249771912130707,
+      "uncalibrated_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 7,
+        "top3_correct": 8,
+        "false_positives": 1,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.875,
+        "recall_at_3": 1.0,
+        "false_positive_rate": 0.5
+      },
+      "calibration_metrics": {
+        "positive_cases": 8,
+        "no_match_cases": 2,
+        "top1_correct": 7,
+        "top3_correct": 8,
+        "false_positives": 0,
+        "forbidden_acceptances": 0,
+        "exact_failures": 0,
+        "top1_accuracy": 0.875,
+        "recall_at_3": 1.0,
+        "false_positive_rate": 0.0
+      }
+    }
+  ],
+  "selected_variant": {
+    "name": "rich_joined",
+    "query_variant": "rich",
+    "history_variant": "joined",
+    "threshold": 3.7249771912130707,
+    "calibration_metrics": {
+      "positive_cases": 8,
+      "no_match_cases": 2,
+      "top1_correct": 7,
+      "top3_correct": 8,
+      "false_positives": 0,
+      "forbidden_acceptances": 0,
+      "exact_failures": 0,
+      "top1_accuracy": 0.875,
+      "recall_at_3": 1.0,
+      "false_positive_rate": 0.0
+    },
+    "held_out_metrics": {
+      "positive_cases": 8,
+      "no_match_cases": 2,
+      "top1_correct": 7,
+      "top3_correct": 7,
+      "false_positives": 1,
+      "forbidden_acceptances": 1,
+      "exact_failures": 0,
+      "top1_accuracy": 0.875,
+      "recall_at_3": 0.875,
+      "false_positive_rate": 0.5
+    },
+    "selection_rationale": "Lowest calibration false-positive rate, then highest top-1 accuracy, highest recall@3, and lexicographic variant name."
+  },
+  "trace_system": "rich_joined",
+  "fallback_reason": null,
+  "cases": [
+    {
+      "id": "oom_exact",
+      "split": "calibration",
+      "expected_keys": [
+        "oom"
+      ],
+      "expected_mode": "exact",
+      "forbidden_keys": [],
+      "selected_mode": "exact",
+      "exact_ambiguous": false,
+      "rationale": "OOMKilled is an approved conclusive canonical state.",
+      "ranked": [
+        {
+          "knowledge_key": "oom",
+          "raw_score": 1.0,
+          "score": 1.0,
+          "source": "knowledge",
+          "source_id": "oom",
+          "matched_terms": []
+        }
+      ]
+    },
+    {
+      "id": "init_oom_exact",
+      "split": "calibration",
+      "expected_keys": [
+        "init_oom"
+      ],
+      "expected_mode": "exact",
+      "forbidden_keys": [],
+      "selected_mode": "exact",
+      "exact_ambiguous": false,
+      "rationale": "An init-container OOMKilled termination is conclusive.",
+      "ranked": [
+        {
+          "knowledge_key": "init_oom",
+          "raw_score": 1.0,
+          "score": 1.0,
+          "source": "knowledge",
+          "source_id": "init_oom",
+          "matched_terms": []
+        }
+      ]
+    },
+    {
+      "id": "config_error_exact",
+      "split": "calibration",
+      "expected_keys": [
+        "config_error"
+      ],
+      "expected_mode": "exact",
+      "forbidden_keys": [],
+      "selected_mode": "exact",
+      "exact_ambiguous": false,
+      "rationale": "CreateContainerConfigError with a missing Secret is conclusive.",
+      "ranked": [
+        {
+          "knowledge_key": "config_error",
+          "raw_score": 1.0,
+          "score": 1.0,
+          "source": "knowledge",
+          "source_id": "config_error",
+          "matched_terms": []
+        }
+      ]
+    },
+    {
+      "id": "image_pull_advisory",
+      "split": "calibration",
+      "expected_keys": [
+        "image_pull"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [
+        "oom"
+      ],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Image pull evidence should retrieve image guidance, not OOM guidance.",
+      "ranked": [
+        {
+          "knowledge_key": "image_pull",
+          "raw_score": 4.636681184671105,
+          "score": 4.636681184671105,
+          "source": "knowledge",
+          "source_id": "image_pull",
+          "matched_terms": [
+            "imagepullbackoff"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "failed_scheduling_advisory",
+      "split": "calibration",
+      "expected_keys": [
+        "failed_scheduling"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [
+        "crashloop"
+      ],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Scheduling evidence should retrieve scheduling guidance.",
+      "ranked": [
+        {
+          "knowledge_key": "failed_scheduling",
+          "raw_score": 4.767785853960735,
+          "score": 4.767785853960735,
+          "source": "knowledge",
+          "source_id": "failed_scheduling",
+          "matched_terms": [
+            "failedscheduling"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "outbox_not_draining",
+      "split": "calibration",
+      "expected_keys": [
+        "outbox_not_draining"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Pending outbox events should retrieve the outbox backlog pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "outbox_not_draining",
+          "raw_score": 13.911944747485764,
+          "score": 13.911944747485764,
+          "source": "history",
+          "source_id": "fixture-history-0008",
+          "matched_terms": [
+            "events",
+            "no",
+            "outbox",
+            "pending",
+            "published",
+            "rows"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "driver_geo_empty",
+      "split": "calibration",
+      "expected_keys": [
+        "driver_matching_returns_0_results"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "An empty driver geosearch should retrieve the matching-zero-results pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "driver_matching_returns_0_results",
+          "raw_score": 12.620510299467991,
+          "score": 12.620510299467991,
+          "source": "history",
+          "source_id": "fixture-history-0003",
+          "matched_terms": [
+            "available",
+            "drivers",
+            "empty",
+            "geosearch",
+            "returns"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generic_crashloop",
+      "split": "calibration",
+      "expected_keys": [
+        "crashloop"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [
+        "oom"
+      ],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "A generic startup crash should retrieve crashloop guidance without claiming OOM.",
+      "ranked": [
+        {
+          "knowledge_key": "init_crashloop",
+          "raw_score": 4.0501488320218755,
+          "score": 4.0501488320218755,
+          "source": "knowledge",
+          "source_id": "init_crashloop",
+          "matched_terms": [
+            "crashloopbackoff"
+          ]
+        },
+        {
+          "knowledge_key": "crashloop",
+          "raw_score": 3.7249771912130707,
+          "score": 3.7249771912130707,
+          "source": "knowledge",
+          "source_id": "crashloop",
+          "matched_terms": [
+            "crashloopbackoff"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tls_no_match",
+      "split": "calibration",
+      "expected_keys": [],
+      "expected_mode": "none",
+      "forbidden_keys": [
+        "crashloop",
+        "image_pull"
+      ],
+      "selected_mode": "none",
+      "exact_ambiguous": false,
+      "rationale": "The catalog has no approved TLS certificate diagnosis.",
+      "ranked": []
+    },
+    {
+      "id": "disk_no_match",
+      "split": "calibration",
+      "expected_keys": [],
+      "expected_mode": "none",
+      "forbidden_keys": [
+        "oom"
+      ],
+      "selected_mode": "none",
+      "exact_ambiguous": false,
+      "rationale": "The catalog has no approved disk-pressure diagnosis.",
+      "ranked": []
+    },
+    {
+      "id": "init_crashloop",
+      "split": "held_out",
+      "expected_keys": [
+        "init_crashloop"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [
+        "crashloop"
+      ],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Init-container crash evidence should retrieve the init-specific pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "init_crashloop",
+          "raw_score": 8.100297664043751,
+          "score": 8.100297664043751,
+          "source": "knowledge",
+          "source_id": "init_crashloop",
+          "matched_terms": [
+            "crashloopbackoff",
+            "init"
+          ]
+        },
+        {
+          "knowledge_key": "init_oom",
+          "raw_score": 3.8274066873616253,
+          "score": 3.8274066873616253,
+          "source": "knowledge",
+          "source_id": "init_oom",
+          "matched_terms": [
+            "init"
+          ]
+        },
+        {
+          "knowledge_key": "crashloop",
+          "raw_score": 3.7249771912130707,
+          "score": 3.7249771912130707,
+          "source": "knowledge",
+          "source_id": "crashloop",
+          "matched_terms": [
+            "crashloopbackoff"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scaled_to_zero",
+      "split": "held_out",
+      "expected_keys": [
+        "deployment_scaled_to_zero",
+        "zero_replica"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Zero desired and available replicas admits either approved zero-replica key.",
+      "ranked": [
+        {
+          "knowledge_key": "deployment_scaled_to_zero",
+          "raw_score": 8.343305973683655,
+          "score": 8.343305973683655,
+          "source": "history",
+          "source_id": "fixture-history-0002",
+          "matched_terms": [
+            "0",
+            "no",
+            "rps",
+            "traffic"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "xautoclaim_backlog",
+      "split": "held_out",
+      "expected_keys": [
+        "xautoclaim_pel_backlog"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Unacknowledged pending entries should retrieve the XAUTOCLAIM backlog pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "xautoclaim_pel_backlog",
+          "raw_score": 9.671943914077033,
+          "score": 9.671943914077033,
+          "source": "history",
+          "source_id": "fixture-history-0010",
+          "matched_terms": [
+            "acknowledged",
+            "messages",
+            "not",
+            "xautoclaim"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trip_timeout_storm",
+      "split": "held_out",
+      "expected_keys": [
+        "trip_offer_timeout_storm"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Immediate post-request cancellations should retrieve the offer-timeout pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "trip_offer_timeout_storm",
+          "raw_score": 17.60902971937982,
+          "score": 17.60902971937982,
+          "source": "history",
+          "source_id": "fixture-history-0009",
+          "matched_terms": [
+            "after",
+            "cancelled",
+            "deadline",
+            "immediately",
+            "offer",
+            "requested",
+            "trips"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "argocd_outofsync",
+      "split": "held_out",
+      "expected_keys": [
+        "argocd_app_stuck_outofsync"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [
+        "kargo_verification_failing"
+      ],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Persistent Argo CD drift should retrieve the Argo CD pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "argocd_app_stuck_outofsync",
+          "raw_score": 9.50289874612833,
+          "score": 9.50289874612833,
+          "source": "history",
+          "source_id": "fixture-history-0001",
+          "matched_terms": [
+            "infrastructure",
+            "outofsync",
+            "perpetually",
+            "vroom"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kargo_analysis_failed",
+      "split": "held_out",
+      "expected_keys": [
+        "kargo_verification_failing"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [
+        "argocd_app_stuck_outofsync"
+      ],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "A failed promotion analysis should retrieve the Kargo verification pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "kargo_verification_failing",
+          "raw_score": 14.699278062491828,
+          "score": 14.699278062491828,
+          "source": "history",
+          "source_id": "fixture-history-0005",
+          "matched_terms": [
+            "analysisrun",
+            "blocked",
+            "checks",
+            "failed",
+            "prometheus",
+            "promotion"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "high_error_rate",
+      "split": "held_out",
+      "expected_keys": [
+        "high_error_rate_on_ride_service"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "Elevated ride-service 5xx traffic should retrieve the high-error-rate pattern.",
+      "ranked": [
+        {
+          "knowledge_key": "high_error_rate_on_ride_service",
+          "raw_score": 17.597707021963938,
+          "score": 17.597707021963938,
+          "source": "history",
+          "source_id": "fixture-history-0004",
+          "matched_terms": [
+            "1",
+            "5xx",
+            "above",
+            "http",
+            "requests",
+            "status",
+            "total"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dns_no_match",
+      "split": "held_out",
+      "expected_keys": [],
+      "expected_mode": "none",
+      "forbidden_keys": [
+        "oom",
+        "config_error"
+      ],
+      "selected_mode": "advisory",
+      "exact_ambiguous": false,
+      "rationale": "DNS failure has no approved catalog diagnosis despite the generic wait state.",
+      "ranked": [
+        {
+          "knowledge_key": "init_crashloop",
+          "raw_score": 4.0501488320218755,
+          "score": 4.0501488320218755,
+          "source": "knowledge",
+          "source_id": "init_crashloop",
+          "matched_terms": [
+            "crashloopbackoff"
+          ]
+        },
+        {
+          "knowledge_key": "crashloop",
+          "raw_score": 3.7249771912130707,
+          "score": 3.7249771912130707,
+          "source": "knowledge",
+          "source_id": "crashloop",
+          "matched_terms": [
+            "crashloopbackoff"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sparse_no_match",
+      "split": "held_out",
+      "expected_keys": [],
+      "expected_mode": "none",
+      "forbidden_keys": [
+        "oom",
+        "crashloop"
+      ],
+      "selected_mode": "none",
+      "exact_ambiguous": false,
+      "rationale": "An alert name without supporting facts must not produce an approved diagnosis.",
+      "ranked": []
+    },
+    {
+      "id": "ambiguous_conclusive",
+      "split": "held_out",
+      "expected_keys": [
+        "init_oom",
+        "config_error"
+      ],
+      "expected_mode": "advisory",
+      "forbidden_keys": [],
+      "selected_mode": "none",
+      "exact_ambiguous": true,
+      "rationale": "Two competing conclusive states require advisory handling.",
+      "ranked": []
+    }
+  ]
+}
