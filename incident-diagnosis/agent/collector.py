@@ -29,8 +29,8 @@ def _prom_value(query: str):
         return None, "unavailable", str(exc)
 
 
-def collect_impact(service: str, namespace: str, window: str = "5m") -> dict:
-    """Collect truthful, service-scoped impact evidence from emitted Gin metrics."""
+def collect_impact(service: str, namespace: str, window: str = "5m", alert: dict | None = None) -> dict:
+    """Collect service-scoped HTTP impact, retaining the alert's own metric when applicable."""
     total_query = (
         f'sum(rate(gin_requests_total{{service="{service}",namespace="{namespace}"}}[{window}]))'
     )
@@ -64,7 +64,7 @@ def collect_impact(service: str, namespace: str, window: str = "5m") -> dict:
     error_percent = None if total is None or error_rate is None else (
         0.0 if total == 0.0 else error_rate / total * 100
     )
-    return {
+    impact = {
         "status": status,
         "window": window,
         "request_rate": total,
@@ -72,6 +72,15 @@ def collect_impact(service: str, namespace: str, window: str = "5m") -> dict:
         "p99_seconds": parsed["p99_seconds"],
         "errors": errors,
     }
+    if (alert or {}).get("alert_name") == "DLQEventsDetected":
+        metric_value = (alert or {}).get("metric_value")
+        threshold = (alert or {}).get("threshold")
+        if metric_value is not None:
+            impact["status"] = "available"
+            impact["triggering_metric"] = {
+                "name": "DLQ events", "value": metric_value, "threshold": threshold,
+            }
+    return impact
 
 def _prom(query: str) -> float:
     try:

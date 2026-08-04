@@ -38,6 +38,14 @@ def test_collect_log_evidence_returns_trace_fields():
     assert result["trace_id"] == TRACE_ID
 
 
+def test_collect_log_evidence_queries_a_pre_alert_lookback_window():
+    start = 1775000000
+    line = json.dumps({"level": "error", "service": "dispatch-service", "trace_id": TRACE_ID})
+    with patch("requests.get", return_value=_loki_response(line)) as get:
+        collect_log_evidence("dispatch-service", "vroom-dev", start, start + 900)
+    assert get.call_args.kwargs["params"]["start"] == str((start - 120) * 1_000_000_000)
+
+
 def test_correlate_trace_fetches_exact_log_trace_id():
     with patch("requests.get", return_value=_tempo_response()) as get:
         trace = correlate_trace(LOG_EVIDENCE)

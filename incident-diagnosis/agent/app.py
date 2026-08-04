@@ -318,10 +318,10 @@ def set_models():
 def investigate():
     data       = request.get_json(silent=True) or {}
     normalized = normalize_alert(data)
-    alert_name = data.get("alert_name", "UnknownAlert")
-    service    = data.get("service", "unknown")
-    namespace  = data.get("namespace", "vroom-dev")
-    pod        = data.get("pod", "")
+    alert_name = normalized["alert_name"]
+    service    = normalized["service"]
+    namespace  = normalized["namespace"]
+    pod        = normalized["pod"]
     debug      = request.args.get("debug", "").lower() == "true"
 
     seed_if_empty(rdb)
@@ -333,15 +333,14 @@ def investigate():
               "errors": ["alert has no starts_at; incident window unavailable"]}
     log_evidence = {"status": "unavailable", "errors": ["alert has no starts_at"]}
     trace_handoff = {"status": "unavailable"}
-    if data.get("starts_at"):
+    if normalized.get("starts_at") and not normalized.get("starts_at_error"):
         try:
-            start_s, end_s = incident_window(data["starts_at"], datetime.now(timezone.utc))
-            impact = collect_impact(service, namespace)
+            start_s, end_s = incident_window(normalized["starts_at"], datetime.now(timezone.utc))
+            impact = collect_impact(service, namespace, alert=normalized)
             log_evidence = collect_log_evidence(service, namespace, start_s, end_s)
             trace_handoff = correlate_trace(log_evidence)
         except (TypeError, ValueError) as exc:
             impact["errors"] = [str(exc)]
-    diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {})
 
     def _step(name: str, started_at: float, finished_at: float, **metadata) -> None:
         steps.append({
@@ -376,6 +375,12 @@ def investigate():
           classification=(provenance or {}).get("classification"))
 
     facts = {**facts, "template_diff": template_diff, "dependency": dependency, "provenance": provenance}
+    diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {
+        "kubernetes": facts["waiting_reason"],
+        "changes": template_diff,
+        "dependencies": dependency,
+    })
+    low_confidence = diagnosis_confidence["level"] in {"low", "unknown"}
 
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
           f"reason={facts['waiting_reason']!r} last_exit={facts['last_terminated_reason']!r} "
@@ -422,7 +427,7 @@ def investigate():
         "root_cause":     diagnosis["root_cause"],
         "dev_action":     diagnosis["dev_action"],
         "kubectl_hint":   diagnosis["kubectl_hint"],
-        "low_confidence": diagnosis.get("low_confidence", False),
+        "low_confidence": low_confidence,
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
     }
@@ -457,7 +462,7 @@ def investigate():
         "trusted_match":    trusted_match,
         "retrieval_support": retrieval.to_api_dict(debug=debug),
         **({"related_incidents_unconfirmed": related_incidents_unconfirmed} if not retrieval.accepted else {}),
-        "low_confidence":   diagnosis.get("low_confidence", False),
+        "low_confidence":   low_confidence,
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         **({"debug": {

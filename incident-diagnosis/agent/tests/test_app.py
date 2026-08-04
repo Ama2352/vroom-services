@@ -402,7 +402,45 @@ def test_investigate_includes_low_confidence(client):
             content_type="application/json")
     body = r.get_json()
     assert "low_confidence" in body
-    assert body["low_confidence"] is False
+    assert body["low_confidence"] is True
+
+
+def test_investigate_uses_evidence_confidence_for_low_confidence(client):
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.collect_provenance", return_value=None), \
+         patch("app.interpret", return_value={**_FAKE_DIAGNOSIS, "low_confidence": False}), \
+         patch("app.assess_confidence", return_value={"level": "unknown", "reasons": [], "missing_evidence": []}), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate",
+            data=json.dumps({"alert_name": "KubePodNotReady", "service": "ride", "namespace": "vroom-dev"}),
+            content_type="application/json")
+    assert r.get_json()["low_confidence"] is True
+
+
+def test_investigate_passes_dlq_alert_metric_into_impact_collection(client):
+    impact = {"status": "available", "window": "5m", "request_rate": None,
+              "error_rate_percent": None, "p99_seconds": None, "errors": [],
+              "triggering_metric": {"name": "DLQ events", "value": 1.0, "threshold": 0.0}}
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.collect_provenance", return_value=None), \
+         patch("app.collect_impact", return_value=impact) as collect_impact, \
+         patch("app.collect_log_evidence", return_value={"status": "found", "trace_id": "a" * 32}), \
+         patch("app.correlate_trace", return_value={"status": "correlated"}), \
+         patch("app.interpret", return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate", data=json.dumps({
+            "alert_name": "DLQEventsDetected", "service": "dispatch-service", "namespace": "vroom-dev",
+            "starts_at": "2026-08-04T16:14:40Z", "metric_value": 1, "threshold": 0,
+        }), content_type="application/json")
+    assert collect_impact.call_args.kwargs["alert"]["metric_value"] == 1.0
+    assert r.get_json()["diagnosis_confidence"]["level"] == "high"
+    assert r.get_json()["low_confidence"] is False
 
 
 def test_investigate_forwards_pod_to_interpret(client):
