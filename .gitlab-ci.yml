@@ -36,7 +36,7 @@ test-kubectl-executor:
   image: python:3.12-slim
   script:
     - cd incident-diagnosis/kubectl-executor
-    - python -m pip install -r requirements.txt
+    - python -m pip install --root-user-action=ignore -r requirements.txt "pytest>=8,<10"
     - python -m pytest tests/test_named_tools.py -q
 
 test-n8n-sources:
