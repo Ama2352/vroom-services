@@ -104,6 +104,22 @@ gosec:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
+test-incident-agent:
+  stage: test
+  image: python:3.12-slim
+  cache:
+    key: "incident-agent-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - incident-diagnosis/agent/.cache/pip/
+  script:
+    - cd incident-diagnosis/agent
+    - python -m pip install --cache-dir .cache/pip -r requirements.txt -r requirements-test.txt
+    - python -m pytest tests/test_app.py tests/test_interpreter.py tests/test_memory.py tests/test_retrieval_*.py -q
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [incident-diagnosis/agent/**/*]
+    - if: $CI_PIPELINE_SOURCE == "web"
+
 # ---------------------------------------------------------------------------
 # STAGE 2: integration — testcontainers tests (Docker-in-Docker required)
 # ---------------------------------------------------------------------------
@@ -409,6 +425,18 @@ build-push-incident-agent:
   variables:
     SERVICE_NAME: incident-agent
     SERVICE_PATH: incident-diagnosis/agent
+  needs: [test-incident-agent]
+  script:
+    - export IMG_BASE="${IMG_PREFIX}-${SERVICE_NAME}"
+    - export IMG="$IMG_BASE:ci-$CI_COMMIT_SHORT_SHA"
+    - cd "$SERVICE_PATH"
+    - docker pull "$IMG_BASE:latest" || true
+    - docker build --build-arg BASE_IMAGE_PREFIX="public.ecr.aws/docker/library/" --cache-from "$IMG_BASE:latest" --target verification -t "$IMG_BASE:verification-$CI_COMMIT_SHORT_SHA" .
+    - docker build --build-arg BASE_IMAGE_PREFIX="public.ecr.aws/docker/library/" --cache-from "$IMG_BASE:latest" --target production -t "$IMG" .
+    - test "$(docker image inspect "$IMG" --format '{{.Size}}')" -le 524288000
+    - docker push "$IMG"
+    - docker tag "$IMG" "$IMG_BASE:latest"
+    - docker push "$IMG_BASE:latest"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
       changes: [incident-diagnosis/agent/**/*]
