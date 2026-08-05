@@ -21,7 +21,7 @@ from memory import (search_memory as memory_search,
 from collector import collect_bundle, collect_impact
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace
-from confidence import assess_confidence
+from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
@@ -416,6 +416,9 @@ def investigate():
         groq_key=GROQ_KEY,
         openrouter_key=OPENROUTER_KEY,
         pod=pod,
+    )
+    diagnosis["root_cause"] = align_root_cause_confidence(
+        diagnosis["root_cause"], diagnosis_confidence,
     )
     steps.extend(diagnosis.pop("_step_log", []))
 

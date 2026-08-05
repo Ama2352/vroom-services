@@ -18,7 +18,7 @@ def _error(status, **fields):
 
 def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
     query_start_epoch_s = start_epoch_s - PRE_ALERT_LOOKBACK_SECONDS
-    query = f'{{app="{service}",namespace="{namespace}"}} | json | level="error"'
+    query = f'{{app="{service}",namespace="{namespace}"}} | json | level=~"(?i)^error$"'
     try:
         response = requests.get(LOKI_URL, params={
             "query": query, "start": str(int(query_start_epoch_s * 1_000_000_000)),
@@ -34,7 +34,7 @@ def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
                 except (TypeError, json.JSONDecodeError):
                     continue
                 trace_id = record.get("trace_id", "")
-                if (record.get("level") != "error" or record.get("service", service) != service
+                if (str(record.get("level", "")).lower() != "error" or record.get("service", service) != service
                         or not TRACE_ID_RE.fullmatch(trace_id)):
                     continue
                 candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), record))

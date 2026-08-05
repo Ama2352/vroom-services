@@ -443,6 +443,40 @@ def test_investigate_passes_dlq_alert_metric_into_impact_collection(client):
     assert r.get_json()["low_confidence"] is False
 
 
+def test_investigate_high_confidence_replaces_insufficient_evidence_wording(client):
+    diagnosis = {**_FAKE_DIAGNOSIS,
+                 "root_cause": "Insufficient evidence to confirm — observed: PostgreSQL unreachable"}
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.collect_provenance", return_value=None), \
+         patch("app.interpret", return_value=diagnosis), \
+         patch("app.assess_confidence", return_value={"level": "high", "reasons": [], "missing_evidence": []}), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate", data=json.dumps({
+            "alert_name": "DLQEventsDetected", "service": "dispatch-service", "namespace": "vroom-dev",
+        }), content_type="application/json")
+    assert r.get_json()["root_cause"] == "Confirmed by metrics, structured log, and trace — observed: PostgreSQL unreachable"
+
+
+def test_investigate_medium_confidence_uses_probable_diagnosis_wording(client):
+    diagnosis = {**_FAKE_DIAGNOSIS,
+                 "root_cause": "Insufficient evidence to confirm — observed: PostgreSQL unreachable"}
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.collect_provenance", return_value=None), \
+         patch("app.interpret", return_value=diagnosis), \
+         patch("app.assess_confidence", return_value={"level": "medium", "reasons": [], "missing_evidence": []}), \
+         patch("app._reflect_and_store"):
+        r = client.post("/investigate", data=json.dumps({
+            "alert_name": "DLQEventsDetected", "service": "dispatch-service", "namespace": "vroom-dev",
+        }), content_type="application/json")
+    assert r.get_json()["root_cause"] == "Probable diagnosis — observed: PostgreSQL unreachable"
+
+
 def test_investigate_forwards_pod_to_interpret(client):
     with patch("app.collect_bundle",         side_effect=_fake_bundle), \
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \

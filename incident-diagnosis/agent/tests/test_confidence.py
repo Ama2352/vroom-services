@@ -22,3 +22,11 @@ def test_confidence_table(impact, log, trace, expected):
     result = assess_confidence(ALERT, impact, log, trace, FACTS)
     assert result["level"] == expected
     assert result["reasons"] or result["missing_evidence"]
+
+
+def test_confidence_requires_a_scoped_log_before_returning_medium():
+    result = assess_confidence(
+        ALERT, IMPACT, {"status": "no_match"}, {"status": "no_trace_id"},
+        {"changes": {"image_changed": True}},
+    )
+    assert result["level"] == "low"
