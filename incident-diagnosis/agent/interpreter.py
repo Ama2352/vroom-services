@@ -46,7 +46,7 @@ REQUIRED_KEYS = {"root_cause", "dev_action", "kubectl_hint"}
 def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
                             facts: dict, bundle: str,
                             retrieval_result: RetrievalResult | None,
-                            pod: str) -> str:
+                            pod: str, chain: dict | None = None) -> str:
     lines = [
         f"Alert: {alert_name}",
         f"Service: {service}",
@@ -133,12 +133,23 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
             "",
             instruction,
         ]
+    if chain is not None:
+        lines += ["", "Citable evidence IDs (use these exact strings only):"]
+        for role in ("trigger", "primary", "causal_context", "consequence", "secondary"):
+            for item in chain.get(role, []):
+                lines.append(f"  - {item['id']} (role: {role})")
+        lines += [
+            "Cite every trigger and primary item used for the diagnosis in evidence_refs. "
+            "Do not copy IDs for evidence that your answer did not actually use.",
+        ]
     lines += [
         "",
         GROUNDING_RULE,
         "",
         "Output exactly this JSON (no markdown, no explanation):",
-        '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}',
+        ('{"root_cause":"...","dev_action":"...","kubectl_hint":"...",'
+         '"evidence_refs":["exact-evidence-id"]}' if chain is not None else
+         '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}'),
     ]
     return "\n".join(lines)
 
@@ -248,7 +259,8 @@ def _parse_output(text: str) -> dict | None:
     return result
 
 
-def _build_refine_prompt(original_prompt: str, diagnosis: dict, issues: list) -> str:
+def _build_refine_prompt(original_prompt: str, diagnosis: dict, issues: list,
+                         require_evidence_refs: bool = False) -> str:
     lines = [
         original_prompt,
         "",
@@ -263,7 +275,9 @@ def _build_refine_prompt(original_prompt: str, diagnosis: dict, issues: list) ->
         "",
         "Fix ONLY these issues. Keep all other fields the same.",
         "Output exactly this JSON (no markdown, no explanation):",
-        '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}',
+        ('{"root_cause":"...","dev_action":"...","kubectl_hint":"...",'
+         '"evidence_refs":["exact-evidence-id"]}' if require_evidence_refs else
+         '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}'),
     ]
     return "\n".join(lines)
 
@@ -335,7 +349,7 @@ def interpret(
                 "_step_log": [{"type": "step", "name": "exact_conclusive", "metadata": {"retrieval_mode": retrieval_result.mode.value}}],
             }
     prompt   = _build_grounded_prompt(alert_name, service, namespace,
-                                      facts, bundle, retrieval_result, pod)
+                                      facts, bundle, retrieval_result, pod, chain=chain)
     messages = [{"role": "user", "content": prompt}]
     step_log = []
 
@@ -361,11 +375,6 @@ def interpret(
         return result
 
     if chain is not None:
-        # The chain is the sole source of valid references for the two gates.
-        phase1.setdefault("evidence_refs", [
-            item["id"] for role in ("trigger", "primary") for item in chain.get(role, [])
-        ])
-
         def critic_llm(critic_prompt, temperature=0.0):
             return _run_llm([{"role": "user", "content": critic_prompt}], _llm, models,
                             groq_key, openrouter_key, temperature=temperature)
@@ -383,13 +392,14 @@ def interpret(
             phase1["low_confidence"] = False
             phase1["_step_log"] = step_log
             return phase1
-        refine_prompt = _build_refine_prompt(prompt, phase1, hard.issues + critic.issues)
+        refine_prompt = _build_refine_prompt(
+            prompt, phase1, hard.issues + critic.issues, require_evidence_refs=True,
+        )
         refined_raw = _run_llm([{"role": "user", "content": refine_prompt}], _llm, models,
                                groq_key, openrouter_key, temperature=REFINE_TEMPERATURE)
         refined = _parse_output(refined_raw)
         _log_step("llm_refine", time.time(), time.time(), parsed=refined is not None)
         if refined is not None:
-            refined.setdefault("evidence_refs", phase1.get("evidence_refs", []))
             hard2, critic2 = run_gates(refined)
             _log_step("hard_validation_refine", time.time(), time.time(), passed=hard2.passed, issues=hard2.issues)
             _log_step("semantic_critic_refine", time.time(), time.time(), passed=critic2.passed, status=critic2.status, issues=critic2.issues)

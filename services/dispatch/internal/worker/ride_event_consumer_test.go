@@ -1,18 +1,34 @@
 package worker
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
-func TestUnknownEventIsAckedOnlyAfterMaxRetries(t *testing.T) {
-	if shouldAckEvent("Trip.Requested.v2", 1) {
-		t.Fatal("unknown event was acknowledged before retry budget was exhausted")
-	}
-	if !shouldAckEvent("Trip.Requested.v2", maxEventRetries) {
-		t.Fatal("unknown event was not acknowledged after retry budget was exhausted")
+func TestUnsupportedContractIsPermanentFailure(t *testing.T) {
+	result := classifyMessage("Trip.Requested.v2", nil)
+	if result.disposition != dispositionPermanentFailure {
+		t.Fatalf("unsupported contract disposition = %v, want permanent failure", result.disposition)
 	}
 }
 
-func TestKnownEventIsAckedImmediately(t *testing.T) {
-	if !shouldAckEvent("Trip.Requested", 1) {
-		t.Fatal("known event was not acknowledged immediately")
+func TestKnownHandlerDependencyErrorIsRetryable(t *testing.T) {
+	result := classifyMessage("Trip.Requested", errors.New("redis timeout"))
+	if result.disposition != dispositionRetryableFailure {
+		t.Fatalf("known handler dependency error disposition = %v, want retryable failure", result.disposition)
+	}
+}
+
+func TestInvalidKnownPayloadIsPermanentFailure(t *testing.T) {
+	result := classifyMessage("Trip.Requested", permanentMessageError{cause: errors.New("invalid payload")})
+	if result.disposition != dispositionPermanentFailure {
+		t.Fatalf("invalid known payload disposition = %v, want permanent failure", result.disposition)
+	}
+}
+
+func TestKnownHandlerSuccessIsTerminalSuccess(t *testing.T) {
+	result := classifyMessage("Trip.Requested", nil)
+	if result.disposition != dispositionSuccess {
+		t.Fatalf("known handler success disposition = %v, want success", result.disposition)
 	}
 }

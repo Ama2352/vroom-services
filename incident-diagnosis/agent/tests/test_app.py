@@ -21,6 +21,20 @@ import pytest
 from retrieval.models import RetrievalDocument, RetrievalResult
 
 
+def test_event_contract_change_matches_unknown_event_signature():
+    assert agent_app._change_matches_primary_failure(
+        {"env_diff": [{"key": "EVENT_CONTRACT_VERSION", "old_value": "v1", "new_value": "v2"}]},
+        {"message": 'unknown event type "Trip.Requested.v2"'},
+    )
+
+
+def test_unrelated_env_change_does_not_match_unknown_event_signature():
+    assert not agent_app._change_matches_primary_failure(
+        {"env_diff": [{"key": "LOG_LEVEL", "old_value": "info", "new_value": "debug"}]},
+        {"message": 'unknown event type "Trip.Requested.v2"'},
+    )
+
+
 def _none_retrieval():
     return RetrievalResult.none(corpus_version=1)
 
@@ -441,6 +455,52 @@ def test_investigate_passes_dlq_alert_metric_into_impact_collection(client):
     assert collect_impact.call_args.kwargs["alert"]["metric_value"] == 1.0
     assert r.get_json()["diagnosis_confidence"]["level"] == "high"
     assert r.get_json()["low_confidence"] is False
+
+
+def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_service(client):
+    calls = []
+    ride_diff = {
+        "changed_at": "2026-08-06T10:30:00Z",
+        "env_changed": True,
+        "env_diff": [{"key": "EVENT_CONTRACT_VERSION", "old_value": "v1", "new_value": "v2"}],
+    }
+
+    def collect_change(service, namespace):
+        calls.append(("change", service, namespace))
+        return ride_diff if service == "ride-service" else None
+
+    def collect_provenance(service, namespace, template_diff, dependency):
+        calls.append(("provenance", service, namespace))
+        assert template_diff["service"] == "ride-service"
+        return {"classification": "gitops-commit", "changed_at": "2026-08-06T10:30:00Z"}
+
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_impact", return_value={"status": "available", "errors": []}), \
+         patch("app.collect_log_evidence", return_value={
+             "status": "found", "service": "dispatch-service", "namespace": "vroom-dev",
+             "message": 'unknown event type "Trip.Requested.v2"', "trace_id": "a" * 32,
+         }), \
+         patch("app.correlate_trace", return_value={
+             "status": "correlated", "trace_id": "a" * 32,
+             "involved_services": ["ride-service", "dispatch-service"],
+         }), \
+         patch("app.collect_change_evidence", side_effect=collect_change), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.collect_provenance", side_effect=collect_provenance), \
+         patch("app.interpret", return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        response = client.post("/investigate?debug=true", data=json.dumps({
+            "alert_name": "DLQEventsDetected", "incident_kind": "dlq",
+            "service": "dispatch-service", "namespace": "vroom-dev",
+            "starts_at": "2026-08-06T10:34:32Z", "metric_value": 1,
+        }), content_type="application/json")
+
+    assert response.status_code == 200
+    assert calls[0] == ("change", "ride-service", "vroom-dev")
+    assert ("provenance", "ride-service", "vroom-dev") in calls
+    assert response.get_json()["debug"]["facts"]["template_diff"]["service"] == "ride-service"
+    assert response.get_json()["debug"]["facts"]["provenance"]["causal_status"]["status"] == "causal_candidate"
 
 
 def test_investigate_high_confidence_replaces_insufficient_evidence_wording(client):

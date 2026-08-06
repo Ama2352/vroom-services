@@ -18,7 +18,16 @@ variables:
 
 test-dispatch-correlation:
   extends: .go_consumer_test
-  variables: { SERVICE_PATH: services/dispatch }
+  services:
+    - name: redis:7-alpine
+      alias: redis
+  variables:
+    SERVICE_PATH: services/dispatch
+    REDIS_TEST_ADDR: redis:6379
+  script:
+    - cd "$SERVICE_PATH"
+    - go test ./internal/telemetry ./internal/worker -v
+    - go test -tags=integration ./internal/worker -run 'Test(UnsupportedContract|RetryableKnownEvent)' -count=1 -v
 
 test-notification-correlation:
   extends: .go_consumer_test
@@ -37,7 +46,7 @@ test-incident-agent:
   script:
     - cd incident-diagnosis/agent
     - python -m pip install -r requirements.txt -r requirements-test.txt
-    - python -m pytest tests/test_alerting.py tests/test_collector.py tests/test_confidence.py tests/test_correlation.py tests/test_app.py tests/test_memory.py -q
+    - python -m pytest tests/test_alerting.py tests/test_collector.py tests/test_confidence.py tests/test_correlation.py tests/test_diagnostics.py tests/test_evidence.py tests/test_interpreter.py tests/test_validation.py tests/test_app.py tests/test_memory.py -q
 
 test-kubectl-executor:
   stage: test

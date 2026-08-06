@@ -48,6 +48,33 @@ def test_collect_log_evidence_accepts_uppercase_structured_error_level():
     assert 'level=~"(?i)^error$"' in get.call_args.kwargs["params"]["query"]
 
 
+def test_collect_log_evidence_normalizes_go_slog_msg_field():
+    line = json.dumps({"time": "2026-08-06T10:34:31Z", "level": "ERROR",
+                       "service": "dispatch-service", "operation": "dispatch.consume",
+                       "msg": 'unknown event type "Trip.Requested.v2"', "trace_id": TRACE_ID,
+                       "span_id": "00f067aa0ba902b7", "event_id": "1786012471819-0"})
+    with patch("requests.get", return_value=_loki_response(line)):
+        result = collect_log_evidence("dispatch-service", "vroom-dev", 1775038510, 1775039410)
+    assert result["message"] == 'unknown event type "Trip.Requested.v2"'
+    assert derive_log_error(result) == 'unknown event type "Trip.Requested.v2"'
+
+
+def test_collect_log_evidence_selects_nearest_record_not_last_record_in_stream():
+    near = json.dumps({"level": "ERROR", "service": "dispatch-service", "operation": "dispatch.consume",
+                       "msg": "nearest failure", "trace_id": TRACE_ID})
+    far = json.dumps({"level": "ERROR", "service": "dispatch-service", "operation": "dispatch.consume",
+                      "msg": "far failure", "trace_id": "a" * 32})
+    response = MagicMock(ok=True)
+    response.json.return_value = {"data": {"result": [{"values": [
+        ["1775038510000000000", near],
+        ["1775038990000000000", far],
+    ]}]}}
+    with patch("requests.get", return_value=response):
+        result = collect_log_evidence("dispatch-service", "vroom-dev", 1775038511, 1775039410)
+    assert result["message"] == "nearest failure"
+    assert result["trace_id"] == TRACE_ID
+
+
 def test_collect_log_evidence_queries_a_pre_alert_lookback_window():
     start = 1775000000
     line = json.dumps({"level": "error", "service": "dispatch-service", "trace_id": TRACE_ID})
@@ -62,6 +89,22 @@ def test_correlate_trace_fetches_exact_log_trace_id():
     assert get.call_args.args[0].endswith(f"/api/traces/{TRACE_ID}")
     assert trace["status"] == "correlated"
     assert trace["error_service"] == "dispatch-service"
+
+
+def test_correlate_trace_returns_upstream_services_from_same_trace():
+    response = _tempo_response()
+    response.json.return_value["batches"].insert(0, {
+        "resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "ride-service"}}]},
+        "scopeSpans": [{"spans": [{
+            "traceId": TRACE_ID, "spanId": "1111111111111111", "name": "POST /api/v1/trips",
+            "startTimeUnixNano": "1775038509000000000", "endTimeUnixNano": "1775038510000000000",
+            "status": {"code": "STATUS_CODE_OK"}, "events": [],
+        }]}],
+    })
+    with patch("requests.get", return_value=response):
+        trace = correlate_trace(LOG_EVIDENCE)
+    assert trace["status"] == "correlated"
+    assert trace["involved_services"] == ["ride-service", "dispatch-service"]
 
 
 def test_correlate_trace_reports_conflict_when_error_is_unrelated():

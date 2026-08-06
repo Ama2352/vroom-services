@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -29,8 +30,48 @@ const (
 
 var dlqEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "vroom_dlq_events_total",
-	Help: "Total number of events sent to the DLQ after exhausting retries",
+	Help: "Total number of events sent to the DLQ after permanent failure or exhausted retries",
 }, []string{"event_type"})
+
+type messageDisposition uint8
+
+const (
+	dispositionSuccess messageDisposition = iota
+	dispositionRetryableFailure
+	dispositionPermanentFailure
+)
+
+type messageResult struct {
+	disposition messageDisposition
+	err         error
+	terminal    bool
+}
+
+type permanentMessageError struct {
+	cause error
+}
+
+func (e permanentMessageError) Error() string { return e.cause.Error() }
+func (e permanentMessageError) Unwrap() error { return e.cause }
+
+func classifyMessage(eventType string, handlerErr error) messageResult {
+	if !isKnownEventType(eventType) {
+		return messageResult{
+			disposition: dispositionPermanentFailure,
+			err:         fmt.Errorf("unknown event type %q", eventType),
+			terminal:    true,
+		}
+	}
+	if handlerErr == nil {
+		return messageResult{disposition: dispositionSuccess, terminal: true}
+	}
+
+	var permanentErr permanentMessageError
+	if errors.As(handlerErr, &permanentErr) {
+		return messageResult{disposition: dispositionPermanentFailure, err: handlerErr, terminal: true}
+	}
+	return messageResult{disposition: dispositionRetryableFailure, err: handlerErr}
+}
 
 type RideEventConsumer struct {
 	redisClient     *redis.Client
@@ -73,7 +114,7 @@ func (c *RideEventConsumer) Start(ctx context.Context) {
 
 func (c *RideEventConsumer) consume(ctx context.Context) {
 	// Reclaim messages stuck in PEL > 30 s (handles consumer crash mid-processing)
-	autoclaimed, _, _ := c.redisClient.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+	autoclaimed, _, err := c.redisClient.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 		Stream:   c.streamName,
 		Group:    c.groupName,
 		Consumer: c.consumerID,
@@ -81,33 +122,11 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 		Start:    "0-0",
 		Count:    10,
 	}).Result()
+	if err != nil && err != redis.Nil && !strings.Contains(err.Error(), "NOGROUP") {
+		log.Printf("Error reclaiming Redis Stream messages: %v", err)
+	}
 	for _, msg := range autoclaimed {
-		eventType := stringValue(msg.Values["type"])
-		eventID := ""
-		if val, ok := msg.Values["id"]; ok {
-			eventID = val.(string)
-		} else {
-			eventID = msg.ID
-		}
-		key := "processed_event:dispatch:" + eventID
-		var setErr error = redis.Nil
-		if isKnownEventType(eventType) {
-			setErr = c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
-				TTL:  24 * time.Hour,
-				Mode: "NX",
-			}).Err()
-		}
-		if setErr != nil && setErr != redis.Nil {
-			log.Printf("[DISPATCH ERROR] Failed to check idempotency for reclaimed event %s: %v", eventID, setErr)
-		}
-		if setErr == nil {
-			if shouldAck := c.processWithDLQ(ctx, msg); shouldAck {
-				c.redisClient.XAck(ctx, c.streamName, c.groupName, msg.ID)
-			}
-		} else if setErr == redis.Nil {
-			log.Printf("[IDEMPOTENCY] Reclaimed event %s already processed by dispatch, skipping", eventID)
-		}
-		c.redisClient.XAck(ctx, c.streamName, c.groupName, msg.ID)
+		c.consumeMessage(ctx, msg, true)
 	}
 
 	// Read from group
@@ -137,35 +156,47 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 
 	for _, stream := range entries {
 		for _, message := range stream.Messages {
-			eventType := stringValue(message.Values["type"])
-			// Idempotency check using SETNX on Event ID
-			eventID := ""
-			if val, ok := message.Values["id"]; ok {
-				eventID = val.(string)
-			} else {
-				eventID = message.ID // Fallback to stream ID
-			}
-
-			key := "processed_event:dispatch:" + eventID
-			var setErr error = redis.Nil
-			if isKnownEventType(eventType) {
-				setErr = c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
-					TTL:  24 * time.Hour,
-					Mode: "NX",
-				}).Err()
-			}
-			if setErr != nil && setErr != redis.Nil {
-				log.Printf("[DISPATCH ERROR] Failed to check idempotency for event %s: %v", eventID, setErr)
-			} else if setErr == redis.Nil {
-				log.Printf("[IDEMPOTENCY] Event %s already processed by dispatch, skipping", eventID)
-				c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
-				continue
-			}
-
-			if shouldAck := c.processWithDLQ(ctx, message); shouldAck {
-				c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
-			}
+			c.consumeMessage(ctx, message, false)
 		}
+	}
+}
+
+func eventIDForMessage(msg redis.XMessage) string {
+	if eventID := stringValue(msg.Values["id"]); eventID != "" {
+		return eventID
+	}
+	return msg.ID
+}
+
+func (c *RideEventConsumer) consumeMessage(ctx context.Context, msg redis.XMessage, reclaimed bool) {
+	eventID := eventIDForMessage(msg)
+	processedKey := "processed_event:dispatch:" + eventID
+	processed, err := c.redisClient.Exists(ctx, processedKey).Result()
+	if err != nil {
+		log.Printf("[DISPATCH ERROR] Failed to check terminal state for event %s: %v", eventID, err)
+		return
+	}
+	if processed > 0 {
+		log.Printf("[IDEMPOTENCY] Event %s already reached a terminal state, skipping", eventID)
+		_ = c.redisClient.XAck(ctx, c.streamName, c.groupName, msg.ID).Err()
+		return
+	}
+
+	result := c.processWithDLQ(ctx, msg)
+	if !result.terminal {
+		return
+	}
+
+	if err := c.redisClient.Set(ctx, processedKey, "true", 24*time.Hour).Err(); err != nil {
+		log.Printf("[DISPATCH ERROR] Failed to record terminal state for event %s: %v", eventID, err)
+		return
+	}
+	if err := c.redisClient.XAck(ctx, c.streamName, c.groupName, msg.ID).Err(); err != nil {
+		log.Printf("[DISPATCH ERROR] Failed to acknowledge event %s: %v", eventID, err)
+		return
+	}
+	if reclaimed {
+		log.Printf("[RECOVERY] Reclaimed event %s reached terminal state and was acknowledged", eventID)
 	}
 }
 
@@ -178,57 +209,79 @@ func isKnownEventType(eventType string) bool {
 	}
 }
 
-func shouldAckEvent(eventType string, retries int64) bool {
-	return isKnownEventType(eventType) || retries >= maxEventRetries
-}
-
-func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessage) bool {
+func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessage) messageResult {
 	ctx = extractMessageContext(ctx, msg)
 	eventType := stringValue(msg.Values["type"])
 	ctx, span := otel.Tracer("dispatch-consumer").Start(ctx, "dispatch.consume."+eventType)
 	defer span.End()
 
+	var handlerErr error
+	if isKnownEventType(eventType) {
+		handlerErr = c.handleMessage(ctx, msg)
+	}
+	result := classifyMessage(eventType, handlerErr)
+	if result.disposition == dispositionSuccess {
+		_ = c.redisClient.Del(ctx, "event:retry:"+msg.ID).Err()
+		return result
+	}
+
+	span.RecordError(result.err)
+	span.SetStatus(codes.Error, result.err.Error())
+	logger := c.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	if result.disposition == dispositionPermanentFailure {
+		dispatchtelemetry.LogError(ctx, logger, "dispatch.consume", result.err, "event_id", msg.ID, "failure_class", "permanent")
+		if err := c.moveToDLQ(ctx, msg, result.err, 0); err != nil {
+			return messageResult{disposition: dispositionRetryableFailure, err: fmt.Errorf("write permanent failure to DLQ: %w", err)}
+		}
+		return result
+	}
+
 	retryKey := "event:retry:" + msg.ID
-	retries, _ := c.redisClient.Incr(ctx, retryKey).Result()
-	c.redisClient.Expire(ctx, retryKey, 24*time.Hour)
-
-	c.handleMessage(ctx, msg)
-
-	known := isKnownEventType(eventType)
-
-	if !known {
-		err := fmt.Errorf("unknown event type %q", eventType)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		logger := c.logger
-		if logger == nil {
-			logger = slog.Default()
-		}
-		dispatchtelemetry.LogError(ctx, logger, "dispatch.consume", err, "event_id", msg.ID, "retry", retries)
+	retries, err := c.redisClient.Incr(ctx, retryKey).Result()
+	if err != nil {
+		return messageResult{disposition: dispositionRetryableFailure, err: fmt.Errorf("increment retry state: %w", err)}
 	}
-	if !known && retries >= maxEventRetries {
-		payload := ""
-		if v, ok := msg.Values["payload"]; ok {
-			payload = v.(string)
-		}
-		_ = c.redisClient.XAdd(ctx, &redis.XAddArgs{
-			Stream: dlqStreamName,
-			Values: map[string]any{
-				"original_id": msg.ID,
-				"event_type":  eventType,
-				"error":       fmt.Sprintf("unknown event type after %d retries", retries),
-				"payload":     payload,
-				"failed_at":   time.Now().Format(time.RFC3339),
-			},
-		}).Err()
-		_ = c.redisClient.Del(ctx, retryKey).Err()
-		dlqEventsTotal.WithLabelValues(eventType).Inc()
-		log.Printf("[DLQ] Event %s (type=%s) moved to DLQ after %d retries", msg.ID, eventType, retries)
+	_ = c.redisClient.Expire(ctx, retryKey, 24*time.Hour).Err()
+	dispatchtelemetry.LogError(ctx, logger, "dispatch.consume", result.err, "event_id", msg.ID, "failure_class", "retryable", "retry", retries)
+	if retries < maxEventRetries {
+		return result
 	}
-	return shouldAckEvent(eventType, retries)
+	if err := c.moveToDLQ(ctx, msg, result.err, retries); err != nil {
+		return messageResult{disposition: dispositionRetryableFailure, err: fmt.Errorf("write exhausted failure to DLQ: %w", err)}
+	}
+	_ = c.redisClient.Del(ctx, retryKey).Err()
+	result.terminal = true
+	return result
 }
 
-func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) {
+func (c *RideEventConsumer) moveToDLQ(ctx context.Context, msg redis.XMessage, cause error, retries int64) error {
+	values := map[string]any{
+		"original_id":    msg.ID,
+		"event_id":       eventIDForMessage(msg),
+		"event_type":     stringValue(msg.Values["type"]),
+		"error":          cause.Error(),
+		"payload":        stringValue(msg.Values["payload"]),
+		"correlation_id": stringValue(msg.Values["correlation_id"]),
+		"traceparent":    stringValue(msg.Values["traceparent"]),
+		"tracestate":     stringValue(msg.Values["tracestate"]),
+		"failed_at":      time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if retries > 0 {
+		values["retries"] = retries
+	}
+	if err := c.redisClient.XAdd(ctx, &redis.XAddArgs{Stream: dlqStreamName, Values: values}).Err(); err != nil {
+		return err
+	}
+	dlqEventsTotal.WithLabelValues(stringValue(msg.Values["type"])).Inc()
+	log.Printf("[DLQ] Event %s (type=%s) moved to DLQ: %v", msg.ID, stringValue(msg.Values["type"]), cause)
+	return nil
+}
+
+func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) error {
 	// Robust field extraction
 	getVal := func(key string) string {
 		if val, ok := msg.Values[key]; ok {
@@ -252,7 +305,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		var data map[string]interface{}
 		if err := json.Unmarshal([]byte(payload), &data); err != nil {
 			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal payload for trip %s: %v", aggregateID, err)
-			return
+			return permanentMessageError{cause: fmt.Errorf("invalid %s payload: %w", eventType, err)}
 		}
 
 		tripID := aggregateID
@@ -263,11 +316,14 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		if eventType == "Trip.OfferRejected" {
 			driverID, _ := data["driver_id"].(string)
 			log.Printf("[REJECT] Driver %s rejected Trip %s. Recording rejection and re-matching...", driverID, tripID)
-			_ = c.dispatchService.RecordRejection(ctx, tripID, driverID)
+			if err := c.dispatchService.RecordRejection(ctx, tripID, driverID); err != nil {
+				return fmt.Errorf("record rejection for trip %s: %w", tripID, err)
+			}
 			// Saga compensation: release driver reservation so they can be matched again
 			if driverID != "" {
 				if err := c.dispatchService.ReleaseDriver(ctx, driverID); err != nil {
 					log.Printf("[SAGA COMPENSATE] Failed to release driver %s: %v", driverID, err)
+					return fmt.Errorf("release rejected driver %s: %w", driverID, err)
 				} else {
 					log.Printf("[SAGA COMPENSATE] Driver %s released (compensation for rejected offer)", driverID)
 				}
@@ -300,7 +356,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		driverID, err := c.dispatchService.MatchDriver(ctx, tripID, lat, lng)
 		if err != nil {
 			log.Printf("[DISPATCH ERROR] MatchDriver failed for trip %s: %v", tripID, err)
-			return
+			return fmt.Errorf("match driver for trip %s: %w", tripID, err)
 		}
 
 		if driverID == "" {
@@ -328,8 +384,9 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 
 			if err != nil {
 				log.Printf("[DISPATCH ERROR] Failed to publish Trip.MatchFailed for trip %s: %v", tripID, err)
+				return fmt.Errorf("publish Trip.MatchFailed for trip %s: %w", tripID, err)
 			}
-			return
+			return nil
 		}
 
 		log.Printf("[STEP 2] MATCH SUCCESS: Trip %s assigned to Driver %s. Publishing 'Trip.Matched'...", tripID, driverID)
@@ -358,11 +415,13 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 
 		if err != nil {
 			log.Printf("[DISPATCH ERROR] Failed to publish Trip.Matched for trip %s: %v", tripID, err)
+			return fmt.Errorf("publish Trip.Matched for trip %s: %w", tripID, err)
 		} else {
 			log.Printf("[STEP 2.1] Event 'Trip.Matched' published successfully for Trip: %s", tripID)
 			// Saga step 2: commit driver reservation in Redis
 			if err := c.dispatchService.ReserveDriver(ctx, driverID); err != nil {
 				log.Printf("[SAGA] Failed to reserve driver %s: %v", driverID, err)
+				return fmt.Errorf("reserve driver %s: %w", driverID, err)
 			} else {
 				log.Printf("[SAGA] Driver %s reserved (ON_OFFER) for Trip %s", driverID, tripID)
 			}
@@ -371,13 +430,14 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		var data map[string]interface{}
 		if err := json.Unmarshal([]byte(payload), &data); err != nil {
 			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal Trip.Accepted payload: %v", err)
-			return
+			return permanentMessageError{cause: fmt.Errorf("invalid Trip.Accepted payload: %w", err)}
 		}
 		driverID, _ := data["driver_id"].(string)
 		if driverID != "" {
 			// Saga step 4: transition ON_OFFER → ON_TRIP
 			if err := c.dispatchService.ConfirmDriverOnTrip(ctx, driverID); err != nil {
 				log.Printf("[SAGA] Failed to confirm driver %s ON_TRIP: %v", driverID, err)
+				return fmt.Errorf("confirm driver %s on trip: %w", driverID, err)
 			} else {
 				log.Printf("[SAGA] Driver %s confirmed ON_TRIP", driverID)
 			}
@@ -386,7 +446,7 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		var data map[string]interface{}
 		if err := json.Unmarshal([]byte(payload), &data); err != nil {
 			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal Trip.Cancelled payload: %v", err)
-			return
+			return permanentMessageError{cause: fmt.Errorf("invalid Trip.Cancelled payload: %w", err)}
 		}
 		driverID, _ := data["driver_id"].(string)
 		tripID := aggregateID
@@ -394,11 +454,14 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 			tripID = id
 		}
 		// Cleanup rejection tracking
-		_ = c.redisClient.Del(ctx, "trip_rejections:"+tripID)
+		if err := c.redisClient.Del(ctx, "trip_rejections:"+tripID).Err(); err != nil {
+			return fmt.Errorf("clear rejections for trip %s: %w", tripID, err)
+		}
 		// Saga compensation: release driver if one was assigned
 		if driverID != "" {
 			if err := c.dispatchService.ReleaseDriver(ctx, driverID); err != nil {
 				log.Printf("[SAGA COMPENSATE] Failed to release driver %s on cancellation: %v", driverID, err)
+				return fmt.Errorf("release cancelled driver %s: %w", driverID, err)
 			} else {
 				log.Printf("[SAGA COMPENSATE] Driver %s released (Trip.Cancelled)", driverID)
 			}
@@ -407,18 +470,20 @@ func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessag
 		var data map[string]interface{}
 		if err := json.Unmarshal([]byte(payload), &data); err != nil {
 			log.Printf("[ERROR] Dispatch Consumer: Failed to unmarshal Trip.Completed payload: %v", err)
-			return
+			return permanentMessageError{cause: fmt.Errorf("invalid Trip.Completed payload: %w", err)}
 		}
 		driverID, _ := data["driver_id"].(string)
 		if driverID != "" {
 			// Saga cleanup: remove ON_TRIP commitment after successful completion
 			if err := c.dispatchService.ReleaseDriver(ctx, driverID); err != nil {
 				log.Printf("[SAGA] Failed to release driver %s after completion: %v", driverID, err)
+				return fmt.Errorf("release completed driver %s: %w", driverID, err)
 			} else {
 				log.Printf("[SAGA] Driver %s released after Trip.Completed", driverID)
 			}
 		}
 	}
+	return nil
 }
 
 func stringValue(value any) string {

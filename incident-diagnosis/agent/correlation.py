@@ -42,14 +42,16 @@ def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
                 if (str(record.get("level", "")).lower() != "error" or record.get("service", service) != service
                         or not TRACE_ID_RE.fullmatch(trace_id)):
                     continue
-            candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), int(timestamp), record))
+                candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), int(timestamp), record))
         if not candidates:
             return _error("no_match")
         _, timestamp_ns, record = min(candidates, key=lambda item: item[0])
         return {"status": "found", "service": service, "namespace": namespace,
                 "trace_id": record["trace_id"], "span_id": record.get("span_id", ""),
-                "operation": record.get("operation", ""), "message": record.get("message", ""),
-                "event_id": record.get("event_id", ""), "timestamp": record.get("timestamp", ""),
+                "operation": record.get("operation", ""),
+                "message": record.get("message") or record.get("msg", ""),
+                "event_id": record.get("event_id", ""),
+                "timestamp": record.get("timestamp") or record.get("time", ""),
                 "timestamp_ns": timestamp_ns}
     except Exception as exc:
         return _error("unavailable", errors=[str(exc)])
@@ -105,6 +107,21 @@ def correlate_trace(log_evidence, start_epoch_s=None, end_epoch_s=None):
     agrees = selected.get("service_name") == log_evidence.get("service") or operation == log_evidence.get("operation") or bool(tokens & log_tokens)
     if not agrees:
         return _error("conflict", trace_id=trace_id, error_service=selected.get("service_name", ""), error_operation=operation)
+
+    involved_services = []
+    ordered_spans = sorted(
+        enumerate(spans),
+        key=lambda item: (
+            int(item[1].get("startTimeUnixNano", 0)) if str(item[1].get("startTimeUnixNano", "")).isdigit()
+            and int(item[1].get("startTimeUnixNano", 0)) > 0 else 2**63,
+            item[0],
+        ),
+    )
+    for _, span in ordered_spans:
+        service_name = span.get("service_name", "")
+        if service_name and service_name not in involved_services:
+            involved_services.append(service_name)
     return {"status": "correlated", "trace_id": trace_id, "error_service": selected.get("service_name", ""),
             "error_operation": operation, "error_message": message,
+            "involved_services": involved_services,
             "grafana_url": f"{GRAFANA_BASE_URL.rstrip('/')}/explore?{urlencode({'left': json.dumps({'datasource': 'Tempo', 'queries': [{'queryType': 'traceql', 'query': f'{{.trace:id={trace_id}}}'}]})})}"}

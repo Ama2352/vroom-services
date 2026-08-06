@@ -553,3 +553,37 @@ def test_refined_answer_must_pass_both_gates():
     result = interpret(chain=DLQ_CHAIN, retrieval_result=RetrievalResult.none(), namespace="vroom-dev", _llm=llm)
     assert result["low_confidence"] is True
     assert result["acceptance_status"] == "rejected_after_refine"
+
+
+def test_generation_cannot_pass_by_omitting_evidence_references():
+    from unittest.mock import Mock
+    from tests.test_validation import DLQ_CHAIN
+    draft_without_refs = (
+        '{"root_cause":"unknown event type Trip.Requested.v2 sent to DLQ",'
+        '"dev_action":"rollback EVENT_CONTRACT_VERSION to v1",'
+        '"kubectl_hint":"kubectl get pods -n vroom-dev"}'
+    )
+    critic_pass = '{"verdict":"pass","issues":[]}'
+    llm = Mock(side_effect=[draft_without_refs, critic_pass, draft_without_refs, critic_pass])
+
+    result = interpret(
+        chain=DLQ_CHAIN,
+        retrieval_result=RetrievalResult.none(),
+        namespace="vroom-dev",
+        _llm=llm,
+    )
+
+    assert result["acceptance_status"] == "rejected_after_refine"
+    assert result["low_confidence"] is True
+    assert "evidence_refs" not in result
+
+
+def test_chain_prompt_lists_citable_ids_and_requires_evidence_refs():
+    from tests.test_validation import DLQ_CHAIN
+    prompt = _build_grounded_prompt(
+        "DLQEventsDetected", "dispatch-service", "vroom-dev",
+        SAMPLE_FACTS, "", RetrievalResult.none(), "", chain=DLQ_CHAIN,
+    )
+    assert "metric:dlq_events" in prompt
+    assert "log:evt-42" in prompt
+    assert '"evidence_refs":["exact-evidence-id"]' in prompt

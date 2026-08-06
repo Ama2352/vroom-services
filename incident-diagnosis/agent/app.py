@@ -315,6 +315,20 @@ def set_models():
     return jsonify({"models": _current_models})
 
 
+def _change_matches_primary_failure(template_diff: dict | None, log_evidence: dict) -> bool:
+    """Return whether a DLQ contract change is named by the canonical failure."""
+    message = str(log_evidence.get("message", "")).lower()
+    if "unknown event type" not in message:
+        return False
+    for change in (template_diff or {}).get("env_diff", []):
+        if change.get("key") != "EVENT_CONTRACT_VERSION":
+            continue
+        new_value = str(change.get("new_value", "")).strip().lower()
+        if new_value and re.search(rf"(?<![a-z0-9]){re.escape(new_value)}(?![a-z0-9])", message):
+            return True
+    return False
+
+
 @app.route("/investigate", methods=["POST"])
 def investigate():
     data       = request.get_json(silent=True) or {}
@@ -362,10 +376,25 @@ def investigate():
           pods_available=facts["pods_available"], pods_desired=facts["pods_desired"],
           waiting_reason=facts["waiting_reason"])
 
-    t1a           = time.time()
-    template_diff = collect_change_evidence(service, namespace)
+    change_services = []
+    if normalized.get("incident_kind") == "dlq" and trace_handoff.get("status") == "correlated":
+        change_services.extend(
+            traced_service for traced_service in trace_handoff.get("involved_services", [])
+            if traced_service and traced_service != service
+        )
+    change_services.append(service)
+
+    t1a = time.time()
+    template_diff = None
+    change_service = service
+    for candidate_service in dict.fromkeys(change_services):
+        candidate_diff = collect_change_evidence(candidate_service, namespace)
+        if candidate_diff is not None:
+            change_service = candidate_service
+            template_diff = {**candidate_diff, "service": candidate_service}
+            break
     t1b           = time.time()
-    _step("replicaset_diff", t1a, t1b, found=template_diff is not None)
+    _step("replicaset_diff", t1a, t1b, found=template_diff is not None, service=change_service)
 
     t1c        = time.time()
     dependency = resolve_dependency(facts["log_error"], facts["event_message"])
@@ -373,10 +402,24 @@ def investigate():
     _step("dependency_chase", t1c, t1d, found=dependency is not None)
 
     t1e        = time.time()
-    provenance = collect_provenance(service, namespace, template_diff, dependency)
+    provenance = collect_provenance(change_service, namespace, template_diff, dependency)
     t1f        = time.time()
     _step("provenance_lookup", t1e, t1f,
           classification=(provenance or {}).get("classification"))
+
+    if provenance is not None and template_diff is not None:
+        affected_fields = [
+            f"env.{change.get('key')}" for change in template_diff.get("env_diff", [])
+            if change.get("key")
+        ]
+        if template_diff.get("image_changed"):
+            affected_fields.append("image")
+        provenance = {
+            **provenance,
+            "service": change_service,
+            "alert_started_at": normalized.get("starts_at", ""),
+            "affected_fields": affected_fields,
+        }
 
     facts = {**facts, "template_diff": template_diff, "dependency": dependency, "provenance": provenance}
     if log_evidence.get("status") == "found":
@@ -387,10 +430,18 @@ def investigate():
     provenance_status = classify_provenance(
         provenance,
         (provenance or {}).get("changed_at", (template_diff or {}).get("changed_at", "")),
-        service,
+        change_service,
         drift=bool((provenance or {}).get("drift")),
         failure_predates=False,
     )
+    if (normalized.get("incident_kind") == "dlq"
+            and provenance_status.get("status") == "causal_candidate"
+            and not _change_matches_primary_failure(template_diff, log_evidence)):
+        provenance_status = {
+            **provenance_status,
+            "status": "recent_context",
+            "reason_codes": [*provenance_status.get("reason_codes", []), "change_does_not_match_primary_failure"],
+        }
     if provenance is not None:
         provenance = {**provenance, "causal_status": provenance_status}
         facts["provenance"] = provenance
