@@ -15,6 +15,11 @@ def _error(status, **fields):
     return {"status": status, **fields}
 
 
+def derive_log_error(log_evidence: dict) -> str:
+    """Return the displayed error from the same canonical Loki record."""
+    return log_evidence.get("message", "") if log_evidence.get("status") == "found" else ""
+
+
 def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
     query = f'{{app="{service}",namespace="{namespace}"}} | json | level="error"'
     try:
@@ -35,14 +40,15 @@ def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
                 if (record.get("level") != "error" or record.get("service", service) != service
                         or not TRACE_ID_RE.fullmatch(trace_id)):
                     continue
-                candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), record))
+            candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), int(timestamp), record))
         if not candidates:
             return _error("no_match")
-        record = min(candidates, key=lambda item: item[0])[1]
+        _, timestamp_ns, record = min(candidates, key=lambda item: item[0])
         return {"status": "found", "service": service, "namespace": namespace,
                 "trace_id": record["trace_id"], "span_id": record.get("span_id", ""),
                 "operation": record.get("operation", ""), "message": record.get("message", ""),
-                "event_id": record.get("event_id", ""), "timestamp": record.get("timestamp", "")}
+                "event_id": record.get("event_id", ""), "timestamp": record.get("timestamp", ""),
+                "timestamp_ns": timestamp_ns}
     except Exception as exc:
         return _error("unavailable", errors=[str(exc)])
 
@@ -61,7 +67,7 @@ def fetch_trace(trace_id):
         return _error("unavailable", trace_id=trace_id, errors=[str(exc)])
 
 
-def correlate_trace(log_evidence):
+def correlate_trace(log_evidence, start_epoch_s=None, end_epoch_s=None):
     trace_id = log_evidence.get("trace_id")
     if not trace_id:
         return _error("no_trace_id")
@@ -78,6 +84,14 @@ def correlate_trace(log_evidence):
     if not failed:
         return _error("conflict", trace_id=trace_id, reason="trace contains no error span")
     selected = failed[-1]
+    if start_epoch_s is not None and end_epoch_s is not None:
+        try:
+            trace_start = int(selected.get("startTimeUnixNano", 0)) / 1_000_000_000
+            trace_end = int(selected.get("endTimeUnixNano", selected.get("startTimeUnixNano", 0))) / 1_000_000_000
+            if trace_start and trace_end and (trace_end < start_epoch_s or trace_start > end_epoch_s):
+                return _error("conflict", trace_id=trace_id, reason="trace outside incident window")
+        except (TypeError, ValueError):
+            return _error("conflict", trace_id=trace_id, reason="trace outside incident window")
     operation = selected.get("name", "")
     message = ""
     for event in selected.get("events", []):

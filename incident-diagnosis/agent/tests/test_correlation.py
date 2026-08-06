@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from correlation import collect_log_evidence, correlate_trace
+from correlation import collect_log_evidence, correlate_trace, derive_log_error
 
 TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
 LOG_EVIDENCE = {"status": "found", "service": "dispatch-service", "namespace": "vroom-dev",
@@ -54,3 +54,20 @@ def test_correlate_trace_reports_conflict_when_error_is_unrelated():
 
 def test_correlate_trace_reports_no_trace_id():
     assert correlate_trace({"status": "found", "message": "error"})["status"] == "no_trace_id"
+
+
+def test_legacy_log_error_is_derived_from_selected_structured_record():
+    selected = {"status": "found", "message": "unknown event type Trip.Requested.v2", "trace_id": TRACE_ID}
+    assert derive_log_error(selected) == "unknown event type Trip.Requested.v2"
+
+
+def test_trace_outside_incident_window_is_conflicting(monkeypatch):
+    monkeypatch.setattr("correlation.fetch_trace", lambda _: {
+        "status": "fetched", "trace_id": TRACE_ID,
+        "payload": {"batches": [{"resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "dispatch-service"}}]},
+            "scopeSpans": [{"spans": [{"startTimeUnixNano": "1775038510000000000", "name": "dispatch.consume.UNKNOWN_EVENT_TYPE_DEMO",
+                "status": {"code": "STATUS_CODE_ERROR"}, "events": []}]}]}]},
+    })
+    result = correlate_trace(LOG_EVIDENCE, 1775038500, 1775038501)
+    assert result["status"] == "conflict"
+    assert result["reason"] == "trace outside incident window"
