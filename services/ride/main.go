@@ -35,6 +35,10 @@ func main() {
 	dbPassword := getEnv("DB_PASSWORD", "vroom_dev")
 	dbName := getEnv("DB_NAME", "vroom")
 	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
+	eventContractVersion := getEnv("EVENT_CONTRACT_VERSION", "v1")
+	if err := service.ValidateEventContractVersion(eventContractVersion); err != nil {
+		log.Fatalf("Invalid event contract configuration: %v", err)
+	}
 
 	// 1b. Telemetry
 	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
@@ -75,7 +79,7 @@ func main() {
 
 	// 4. Initialize Layers
 	rideRepo := repository.NewPostgresTripRepository(db)
-	rideService := service.NewTripService(rideRepo)
+	rideService := service.NewTripService(rideRepo, eventContractVersion)
 	rideHandler := handler.NewTripHandler(rideService)
 
 	// 4. Start Workers (Background)

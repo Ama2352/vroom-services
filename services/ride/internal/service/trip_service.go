@@ -13,11 +13,37 @@ import (
 
 type TripService struct {
 	repo repository.TripRepository
+	eventContractVersion string
 }
 
-func NewTripService(repo repository.TripRepository) *TripService {
+
+func requestedEventType(version string) (string, error) {
+	switch version {
+	case "v1":
+		return "Trip.Requested", nil
+	case "v2":
+		return "Trip.Requested.v2", nil
+	default:
+		return "", errors.New("EVENT_CONTRACT_VERSION must be v1 or v2")
+	}
+}
+
+// ValidateEventContractVersion validates deployment configuration before startup.
+func ValidateEventContractVersion(version string) error {
+	_, err := requestedEventType(version)
+	return err
+}
+
+// NewTripService accepts an optional version for backwards-compatible callers;
+// omitted configuration uses the healthy v1 contract.
+func NewTripService(repo repository.TripRepository, versions ...string) *TripService {
+	version := "v1"
+	if len(versions) > 0 && versions[0] != "" {
+		version = versions[0]
+	}
 	return &TripService{
 		repo: repo,
+		eventContractVersion: version,
 	}
 }
 
@@ -39,11 +65,15 @@ func (s *TripService) RequestTrip(ctx context.Context, passengerID uuid.UUID, re
 		CreatedAt: time.Now(),
 	}
 
+	eventType, err := requestedEventType(s.eventContractVersion)
+	if err != nil {
+		return nil, err
+	}
 	event := &repository.OutboxEvent{
 		ID:            uuid.New(),
 		AggregateType: "TRIP",
 		AggregateID:   trip.ID,
-		EventType:     "Trip.Requested",
+		EventType:     eventType,
 		Payload: map[string]interface{}{
 			"id":              trip.ID,
 			"passenger_id":    trip.PassengerID,
@@ -58,7 +88,7 @@ func (s *TripService) RequestTrip(ctx context.Context, passengerID uuid.UUID, re
 		},
 	}
 
-	err := s.repo.CreateWithOutbox(ctx, trip, event)
+	err = s.repo.CreateWithOutbox(ctx, trip, event)
 	if err != nil {
 		return nil, err
 	}
