@@ -28,9 +28,14 @@ const (
 	dlqStreamName   = "ride_events_dlq"
 )
 
-var dlqEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+var dlqEventsTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "vroom_dlq_events_total",
 	Help: "Total number of events sent to the DLQ after permanent failure or exhausted retries",
+})
+
+var dlqEventsByTypeTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vroom_dlq_events_by_type_total",
+	Help: "Total number of events sent to the DLQ, partitioned by event type",
 }, []string{"event_type"})
 
 type messageDisposition uint8
@@ -276,7 +281,8 @@ func (c *RideEventConsumer) moveToDLQ(ctx context.Context, msg redis.XMessage, c
 	if err := c.redisClient.XAdd(ctx, &redis.XAddArgs{Stream: dlqStreamName, Values: values}).Err(); err != nil {
 		return err
 	}
-	dlqEventsTotal.WithLabelValues(stringValue(msg.Values["type"])).Inc()
+	dlqEventsTotal.Inc()
+	dlqEventsByTypeTotal.WithLabelValues(stringValue(msg.Values["type"])).Inc()
 	log.Printf("[DLQ] Event %s (type=%s) moved to DLQ: %v", msg.ID, stringValue(msg.Values["type"]), cause)
 	return nil
 }

@@ -75,7 +75,7 @@ func dlqMetricValue(t *testing.T, eventType string) float64 {
 	families, err := prometheus.DefaultGatherer.Gather()
 	require.NoError(t, err)
 	for _, family := range families {
-		if family.GetName() != "vroom_dlq_events_total" {
+		if family.GetName() != "vroom_dlq_events_by_type_total" {
 			continue
 		}
 		for _, metric := range family.GetMetric() {
@@ -89,6 +89,20 @@ func dlqMetricValue(t *testing.T, eventType string) float64 {
 	return 0
 }
 
+func dlqTotalMetricValue(t *testing.T) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != "vroom_dlq_events_total" || len(family.GetMetric()) != 1 {
+			continue
+		}
+		return family.GetMetric()[0].GetCounter().GetValue()
+	}
+	t.Fatalf("vroom_dlq_events_total must be registered before the first DLQ event")
+	return 0
+}
+
 func TestUnsupportedContractMovesExactEventDirectlyToDLQ(t *testing.T) {
 	ctx, client := startConsumerRedis(t)
 	const group = "dispatch_group"
@@ -99,6 +113,7 @@ func TestUnsupportedContractMovesExactEventDirectlyToDLQ(t *testing.T) {
 	require.NoError(t, client.XGroupCreateMkStream(ctx, stream, group, "0").Err())
 	streamID := publishConsumerEvent(t, ctx, client, stream, eventID, eventType)
 	metricBefore := dlqMetricValue(t, eventType)
+	totalMetricBefore := dlqTotalMetricValue(t)
 
 	consumer := NewRideEventConsumer(client, service.NewDispatchService(client), stream, group, "consumer-v2")
 	consumer.ConsumeOnce(ctx)
@@ -117,6 +132,7 @@ func TestUnsupportedContractMovesExactEventDirectlyToDLQ(t *testing.T) {
 	assert.Equal(t, int64(1), client.Exists(ctx, "processed_event:dispatch:"+eventID).Val(), "terminal event must be marked processed")
 	assert.Equal(t, int64(0), client.Exists(ctx, "event:retry:"+streamID).Val(), "permanent failures must not consume retry budget")
 	assert.Equal(t, metricBefore+1, dlqMetricValue(t, eventType))
+	assert.Equal(t, totalMetricBefore+1, dlqTotalMetricValue(t), "the alerting counter must increment from its pre-existing series")
 }
 
 func TestRetryableKnownEventRemainsPendingAndUnprocessed(t *testing.T) {
