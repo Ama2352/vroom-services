@@ -82,6 +82,7 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 		Count:    10,
 	}).Result()
 	for _, msg := range autoclaimed {
+		eventType := stringValue(msg.Values["type"])
 		eventID := ""
 		if val, ok := msg.Values["id"]; ok {
 			eventID = val.(string)
@@ -89,15 +90,20 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 			eventID = msg.ID
 		}
 		key := "processed_event:dispatch:" + eventID
-		setErr := c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
-			TTL:  24 * time.Hour,
-			Mode: "NX",
-		}).Err()
+		var setErr error = redis.Nil
+		if isKnownEventType(eventType) {
+			setErr = c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
+				TTL:  24 * time.Hour,
+				Mode: "NX",
+			}).Err()
+		}
 		if setErr != nil && setErr != redis.Nil {
 			log.Printf("[DISPATCH ERROR] Failed to check idempotency for reclaimed event %s: %v", eventID, setErr)
 		}
 		if setErr == nil {
-			c.processWithDLQ(ctx, msg)
+			if shouldAck := c.processWithDLQ(ctx, msg); shouldAck {
+				c.redisClient.XAck(ctx, c.streamName, c.groupName, msg.ID)
+			}
 		} else if setErr == redis.Nil {
 			log.Printf("[IDEMPOTENCY] Reclaimed event %s already processed by dispatch, skipping", eventID)
 		}
@@ -131,6 +137,7 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 
 	for _, stream := range entries {
 		for _, message := range stream.Messages {
+			eventType := stringValue(message.Values["type"])
 			// Idempotency check using SETNX on Event ID
 			eventID := ""
 			if val, ok := message.Values["id"]; ok {
@@ -140,10 +147,13 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 			}
 
 			key := "processed_event:dispatch:" + eventID
-			setErr := c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
-				TTL:  24 * time.Hour,
-				Mode: "NX",
-			}).Err()
+			var setErr error = redis.Nil
+			if isKnownEventType(eventType) {
+				setErr = c.redisClient.SetArgs(ctx, key, "true", redis.SetArgs{
+					TTL:  24 * time.Hour,
+					Mode: "NX",
+				}).Err()
+			}
 			if setErr != nil && setErr != redis.Nil {
 				log.Printf("[DISPATCH ERROR] Failed to check idempotency for event %s: %v", eventID, setErr)
 			} else if setErr == redis.Nil {
@@ -152,14 +162,27 @@ func (c *RideEventConsumer) consume(ctx context.Context) {
 				continue
 			}
 
-			c.processWithDLQ(ctx, message)
-			// Acknowledge message
-			c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
+			if shouldAck := c.processWithDLQ(ctx, message); shouldAck {
+				c.redisClient.XAck(ctx, c.streamName, c.groupName, message.ID)
+			}
 		}
 	}
 }
 
-func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessage) {
+func isKnownEventType(eventType string) bool {
+	switch eventType {
+	case "Trip.Requested", "Trip.OfferRejected", "Trip.Accepted", "Trip.Cancelled", "Trip.Completed", "Trip.Matched", "Trip.MatchFailed":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldAckEvent(eventType string, retries int64) bool {
+	return isKnownEventType(eventType) || retries >= maxEventRetries
+}
+
+func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessage) bool {
 	ctx = extractMessageContext(ctx, msg)
 	eventType := stringValue(msg.Values["type"])
 	ctx, span := otel.Tracer("dispatch-consumer").Start(ctx, "dispatch.consume."+eventType)
@@ -171,10 +194,7 @@ func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessa
 
 	c.handleMessage(ctx, msg)
 
-	known := eventType == "Trip.Requested" || eventType == "Trip.OfferRejected" ||
-		eventType == "Trip.Accepted" || eventType == "Trip.Cancelled" ||
-		eventType == "Trip.Completed" || eventType == "Trip.Matched" ||
-		eventType == "Trip.MatchFailed"
+	known := isKnownEventType(eventType)
 
 	if !known {
 		err := fmt.Errorf("unknown event type %q", eventType)
@@ -205,6 +225,7 @@ func (c *RideEventConsumer) processWithDLQ(ctx context.Context, msg redis.XMessa
 		dlqEventsTotal.WithLabelValues(eventType).Inc()
 		log.Printf("[DLQ] Event %s (type=%s) moved to DLQ after %d retries", msg.ID, eventType, retries)
 	}
+	return shouldAckEvent(eventType, retries)
 }
 
 func (c *RideEventConsumer) handleMessage(ctx context.Context, msg redis.XMessage) {
