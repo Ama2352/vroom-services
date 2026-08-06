@@ -197,7 +197,7 @@ def test_investigate_records_step_events_in_timeline(client):
     # by Task 11's live manual verification.
     assert step_names == [
         "collect_diagnostics", "replicaset_diff", "dependency_chase", "provenance_lookup",
-        "trusted_match_check", "record_incident",
+        "evidence_chain", "trusted_match_check", "record_incident",
     ]
     for entry in timeline:
         if entry.get("type") == "step":

@@ -20,10 +20,11 @@ from memory import (search_memory as memory_search,
                     store_knowledge_entry, list_all_history_entries)
 from collector import collect_bundle, collect_impact
 from alerting import normalize_alert, incident_window
-from correlation import collect_log_evidence, correlate_trace
+from correlation import collect_log_evidence, correlate_trace, derive_log_error
+from evidence import build_evidence_chain
 from confidence import assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
-                          collect_change_evidence, resolve_dependency, collect_provenance)
+                          collect_change_evidence, resolve_dependency, collect_provenance, classify_provenance)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 from retrieval.models import RetrievalMode
@@ -338,7 +339,7 @@ def investigate():
             start_s, end_s = incident_window(data["starts_at"], datetime.now(timezone.utc))
             impact = collect_impact(service, namespace)
             log_evidence = collect_log_evidence(service, namespace, start_s, end_s)
-            trace_handoff = correlate_trace(log_evidence)
+            trace_handoff = correlate_trace(log_evidence, start_s, end_s)
         except (TypeError, ValueError) as exc:
             impact["errors"] = [str(exc)]
     diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {})
@@ -376,6 +377,40 @@ def investigate():
           classification=(provenance or {}).get("classification"))
 
     facts = {**facts, "template_diff": template_diff, "dependency": dependency, "provenance": provenance}
+    if log_evidence.get("status") == "found":
+        # The selected structured Loki record is canonical for diagnosis; the
+        # legacy latest-error query remains only a collector fallback.
+        facts["log_error"] = derive_log_error(log_evidence)
+
+    provenance_status = classify_provenance(
+        provenance,
+        (provenance or {}).get("changed_at", (template_diff or {}).get("changed_at", "")),
+        service,
+        drift=bool((provenance or {}).get("drift")),
+        failure_predates=False,
+    )
+    if provenance is not None:
+        provenance = {**provenance, "causal_status": provenance_status}
+        facts["provenance"] = provenance
+
+    evidence_bundle = {
+        "impact": {"triggering_metric": {
+            "name": "dlq_events" if normalized.get("incident_kind") == "dlq" else "service_impact",
+            "value": normalized.get("metric_value"),
+        }} if impact.get("status") == "available" else {},
+        "log_evidence": log_evidence,
+        "trace_handoff": trace_handoff,
+        "template_diff": template_diff,
+        "provenance": provenance,
+        "k8s_state": facts,
+        "k8s_event": {"id": facts.get("event_object"), "reason": facts.get("event_reason"), "message": facts.get("event_message")},
+        "dependency": dependency,
+        "dlq_state": {"value": normalized.get("metric_value")} if normalized.get("incident_kind") == "dlq" else {},
+    }
+    evidence_chain = build_evidence_chain(normalized, evidence_bundle)
+    _step("evidence_chain", time.time(), time.time(), incident_kind=evidence_chain["incident_kind"],
+          primary=[item["id"] for item in evidence_chain["primary"]],
+          secondary=[item["id"] for item in evidence_chain["secondary"]])
 
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
           f"reason={facts['waiting_reason']!r} last_exit={facts['last_terminated_reason']!r} "
@@ -411,6 +446,7 @@ def investigate():
         groq_key=GROQ_KEY,
         openrouter_key=OPENROUTER_KEY,
         pod=pod,
+        chain=evidence_chain,
     )
     steps.extend(diagnosis.pop("_step_log", []))
 
@@ -425,6 +461,7 @@ def investigate():
         "low_confidence": diagnosis.get("low_confidence", False),
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
+        "evidence_chain": evidence_chain,
     }
     t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
@@ -460,6 +497,7 @@ def investigate():
         "low_confidence":   diagnosis.get("low_confidence", False),
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
+        "evidence_chain": evidence_chain,
         **({"debug": {
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),

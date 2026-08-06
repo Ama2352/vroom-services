@@ -104,7 +104,11 @@ def build_evidence_chain(alert: dict[str, Any], bundle: dict[str, Any]) -> dict[
         trigger=("impact",), primary=("log_evidence",), causal_context=("provenance",),
         secondary=("k8s_state", "k8s_event", "dependency", "trace_handoff"),
     ))
-    chain = {"incident_kind": kind, "policy": policy, "trigger": [], "primary": [],
+    chain = {"incident_kind": kind, "policy": {
+                "trigger": list(policy.trigger), "primary": list(policy.primary),
+                "causal_context": list(policy.causal_context), "consequence": list(policy.consequence),
+                "secondary": list(policy.secondary), "required": list(policy.required),
+             }, "trigger": [], "primary": [],
              "causal_context": [], "consequence": [], "secondary": [], "required": list(policy.required)}
     for role in ("trigger", "primary", "causal_context", "consequence", "secondary"):
         chain[role] = _role_items(policy, role, bundle)
