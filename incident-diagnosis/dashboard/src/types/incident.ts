@@ -4,7 +4,7 @@ export type TraceStatus = 'correlated' | 'representative' | 'no_trace_id' | 'not
 export type ConfidenceLevel = 'high' | 'medium' | 'low' | 'unknown'
 
 export interface DiagnosisConfidence { level: ConfidenceLevel; reasons: string[]; missing_evidence: string[] }
-export interface ImpactEvidence { status: EvidenceStatus; window?: string; request_rate: number | null; error_rate_percent: number | null; p99_seconds: number | null; errors?: string[] }
+export interface ImpactEvidence { status: EvidenceStatus; window?: string; request_rate: number | null; error_rate_percent: number | null; p99_seconds: number | null; errors?: string[]; triggering_metric?: { name: string; value: number; threshold: number | null } }
 export interface LogEvidence { status: string; trace_id?: string; operation?: string; message?: string }
 export interface TraceHandoff { status: TraceStatus; trace_id?: string; error_service?: string; error_operation?: string; error_message?: string; service_path?: string[]; grafana_url?: string }
 

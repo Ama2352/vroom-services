@@ -22,8 +22,21 @@ def assess_confidence(alert: dict, impact: dict, log: dict, trace: dict, facts: 
         reasons.append("additional Kubernetes, change, or dependency evidence is available")
     if impact.get("status") == "available" and log.get("status") == "found" and trace.get("status") == "correlated":
         return {"level": "high", "reasons": reasons, "missing_evidence": missing}
-    if impact.get("status") == "available" and (log.get("status") == "found" or specific_fact):
+    if impact.get("status") == "available" and log.get("status") == "found":
         return {"level": "medium" if reasons else "low", "reasons": reasons, "missing_evidence": missing}
     if reasons:
         return {"level": "low", "reasons": reasons, "missing_evidence": missing}
     return {"level": "unknown", "reasons": reasons, "missing_evidence": missing}
+
+
+def align_root_cause_confidence(root_cause: str, confidence: dict) -> str:
+    """Keep the user-facing conclusion consistent with evidence confidence."""
+    prefix = "Insufficient evidence to confirm — observed: "
+    if not root_cause.startswith(prefix):
+        return root_cause
+    observed = root_cause.removeprefix(prefix)
+    if confidence.get("level") == "high":
+        return f"Confirmed by metrics, structured log, and trace — observed: {observed}"
+    if confidence.get("level") == "medium":
+        return f"Probable diagnosis — observed: {observed}"
+    return root_cause

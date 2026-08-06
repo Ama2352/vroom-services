@@ -123,3 +123,15 @@ def test_collect_impact_distinguishes_no_data():
     with patch("requests.get", return_value=_prom_empty()):
         impact = collector.collect_impact("ride-service", "vroom-dev")
     assert impact["status"] == "no_data"
+
+
+def test_collect_impact_uses_alert_metric_for_dlq_when_http_metrics_are_sparse():
+    with patch("requests.get", return_value=_prom_empty()):
+        impact = collector.collect_impact(
+            "dispatch-service", "vroom-dev",
+            alert={"alert_name": "DLQEventsDetected", "metric_value": 1.11, "threshold": 0},
+        )
+    assert impact["status"] == "available"
+    assert impact["triggering_metric"] == {
+        "name": "DLQ events", "value": 1.11, "threshold": 0.0,
+    }

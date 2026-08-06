@@ -22,7 +22,7 @@ from collector import collect_bundle, collect_impact
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
 from evidence import build_evidence_chain
-from confidence import assess_confidence
+from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance, classify_provenance)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
@@ -319,10 +319,10 @@ def set_models():
 def investigate():
     data       = request.get_json(silent=True) or {}
     normalized = normalize_alert(data)
-    alert_name = data.get("alert_name", "UnknownAlert")
-    service    = data.get("service", "unknown")
-    namespace  = data.get("namespace", "vroom-dev")
-    pod        = data.get("pod", "")
+    alert_name = normalized["alert_name"]
+    service    = normalized["service"]
+    namespace  = normalized["namespace"]
+    pod        = normalized["pod"]
     debug      = request.args.get("debug", "").lower() == "true"
 
     seed_if_empty(rdb)
@@ -334,15 +334,17 @@ def investigate():
               "errors": ["alert has no starts_at; incident window unavailable"]}
     log_evidence = {"status": "unavailable", "errors": ["alert has no starts_at"]}
     trace_handoff = {"status": "unavailable"}
-    if data.get("starts_at"):
+    if normalized.get("starts_at") and not normalized.get("starts_at_error"):
         try:
-            start_s, end_s = incident_window(data["starts_at"], datetime.now(timezone.utc))
-            impact = collect_impact(service, namespace)
+            start_s, end_s = incident_window(normalized["starts_at"], datetime.now(timezone.utc))
+            impact = collect_impact(service, namespace, alert=normalized)
             log_evidence = collect_log_evidence(service, namespace, start_s, end_s)
             trace_handoff = correlate_trace(log_evidence, start_s, end_s)
         except (TypeError, ValueError) as exc:
             impact["errors"] = [str(exc)]
-    diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {})
+    diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {
+        "kubernetes": facts.get("waiting_reason", "") if "facts" in locals() else "",
+    })
 
     def _step(name: str, started_at: float, finished_at: float, **metadata) -> None:
         steps.append({
@@ -393,6 +395,12 @@ def investigate():
         provenance = {**provenance, "causal_status": provenance_status}
         facts["provenance"] = provenance
 
+    diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {
+        "kubernetes": facts.get("waiting_reason"),
+        "changes": template_diff,
+        "dependencies": dependency,
+    })
+
     evidence_bundle = {
         "impact": {"triggering_metric": {
             "name": "dlq_events" if normalized.get("incident_kind") == "dlq" else "service_impact",
@@ -439,7 +447,7 @@ def investigate():
           f"retrieval_mode={retrieval.mode.value} "
           f"related_incidents={len(related_incidents_unconfirmed)}", flush=True)
 
-    diagnosis = interpret(
+    diagnosis = dict(interpret(
         alert_name, service, namespace,
         facts, bundle, retrieval,
         models=_current_models,
@@ -447,7 +455,11 @@ def investigate():
         openrouter_key=OPENROUTER_KEY,
         pod=pod,
         chain=evidence_chain,
+    ))
+    diagnosis["root_cause"] = align_root_cause_confidence(
+        diagnosis["root_cause"], diagnosis_confidence,
     )
+    diagnosis["low_confidence"] = bool(diagnosis.get("low_confidence")) or diagnosis_confidence["level"] in {"low", "unknown"}
     steps.extend(diagnosis.pop("_step_log", []))
 
     evidence = format_evidence(facts)

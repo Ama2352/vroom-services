@@ -9,6 +9,7 @@ LOKI_URL = os.environ.get("LOKI_URL", "http://loki-stack.monitoring.svc.cluster.
 TEMPO_URL = os.environ.get("TEMPO_URL", "http://tempo.monitoring.svc.cluster.local:3100")
 GRAFANA_BASE_URL = os.environ.get("GRAFANA_BASE_URL", "http://localhost/grafana")
 TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+PRE_ALERT_LOOKBACK_SECONDS = 120
 
 
 def _error(status, **fields):
@@ -21,10 +22,11 @@ def derive_log_error(log_evidence: dict) -> str:
 
 
 def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
-    query = f'{{app="{service}",namespace="{namespace}"}} | json | level="error"'
+    query_start_epoch_s = start_epoch_s - PRE_ALERT_LOOKBACK_SECONDS
+    query = f'{{app="{service}",namespace="{namespace}"}} | json | level=~"(?i)^error$"'
     try:
         response = requests.get(LOKI_URL, params={
-            "query": query, "start": str(int(start_epoch_s * 1_000_000_000)),
+            "query": query, "start": str(int(query_start_epoch_s * 1_000_000_000)),
             "end": str(int(end_epoch_s * 1_000_000_000)), "limit": "50",
         }, timeout=5)
         if not response.ok:
@@ -37,7 +39,7 @@ def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
                 except (TypeError, json.JSONDecodeError):
                     continue
                 trace_id = record.get("trace_id", "")
-                if (record.get("level") != "error" or record.get("service", service) != service
+                if (str(record.get("level", "")).lower() != "error" or record.get("service", service) != service
                         or not TRACE_ID_RE.fullmatch(trace_id)):
                     continue
             candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), int(timestamp), record))

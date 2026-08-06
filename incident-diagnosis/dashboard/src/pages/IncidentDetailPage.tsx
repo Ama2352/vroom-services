@@ -6,6 +6,7 @@ import { ImmediateFixCard } from '../components/incident/ImmediateFixCard'
 import { KnowledgeSuggestionCard } from '../components/incident/KnowledgeSuggestionCard'
 import { ConfidenceCard } from '../components/incident/ConfidenceCard'
 import { TraceHandoffCard } from '../components/incident/TraceHandoffCard'
+import { ImpactCard } from '../components/incident/ImpactCard'
 import { Timeline } from '../components/incident/Timeline'
 import StatusBadge from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -48,6 +49,7 @@ export function IncidentDetailPage() {
         </div>
         <RootCauseCard incident={incident} />
         <ConfidenceCard confidence={incident.diagnosis_confidence} />
+        <ImpactCard impact={incident.impact} />
         <EvidenceGrid incident={incident} />
         <TraceHandoffCard trace={incident.trace_handoff} />
         <ImmediateFixCard incident={incident} />

@@ -38,6 +38,24 @@ def test_collect_log_evidence_returns_trace_fields():
     assert result["trace_id"] == TRACE_ID
 
 
+def test_collect_log_evidence_accepts_uppercase_structured_error_level():
+    line = json.dumps({"timestamp": "2026-08-05T09:31:54Z", "level": "ERROR",
+                       "service": "dispatch-service", "operation": "dispatch.consume",
+                       "message": "unknown event type", "trace_id": TRACE_ID})
+    with patch("requests.get", return_value=_loki_response(line)) as get:
+        result = collect_log_evidence("dispatch-service", "vroom-dev", 1775000000, 1775000900)
+    assert result["status"] == "found"
+    assert 'level=~"(?i)^error$"' in get.call_args.kwargs["params"]["query"]
+
+
+def test_collect_log_evidence_queries_a_pre_alert_lookback_window():
+    start = 1775000000
+    line = json.dumps({"level": "error", "service": "dispatch-service", "trace_id": TRACE_ID})
+    with patch("requests.get", return_value=_loki_response(line)) as get:
+        collect_log_evidence("dispatch-service", "vroom-dev", start, start + 900)
+    assert get.call_args.kwargs["params"]["start"] == str((start - 120) * 1_000_000_000)
+
+
 def test_correlate_trace_fetches_exact_log_trace_id():
     with patch("requests.get", return_value=_tempo_response()) as get:
         trace = correlate_trace(LOG_EVIDENCE)
