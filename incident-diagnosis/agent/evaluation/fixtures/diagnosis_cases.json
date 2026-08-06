@@ -1,0 +1,11 @@
+[
+  {"name":"event-contract-regression","expected_claims":["Trip.Requested.v2"],"required_evidence_refs":["metric:dlq_events","log:event-contract","trace:event-contract","change:event-contract"],"forbidden_claims":["readiness probe"],"required_action_claims":["rollback"],"expected_low_confidence":false},
+  {"name":"conflicting-readiness","expected_claims":["DLQ"],"required_evidence_refs":["log:event-contract"],"forbidden_claims":["readiness probe"],"required_action_claims":[],"expected_low_confidence":true},
+  {"name":"redis-hostname-hotfix","expected_claims":["bad-host"],"required_evidence_refs":["log:redis","change:redis"],"forbidden_claims":[],"required_action_claims":["rollback"],"expected_low_confidence":false},
+  {"name":"exact-oom","expected_claims":["OOMKilled"],"required_evidence_refs":["k8s:oom"],"forbidden_claims":[],"required_action_claims":["memory"],"expected_low_confidence":false},
+  {"name":"minilm-advisory","expected_claims":["postgres"],"required_evidence_refs":["log:postgres"],"forbidden_claims":[],"required_action_claims":["check"],"expected_low_confidence":false},
+  {"name":"trace-mismatch","expected_claims":["trace"],"required_evidence_refs":["log:trace"],"forbidden_claims":["correlated"],"required_action_claims":[],"expected_low_confidence":true},
+  {"name":"unrelated-deployment","expected_claims":["unknown"],"required_evidence_refs":["log:primary"],"forbidden_claims":["deployment caused"],"required_action_claims":[],"expected_low_confidence":true},
+  {"name":"sparse-evidence","expected_claims":["Insufficient evidence"],"required_evidence_refs":[],"forbidden_claims":["definitive"],"required_action_claims":[],"expected_low_confidence":true},
+  {"name":"critic-refine-failure","expected_claims":["unknown event"],"required_evidence_refs":["log:event-contract"],"forbidden_claims":[],"required_action_claims":[],"expected_low_confidence":true}
+]

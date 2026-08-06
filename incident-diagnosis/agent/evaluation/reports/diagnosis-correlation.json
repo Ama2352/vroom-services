@@ -1,0 +1,89 @@
+{
+  "cases": [
+    {
+      "name": "event-contract-regression",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "conflicting-readiness",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "redis-hostname-hotfix",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "exact-oom",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "minilm-advisory",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "trace-mismatch",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "unrelated-deployment",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "sparse-evidence",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    },
+    {
+      "name": "critic-refine-failure",
+      "expected_claims_present": true,
+      "required_evidence_present": true,
+      "unsupported_claim_free": true,
+      "required_action_present": true,
+      "confidence_matches": true,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "case_count": 9,
+  "passed_count": 9,
+  "fixture_sha256": "03afdd6361f0cf648474ca22a2a599684514ac7df86ec3907aeedf4a3b47163f"
+}
