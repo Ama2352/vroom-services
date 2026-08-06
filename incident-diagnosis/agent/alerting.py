@@ -19,6 +19,7 @@ def normalize_alert(data: dict[str, Any]) -> dict[str, Any]:
         "fingerprint": data.get("fingerprint", ""),
         "starts_at": data.get("starts_at", ""),
         "alert_name": data.get("alert_name", "UnknownAlert"),
+        "incident_kind": data.get("incident_kind") or "",
         "service": data.get("service") or "unknown",
         "namespace": data.get("namespace") or "unknown",
         "pod": data.get("pod", ""),
