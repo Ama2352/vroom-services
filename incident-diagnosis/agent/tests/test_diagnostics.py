@@ -4,7 +4,8 @@ os.environ["MAX_CHANGE_AGE_SECONDS"] = "999999999"
 import pytest
 from unittest.mock import patch, MagicMock
 from diagnostics import (collect_diagnostics, format_evidence,
-                          collect_change_evidence, resolve_dependency, collect_provenance)
+                          collect_change_evidence, resolve_dependency, collect_provenance,
+                          classify_provenance)
 
 
 def _prom_scalar(value):
@@ -665,3 +666,22 @@ spec:
             "drift": [{"key": "replicas", "correct": "1", "wrong": "0"}],
             "changed_at": "2026-07-09T08:52:00Z"
         }
+
+
+PROVENANCE = {
+    "service": "ride-service",
+    "alert_started_at": "2026-08-05T17:00:00Z",
+    "commit": {"sha": "abc1234"},
+    "file_path": "apps/ride/base/deployment.yaml",
+}
+
+
+@pytest.mark.parametrize(("changed_at", "service", "drift", "failure_predates", "expected"), [
+    ("2026-08-05T16:55:00Z", "ride-service", False, False, "causal_candidate"),
+    ("2026-08-05T10:00:00Z", "ride-service", False, False, "recent_context"),
+    ("2026-08-05T16:55:00Z", "notification-service", False, False, "recent_context"),
+    ("2026-08-05T16:55:00Z", "ride-service", True, False, "conflicting"),
+    ("2026-08-05T16:55:00Z", "ride-service", False, True, "conflicting"),
+])
+def test_provenance_status_table(changed_at, service, drift, failure_predates, expected):
+    assert classify_provenance(PROVENANCE, changed_at, service, drift, failure_predates)["status"] == expected

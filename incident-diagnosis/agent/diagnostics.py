@@ -1,4 +1,5 @@
 import os, re, time
+from datetime import datetime, timezone
 import requests as http_requests
 
 PROMETHEUS_URL = os.environ.get(
@@ -542,6 +543,58 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None,
 
     file_path = _gitops_file_path(service, namespace, template_diff)
     return _fetch_git_provenance(file_path, synced_sha)
+
+
+def classify_provenance(provenance: dict | None, changed_at: str, service: str,
+                        drift: bool | list | None = False,
+                        failure_predates: bool = False) -> dict:
+    """Classify whether a change is causal context for the selected incident.
+
+    Timing alone is insufficient: the candidate must identify the affected service,
+    be inside the bounded alert-relative window, and have no drift or ordering
+    contradiction.
+    """
+    result = {
+        "status": "unavailable", "reason_codes": [], "changed_at": changed_at,
+        "commit_sha": None, "file_path": provenance.get("file_path") if provenance else None,
+        "affected_fields": provenance.get("affected_fields", []) if provenance else [],
+    }
+    if not provenance or not changed_at:
+        result["reason_codes"].append("provenance_unavailable")
+        return result
+    commit = provenance.get("commit") or {}
+    result["commit_sha"] = commit.get("sha") or provenance.get("commit_sha")
+    if drift:
+        result["status"] = "conflicting"
+        result["reason_codes"].append("live_desired_drift")
+        return result
+    if failure_predates:
+        result["status"] = "conflicting"
+        result["reason_codes"].append("failure_predates_change")
+        return result
+    if provenance.get("service") and provenance.get("service") != service:
+        result["status"] = "recent_context"
+        result["reason_codes"].append("different_service")
+        return result
+    try:
+        changed = datetime.fromisoformat(changed_at.replace("Z", "+00:00")).astimezone(timezone.utc)
+        started_raw = provenance.get("alert_started_at")
+        started = datetime.fromisoformat(started_raw.replace("Z", "+00:00")).astimezone(timezone.utc) if started_raw else None
+    except (TypeError, ValueError):
+        result["reason_codes"].append("invalid_change_timestamp")
+        return result
+    if started is None:
+        result["status"] = "recent_context"
+        result["reason_codes"].append("alert_window_unavailable")
+        return result
+    age_seconds = (started - changed).total_seconds()
+    if age_seconds < 0 or age_seconds > 15 * 60:
+        result["status"] = "recent_context"
+        result["reason_codes"].append("outside_alert_window")
+        return result
+    result["status"] = "causal_candidate"
+    result["reason_codes"].append("same_service_change_precedes_failure")
+    return result
 
 
 def collect_diagnostics(service: str, namespace: str) -> dict:
