@@ -24,6 +24,13 @@ test-notification-correlation:
   extends: .go_consumer_test
   variables: { SERVICE_PATH: services/notification }
 
+test-ride:
+  stage: test
+  image: golang:1.25-alpine
+  script:
+    - cd services/ride
+    - go test ./...
+
 test-incident-agent:
   stage: test
   image: python:3.12-slim
@@ -82,6 +89,11 @@ build-push-notification:
   extends: .build_push_target
   variables: { SERVICE_NAME: notification-service, SERVICE_PATH: services/notification }
   needs: [test-notification-correlation]
+
+build-push-ride:
+  extends: .build_push_target
+  variables: { SERVICE_NAME: ride-service, SERVICE_PATH: services/ride }
+  needs: [test-ride]
 
 build-push-incident-agent:
   extends: .build_push_target
