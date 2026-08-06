@@ -2,6 +2,8 @@ import re, json, time
 import requests as http_requests
 
 from retrieval.models import RetrievalMode, RetrievalResult
+from critic import run_semantic_critic
+from validation import validate_diagnosis
 
 GROQ_URL       = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -55,7 +57,7 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
     lines += [
         "",
         "Evidence:",
-        f"  Pods: {facts['pods_available']}/{facts['pods_desired']} running",
+        f"  Pods: {facts.get('pods_available', 0)}/{facts.get('pods_desired', 0)} running",
     ]
     if facts.get("waiting_reason"):
         state_line = f"  Container state: {facts['waiting_reason']} ({facts['restarts']} restarts)"
@@ -309,11 +311,29 @@ def _call_llm(messages: list, model_entry: dict,
 
 
 def interpret(
-    alert_name: str, service: str, namespace: str,
-    facts: dict, bundle: str, retrieval_result: RetrievalResult | None,
-    models: list, groq_key: str = "", openrouter_key: str = "",
-    pod: str = "", _llm=None,
+    alert_name: str = "", service: str = "", namespace: str = "",
+    facts: dict | None = None, bundle: str = "", retrieval_result: RetrievalResult | None = None,
+    models: list | None = None, groq_key: str = "", openrouter_key: str = "",
+    pod: str = "", _llm=None, chain: dict | None = None,
 ) -> dict:
+    facts = facts or {}
+    models = models or []
+    if chain is not None and isinstance(retrieval_result, RetrievalResult):
+        # A unique, human-approved, contradiction-free match is deliberately
+        # conclusive: no generator, reranker, or critic call is needed.
+        if (retrieval_result.mode is RetrievalMode.EXACT_CONCLUSIVE
+                and retrieval_result.accepted and not chain.get("contradictions")):
+            document = retrieval_result.candidate.document
+            refs = [item["id"] for role in ("trigger", "primary", "causal_context") for item in chain.get(role, [])]
+            return {
+                "root_cause": document.root_cause_pattern,
+                "dev_action": document.fix_action,
+                "kubectl_hint": f"kubectl get pods -n {namespace}",
+                "evidence_refs": refs,
+                "acceptance_status": "exact_conclusive",
+                "low_confidence": False,
+                "_step_log": [{"type": "step", "name": "exact_conclusive", "metadata": {"retrieval_mode": retrieval_result.mode.value}}],
+            }
     prompt   = _build_grounded_prompt(alert_name, service, namespace,
                                       facts, bundle, retrieval_result, pod)
     messages = [{"role": "user", "content": prompt}]
@@ -339,6 +359,49 @@ def interpret(
         result["low_confidence"] = False
         result["_step_log"] = step_log
         return result
+
+    if chain is not None:
+        # The chain is the sole source of valid references for the two gates.
+        phase1.setdefault("evidence_refs", [
+            item["id"] for role in ("trigger", "primary") for item in chain.get(role, [])
+        ])
+
+        def critic_llm(critic_prompt, temperature=0.0):
+            return _run_llm([{"role": "user", "content": critic_prompt}], _llm, models,
+                            groq_key, openrouter_key, temperature=temperature)
+
+        def run_gates(draft):
+            hard = validate_diagnosis(draft, chain)
+            critic = run_semantic_critic(chain, draft, _llm=critic_llm)
+            return hard, critic
+
+        hard, critic = run_gates(phase1)
+        _log_step("hard_validation", time.time(), time.time(), passed=hard.passed, issues=hard.issues)
+        _log_step("semantic_critic", time.time(), time.time(), passed=critic.passed, status=critic.status, issues=critic.issues)
+        if hard.passed and critic.passed:
+            phase1["acceptance_status"] = "accepted"
+            phase1["low_confidence"] = False
+            phase1["_step_log"] = step_log
+            return phase1
+        refine_prompt = _build_refine_prompt(prompt, phase1, hard.issues + critic.issues)
+        refined_raw = _run_llm([{"role": "user", "content": refine_prompt}], _llm, models,
+                               groq_key, openrouter_key, temperature=REFINE_TEMPERATURE)
+        refined = _parse_output(refined_raw)
+        _log_step("llm_refine", time.time(), time.time(), parsed=refined is not None)
+        if refined is not None:
+            refined.setdefault("evidence_refs", phase1.get("evidence_refs", []))
+            hard2, critic2 = run_gates(refined)
+            _log_step("hard_validation_refine", time.time(), time.time(), passed=hard2.passed, issues=hard2.issues)
+            _log_step("semantic_critic_refine", time.time(), time.time(), passed=critic2.passed, status=critic2.status, issues=critic2.issues)
+            if hard2.passed and critic2.passed:
+                refined["acceptance_status"] = "accepted_after_refine"
+                refined["low_confidence"] = False
+                refined["_step_log"] = step_log
+                return refined
+        phase1["acceptance_status"] = "rejected_after_refine"
+        phase1["low_confidence"] = True
+        phase1["_step_log"] = step_log
+        return phase1
 
     # Phase 2 — Deterministic Quality Check
     t2 = time.time()

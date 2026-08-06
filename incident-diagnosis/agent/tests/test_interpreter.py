@@ -528,3 +528,28 @@ class TestStepLog:
             assert "started_at" in s and "finished_at" in s
             assert isinstance(s["duration_ms"], int)
             assert "metadata" in s
+
+
+def test_unique_supported_exact_match_skips_generator_and_critic():
+    from unittest.mock import Mock
+    from tests.test_validation import DLQ_CHAIN
+    calls = Mock()
+    result = interpret(
+        chain=DLQ_CHAIN,
+        retrieval_result=_exact_retrieval(),
+        namespace="vroom-dev",
+        _llm=calls,
+    )
+    assert calls.call_count == 0
+    assert result["acceptance_status"] == "exact_conclusive"
+
+
+def test_refined_answer_must_pass_both_gates():
+    from unittest.mock import Mock
+    from tests.test_validation import DLQ_CHAIN
+    bad = '{"root_cause":"readiness timeout","dev_action":"increase timeout","kubectl_hint":"kubectl get pods","evidence_refs":["k8s:event:readiness"]}'
+    good = '{"root_cause":"unknown event type Trip.Requested.v2 sent to DLQ","dev_action":"rollback EVENT_CONTRACT_VERSION to v1","kubectl_hint":"kubectl get pods -n vroom-dev","evidence_refs":["metric:dlq_events","log:evt-42","trace:' + 'a' * 32 + '"]}'
+    llm = Mock(side_effect=[bad, '{"verdict":"fail","issues":["unsupported cause"]}', good, '{"verdict":"fail","issues":["still unsupported"]}'])
+    result = interpret(chain=DLQ_CHAIN, retrieval_result=RetrievalResult.none(), namespace="vroom-dev", _llm=llm)
+    assert result["low_confidence"] is True
+    assert result["acceptance_status"] == "rejected_after_refine"
