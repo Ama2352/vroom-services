@@ -1,4 +1,5 @@
-FROM python:3.12-slim AS model
+ARG BASE_IMAGE_PREFIX=""
+FROM ${BASE_IMAGE_PREFIX}python:3.12-slim AS model
 WORKDIR /build
 ENV PYTHONPATH=/build
 COPY requirements.txt .
@@ -7,7 +8,7 @@ COPY retrieval/ retrieval/
 COPY scripts/ scripts/
 RUN python scripts/fetch_reranker_model.py --output /opt/models/minilm
 
-FROM python:3.12-slim AS runtime
+FROM ${BASE_IMAGE_PREFIX}python:3.12-slim AS runtime
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
