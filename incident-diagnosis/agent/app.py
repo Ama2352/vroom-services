@@ -24,7 +24,9 @@ from correlation import collect_log_evidence, correlate_trace, derive_log_error
 from evidence import build_evidence_chain
 from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
-                          collect_change_evidence, resolve_dependency, collect_provenance, classify_provenance)
+                          collect_change_evidence, collect_gitops_change_evidence,
+                          resolve_dependency, collect_provenance, classify_provenance,
+                          is_contract_field)
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 from retrieval.models import RetrievalMode
@@ -321,12 +323,42 @@ def _change_matches_primary_failure(template_diff: dict | None, log_evidence: di
     if "unknown event type" not in message:
         return False
     for change in (template_diff or {}).get("env_diff", []):
-        if change.get("key") != "EVENT_CONTRACT_VERSION":
+        if not is_contract_field(change.get("key", "")):
             continue
         new_value = str(change.get("new_value", "")).strip().lower()
         if new_value and re.search(rf"(?<![a-z0-9]){re.escape(new_value)}(?![a-z0-9])", message):
             return True
     return False
+
+
+def _select_change_evidence(change_services: list[str], namespace: str,
+                            log_evidence: dict,
+                            require_primary_match: bool = False) -> tuple[str, dict | None]:
+    """Select an exact causal match before falling back to recent change context."""
+    services = list(dict.fromkeys(change_services))
+    fallback = None
+    for candidate_service in services:
+        candidate_diff = collect_change_evidence(candidate_service, namespace)
+        if candidate_diff is not None and fallback is None:
+            fallback = (candidate_service, candidate_diff)
+        if candidate_diff is not None and (
+                not require_primary_match
+                or _change_matches_primary_failure(candidate_diff, log_evidence)):
+            return candidate_service, candidate_diff
+        if not require_primary_match:
+            continue
+
+        durable_diff = collect_gitops_change_evidence(
+            candidate_service, namespace, str(log_evidence.get("message", "")),
+        )
+        if durable_diff is not None and fallback is None:
+            fallback = (candidate_service, durable_diff)
+        if _change_matches_primary_failure(durable_diff, log_evidence):
+            return candidate_service, durable_diff
+
+    if fallback is not None:
+        return fallback
+    return (services[-1] if services else "", None)
 
 
 @app.route("/investigate", methods=["POST"])
@@ -385,14 +417,15 @@ def investigate():
     change_services.append(service)
 
     t1a = time.time()
-    template_diff = None
-    change_service = service
-    for candidate_service in dict.fromkeys(change_services):
-        candidate_diff = collect_change_evidence(candidate_service, namespace)
-        if candidate_diff is not None:
-            change_service = candidate_service
-            template_diff = {**candidate_diff, "service": candidate_service}
-            break
+    change_service, template_diff = _select_change_evidence(
+        change_services,
+        namespace,
+        log_evidence,
+        require_primary_match=normalized.get("incident_kind") == "dlq",
+    )
+    change_service = change_service or service
+    if template_diff is not None:
+        template_diff = {**template_diff, "service": change_service}
     t1b           = time.time()
     _step("replicaset_diff", t1a, t1b, found=template_diff is not None, service=change_service)
 

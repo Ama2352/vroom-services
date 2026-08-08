@@ -30,13 +30,10 @@ def assess_confidence(alert: dict, impact: dict, log: dict, trace: dict, facts: 
 
 
 def align_root_cause_confidence(root_cause: str, confidence: dict) -> str:
-    """Keep the user-facing conclusion consistent with evidence confidence."""
-    prefix = "Insufficient evidence to confirm — observed: "
-    if not root_cause.startswith(prefix):
-        return root_cause
-    observed = root_cause.removeprefix(prefix)
-    if confidence.get("level") == "high":
-        return f"Confirmed by metrics, structured log, and trace — observed: {observed}"
-    if confidence.get("level") == "medium":
-        return f"Probable diagnosis — observed: {observed}"
+    """Never turn evidence completeness into causal certainty.
+
+    Metric, log, and trace agreement can confirm a failure observation, but only
+    the diagnosis gates can accept a root-cause claim. Preserve the generator's
+    explicit uncertainty instead of relabeling the observation as the cause.
+    """
     return root_cause

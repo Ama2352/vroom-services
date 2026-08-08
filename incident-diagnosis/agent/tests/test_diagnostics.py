@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance,
-                          classify_provenance)
+                          classify_provenance, collect_gitops_change_evidence)
 
 
 def _prom_scalar(value):
@@ -78,6 +78,92 @@ class TestCollectChangeEvidence:
             "new_value": "bad-host:6379",
         }]
         assert result["changed_at"] == "2026-07-07T02:00:00Z"
+
+
+class TestCollectChangeAndGitOpsEvidence:
+    @patch("diagnostics.http_requests.get")
+    def test_finds_contract_commit_behind_later_image_promotion(self, mock_get):
+        synced_sha = "synced-main-sha"
+        promotion_sha = "promotion-sha"
+        contract_sha = "contract-sha"
+
+        def response(data):
+            return MagicMock(ok=True, json=lambda: data)
+
+        def side(url, **kwargs):
+            if "argocd-sync" in url:
+                return response({
+                    "sync_status": "Synced",
+                    "raw": {"status": {"sync": {"revision": synced_sha}}},
+                })
+            if url.endswith("/commits"):
+                assert kwargs["params"] == {
+                    "path": "apps/ride/overlays/dev",
+                    "sha": synced_sha,
+                    "per_page": 20,
+                }
+                return response([{"sha": promotion_sha}, {"sha": contract_sha}])
+            if url.endswith(f"/commits/{promotion_sha}"):
+                return response({
+                    "sha": promotion_sha,
+                    "commit": {
+                        "message": "chore(gitops): promote images to dev",
+                        "author": {"name": "CI", "date": "2026-08-07T15:00:00Z"},
+                    },
+                    "html_url": "https://github.com/example/gitops/commit/promotion",
+                    "files": [{
+                        "filename": "apps/ride/overlays/dev/kustomization.yaml",
+                        "patch": "-  newTag: old\n+  newTag: new",
+                    }],
+                })
+            if url.endswith(f"/commits/{contract_sha}"):
+                return response({
+                    "sha": contract_sha,
+                    "commit": {
+                        "message": "test: introduce dev event contract regression",
+                        "author": {"name": "Sang", "date": "2026-08-07T14:58:00Z"},
+                    },
+                    "html_url": "https://github.com/example/gitops/commit/contract",
+                    "files": [
+                        {
+                            "filename": "apps/ride/overlays/dev/kustomization.yaml",
+                            "patch": "+- path: patches/event-contract-v2.yaml",
+                        },
+                        {
+                            "filename": "apps/ride/overlays/dev/patches/event-contract-v2.yaml",
+                            "patch": (
+                                "             - name: RIDE_EVENT_SCHEMA\n"
+                                "-              value: v1\n"
+                                "+              value: v2"
+                            ),
+                        },
+                    ],
+                })
+            if url.endswith(f"/commits/{contract_sha}/pulls"):
+                return response([])
+            if "/contents/apps/ride/base/deployment.yaml" in url:
+                return MagicMock(ok=True, text=(
+                    "- name: RIDE_EVENT_SCHEMA\n"
+                    "  value: v1\n"
+                ))
+            raise AssertionError(f"unexpected call to {url}")
+
+        mock_get.side_effect = side
+
+        result = collect_gitops_change_evidence(
+            "ride-service", "vroom-dev", 'unknown event type "Trip.Requested.v2"',
+        )
+
+        assert result["service"] == "ride-service"
+        assert result["source"] == "gitops_history"
+        assert result["env_diff"] == [{
+            "key": "RIDE_EVENT_SCHEMA",
+            "old_value": "v1",
+            "new_value": "v2",
+        }]
+        assert result["changed_at"] == "2026-08-07T14:58:00Z"
+        assert result["file_path"] == "apps/ride/overlays/dev/patches/event-contract-v2.yaml"
+        assert result["provenance"]["commit"]["sha"] == contract_sha[:7]
 
     @patch("diagnostics.http_requests.get")
     def test_detects_image_change(self, mock_get):
@@ -438,6 +524,23 @@ class TestFormatEvidence:
 class TestCollectProvenance:
     def test_returns_none_when_no_template_diff(self):
         assert collect_provenance("ride-service", "vroom-dev", None) is None
+
+    def test_reuses_exact_provenance_attached_by_history_lookup(self):
+        provenance = {
+            "classification": "gitops-commit",
+            "commit": {"sha": "c1fdaef", "date": "2026-08-07T14:58:00Z"},
+            "pr": None,
+            "file_path": "apps/ride/overlays/dev/patches/event-contract-v2.yaml",
+        }
+
+        result = collect_provenance(
+            "ride-service",
+            "vroom-dev",
+            {"env_changed": True, "provenance": provenance},
+        )
+
+        assert result == provenance
+        assert result is not provenance
 
     @patch("diagnostics.http_requests.get")
     def test_hotfix_when_out_of_sync(self, mock_get):

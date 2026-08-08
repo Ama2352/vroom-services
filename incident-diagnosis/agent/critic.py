@@ -28,7 +28,14 @@ def parse_critic_output(raw) -> CriticResult:
 def run_semantic_critic(chain: dict, draft: dict, _llm=None) -> CriticResult:
     if _llm is None:
         return CriticResult(False, ["critic_unavailable"], "unavailable")
-    prompt = json.dumps({"task": "criticize diagnosis", "chain": chain, "draft": draft}, sort_keys=True)
+    prompt = "\n".join([
+        "You are an independent incident-diagnosis critic.",
+        "Check whether the cause explains the trigger, respects evidence roles, avoids unsupported causal promotion, and recommends relevant remediation.",
+        "Return ONLY JSON matching one of these exact shapes (no markdown or explanation):",
+        '{"verdict":"pass","issues":[]}',
+        '{"verdict":"fail","issues":["concise_issue_code_or_reason"]}',
+        json.dumps({"chain": chain, "draft": draft}, sort_keys=True),
+    ])
     try:
         try:
             raw = _llm(prompt, temperature=0.0)

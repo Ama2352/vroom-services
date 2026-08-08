@@ -18,6 +18,7 @@ GITHUB_GITOPS_REPO = os.environ.get("GITHUB_GITOPS_REPO", "Ama2352/vroom-gitops"
 GITHUB_API_URL     = "https://api.github.com"
 
 _IP_PORT_RE = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)\b")
+_VERSIONED_MESSAGE_FIELD_MARKERS = ("EVENT", "MESSAGE", "PAYLOAD")
 
 
 def _prom_scalar(query: str) -> float:
@@ -238,6 +239,193 @@ def _github_get_raw_file(path: str, ref: str = "main") -> str:
         return r.text if r.ok else ""
     except Exception:
         return ""
+
+
+def _unknown_event_contract_version(message: str) -> str:
+    match = re.search(
+        r"unknown event type\s+[\"']?[^\"']*\.([a-z][a-z0-9_-]*)[\"']?",
+        message or "",
+        flags=re.IGNORECASE,
+    )
+    return match.group(1) if match else ""
+
+
+def _commit_provenance(detail: dict, file_path: str) -> dict:
+    commit = detail.get("commit") or {}
+    author = commit.get("author") or {}
+    diff_snippet = next(
+        (item.get("patch", "") for item in detail.get("files", [])
+         if item.get("filename") == file_path),
+        "",
+    )
+    return {
+        "classification": "gitops-commit",
+        "commit": {
+            "sha": str(detail.get("sha", ""))[:7],
+            "author": author.get("name", ""),
+            "message": str(commit.get("message", "")).split("\n")[0],
+            "date": author.get("date", ""),
+            "url": detail.get("html_url", ""),
+            "diff_snippet": diff_snippet,
+        },
+        "pr": None,
+        "file_path": file_path,
+    }
+
+
+def _literal_env_value(yaml_text: str, name: str) -> str:
+    match = re.search(
+        rf"(?:^|\n)\s*-\s*name:\s*[\"']?{re.escape(name)}[\"']?\s*\r?\n"
+        r"\s*value:\s*([^\s#]+)",
+        yaml_text or "",
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return match.group(1).strip("\"'")
+
+
+def is_contract_field(name: str) -> bool:
+    normalized = str(name or "").upper()
+    return (
+        "CONTRACT" in normalized
+        or "SCHEMA" in normalized
+        or ("VERSION" in normalized
+            and any(marker in normalized for marker in _VERSIONED_MESSAGE_FIELD_MARKERS))
+    )
+
+
+def _added_literal_env_entries(patch: str) -> list[tuple[str, str]]:
+    entries = []
+    current_field = ""
+    for raw_line in (patch or "").splitlines():
+        if raw_line.startswith("@@"):
+            current_field = ""
+            continue
+        prefix = raw_line[0] if raw_line[:1] in {" ", "+", "-"} else " "
+        content = raw_line[1:] if raw_line[:1] in {" ", "+", "-"} else raw_line
+        name_match = re.match(r"\s*-\s*name:\s*([^\s#]+)", content, flags=re.IGNORECASE)
+        if name_match:
+            current_field = name_match.group(1).strip("\"'")
+            continue
+        value_match = re.match(r"\s*value:\s*([^\s#]+)", content, flags=re.IGNORECASE)
+        if prefix == "+" and current_field and value_match:
+            entries.append((current_field, value_match.group(1).strip("\"'")))
+    return entries
+
+
+def collect_gitops_change_evidence(service: str, namespace: str,
+                                    failure_message: str) -> dict | None:
+    """Find durable GitOps evidence for an exact rejected event-contract version.
+
+    ReplicaSet history is intentionally short-lived. This lookup walks the synced
+    overlay's recent commits and accepts only a patch that names both the contract
+    field and the version found in the canonical failure log.
+    """
+    version = _unknown_event_contract_version(failure_message)
+    if not version or namespace == "platform":
+        return None
+
+    try:
+        r = http_requests.get(
+            f"{EXECUTOR_URL}/tools/argocd-sync",
+            params={"app": _argocd_app_name(service, namespace)},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        data = r.json() if r.ok else {}
+        if data.get("sync_status") != "Synced":
+            return None
+        synced_sha = data.get("raw", {}).get("status", {}).get("sync", {}).get("revision", "")
+        if not synced_sha:
+            return None
+
+        short = _short_name(service)
+        environment = _env_name(namespace)
+        history_path = f"apps/{short}/overlays/{environment}"
+        r = http_requests.get(
+            f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits",
+            params={"path": history_path, "sha": synced_sha, "per_page": 20},
+            headers=_github_headers(),
+            timeout=10,
+        )
+        commits = r.json() if r.ok else []
+
+        allowed_prefixes = (
+            f"apps/{short}/base/",
+            f"apps/{short}/overlays/{environment}/",
+        )
+        for item in commits:
+            sha = item.get("sha", "")
+            if not sha:
+                continue
+            r = http_requests.get(
+                f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits/{sha}",
+                headers=_github_headers(),
+                timeout=10,
+            )
+            detail = r.json() if r.ok else {}
+            matched_file = ""
+            matched_field = ""
+            for changed_file in detail.get("files", []):
+                filename = changed_file.get("filename", "")
+                if not filename.startswith(allowed_prefixes):
+                    continue
+                for field, value in _added_literal_env_entries(changed_file.get("patch", "")):
+                    if is_contract_field(field) and value.lower() == version.lower():
+                        matched_file = filename
+                        matched_field = field
+                        break
+                if matched_file:
+                    break
+            if not matched_file:
+                continue
+
+            provenance = _commit_provenance(detail, matched_file)
+            try:
+                r = http_requests.get(
+                    f"{GITHUB_API_URL}/repos/{GITHUB_GITOPS_REPO}/commits/{sha}/pulls",
+                    headers={**_github_headers(), "Accept": "application/vnd.github.groot-preview+json"},
+                    timeout=10,
+                )
+                prs = r.json() if r.ok else []
+                if prs:
+                    provenance["pr"] = {
+                        "number": prs[0]["number"],
+                        "title": prs[0]["title"],
+                        "url": prs[0]["html_url"],
+                    }
+            except Exception:
+                pass
+
+            changed_at = provenance["commit"].get("date", "")
+            base_yaml = _github_get_raw_file(
+                f"apps/{short}/base/deployment.yaml", synced_sha,
+            )
+            previous_value = _literal_env_value(
+                base_yaml, matched_field,
+            )
+            if previous_value.lower() == version.lower():
+                previous_value = ""
+            return {
+                "service": service,
+                "source": "gitops_history",
+                "image_changed": False,
+                "old_image": "",
+                "new_image": "",
+                "env_changed": True,
+                "env_diff": [{
+                    "key": matched_field,
+                    "old_value": previous_value,
+                    "new_value": version,
+                }],
+                "changed_at": changed_at,
+                "file_path": matched_file,
+                "provenance": provenance,
+            }
+    except Exception:
+        return None
+    return None
 
 
 def _parse_yaml_deployment(yaml_str: str) -> dict:
@@ -521,6 +709,9 @@ def collect_provenance(service: str, namespace: str, template_diff: dict | None,
     # 2. Main service provenance logic (fallback/default)
     if template_diff is None:
         return None
+
+    if template_diff.get("provenance"):
+        return dict(template_diff["provenance"])
 
     app_name = _argocd_app_name(service, namespace)
     try:
