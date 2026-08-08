@@ -644,13 +644,10 @@ def test_investigate_forwards_pod_to_interpret(client):
     assert kwargs.get("pod") == "ride-abc123"
 
 
-def test_admin_ui_returns_html(client):
+def test_obsolete_admin_ui_is_not_exposed(client):
     r = client.get("/admin/ui")
-    assert r.status_code == 200
-    assert "text/html" in r.content_type
-    body = r.data.decode()
-    assert "Models" in body
-    assert "/admin/models" in body
+    assert r.status_code == 404
+    assert client.get("/admin/models").status_code == 200
 
 
 def test_investigate_collects_diagnostics_before_memory_query(client):

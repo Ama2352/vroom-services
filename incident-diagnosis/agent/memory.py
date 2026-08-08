@@ -197,66 +197,6 @@ def delete_history_entry(rdb: redis_lib.Redis, hid: str) -> bool:
     return True
 
 
-# Compatibility surface for the offline evaluation harness. Production callers use
-# retrieval.RetrievalService; these helpers preserve the historical baseline so the
-# tournament can compare old and new behavior in one aligned branch.
-KNOWLEDGE_MATCH_THRESHOLD = 0.5
-
-
-def _derive_reason_signal(facts: dict) -> str:
-    if facts.get("init_last_terminated_reason") and facts["init_last_terminated_reason"] != "Unknown":
-        return f"Init:{facts['init_last_terminated_reason']}"
-    if facts.get("init_waiting_reason"):
-        return f"Init:{facts['init_waiting_reason']}"
-    if facts.get("last_terminated_reason") and facts["last_terminated_reason"] != "Unknown":
-        return facts["last_terminated_reason"]
-    if facts.get("waiting_reason"):
-        return "ImagePullBackOff" if facts["waiting_reason"] == "ErrImagePull" else facts["waiting_reason"]
-    if facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0:
-        return "ZeroReplicas"
-    if facts.get("event_reason"):
-        return facts["event_reason"]
-    return ""
-
-
-def _token_coverage(query: str, text: str) -> float:
-    query_tokens = set(_tokenize(query))
-    if not query_tokens:
-        return 0.0
-    return len(query_tokens & set(_tokenize(text))) / len(query_tokens)
-
-
-def find_trusted_match(rdb: redis_lib.Redis, facts: dict, query: str) -> dict | None:
-    signal = _derive_reason_signal(facts)
-    entries = list_knowledge_entries(rdb)
-    for entry in entries:
-        if signal and entry.get("trigger_waiting_reason") == signal and entry.get("conclusive"):
-            return {"source": "knowledge", "knowledge_key": entry["key"],
-                    "root_cause_pattern": entry["root_cause_pattern"],
-                    "fix_action": entry["fix_action"], "context_notes": ""}
-    candidates = []
-    for history in list_all_history_entries(rdb):
-        candidates.append((_token_coverage(query, history.get("symptom", "")), "history", history))
-    for entry in entries:
-        if signal and entry.get("trigger_waiting_reason") == signal and not entry.get("conclusive"):
-            candidates.append((_token_coverage(query, entry.get("root_cause_pattern", "")), "knowledge", entry))
-    candidates = [candidate for candidate in candidates if candidate[0] >= KNOWLEDGE_MATCH_THRESHOLD]
-    if not candidates:
-        return None
-    _, kind, item = max(candidates, key=lambda candidate: candidate[0])
-    if kind == "history":
-        knowledge = get_knowledge_entry(rdb, item["knowledge_key"])
-        if not knowledge:
-            return None
-        return {"source": "history", "knowledge_key": item["knowledge_key"],
-                "root_cause_pattern": knowledge["root_cause_pattern"],
-                "fix_action": knowledge["fix_action"],
-                "context_notes": item.get("context_notes", "")}
-    return {"source": "knowledge", "knowledge_key": item["key"],
-            "root_cause_pattern": item["root_cause_pattern"],
-            "fix_action": item["fix_action"], "context_notes": ""}
-
-
 PENDING_INDEX = "pending:index"
 
 

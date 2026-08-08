@@ -65,17 +65,8 @@ def test_stable_history_ids_preserve_identical_records_as_distinct():
     assert len({entry["id"] for entry in histories}) == 2
 
 
-def test_instrumented_top1_matches_production_find_trusted_match():
-    case = _case("outbox_not_draining")
-    rdb = seed_store()
-    query = memory.build_symptom_text(
-        case.alert_name,
-        case.facts.get("waiting_reason", ""),
-        case.facts.get("log_error", ""),
-    )
-    production = memory.find_trusted_match(rdb, case.facts, query)
-    instrumented = rank_current_coverage(rdb, case)
-    if production is None:
-        assert instrumented.mode == "none"
-    else:
-        assert instrumented.candidates[0].knowledge_key == production["knowledge_key"]
+def test_legacy_coverage_is_not_exposed_by_production_memory():
+    assert not hasattr(memory, "find_trusted_match")
+    assert not hasattr(memory, "KNOWLEDGE_MATCH_THRESHOLD")
+    assert not hasattr(memory, "_derive_reason_signal")
+    assert not hasattr(memory, "_token_coverage")
