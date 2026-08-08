@@ -21,7 +21,7 @@ from memory import (search_memory as memory_search,
 from collector import collect_bundle, collect_impact
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
-from evidence import build_evidence_chain
+from routing import route_incident
 from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, collect_gitops_change_evidence,
@@ -499,7 +499,9 @@ def investigate():
         "dependency": dependency,
         "dlq_state": {"value": normalized.get("metric_value")} if normalized.get("incident_kind") == "dlq" else {},
     }
-    evidence_chain = build_evidence_chain(normalized, evidence_bundle)
+    routing = route_incident(normalized, evidence_bundle)
+    evidence_chain = routing.evidence_chain
+    _step("routing", time.time(), time.time(), **routing.to_api_dict())
     _step("evidence_chain", time.time(), time.time(), incident_kind=evidence_chain["incident_kind"],
           primary=[item["id"] for item in evidence_chain["primary"]],
           secondary=[item["id"] for item in evidence_chain["secondary"]])
@@ -512,7 +514,7 @@ def investigate():
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
     t2            = time.time()
-    retrieval     = retrieval_service.retrieve(alert_name, facts)
+    retrieval     = retrieval_service.retrieve(alert_name, facts, routing)
     trusted_match = retrieval.mode is RetrievalMode.EXACT_CONCLUSIVE
     t3            = time.time()
     _step(
@@ -598,6 +600,7 @@ def investigate():
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),
             "facts":          facts,
+            "routing":        routing.to_api_dict(include_signals=True),
         }} if debug else {}),
     })
 
