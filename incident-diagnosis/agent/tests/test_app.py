@@ -35,6 +35,86 @@ def test_unrelated_env_change_does_not_match_unknown_event_signature():
     )
 
 
+def test_unrelated_field_with_same_value_does_not_match_unknown_event_signature():
+    assert not agent_app._change_matches_primary_failure(
+        {"env_diff": [{"key": "LOG_LEVEL", "old_value": "v1", "new_value": "v2"}]},
+        {"message": 'unknown event type "Trip.Requested.v2"'},
+    )
+
+
+def test_unrelated_api_version_with_same_value_does_not_match_unknown_event_signature():
+    assert not agent_app._change_matches_primary_failure(
+        {"env_diff": [{"key": "API_VERSION", "old_value": "v1", "new_value": "v2"}]},
+        {"message": 'unknown event type "Trip.Requested.v2"'},
+    )
+
+
+def test_schema_field_discovered_from_change_matches_unknown_event_signature():
+    assert agent_app._change_matches_primary_failure(
+        {"env_diff": [{"key": "RIDE_EVENT_SCHEMA", "old_value": "v1", "new_value": "v2"}]},
+        {"message": 'unknown event type "Trip.Requested.v2"'},
+    )
+
+
+def test_change_selection_prefers_exact_upstream_contract_over_image_changes():
+    image_change = {
+        "image_changed": True,
+        "env_changed": False,
+        "env_diff": [],
+        "changed_at": "2026-08-07T15:00:00Z",
+    }
+    contract_change = {
+        "service": "ride-service",
+        "source": "gitops_history",
+        "image_changed": False,
+        "env_changed": True,
+        "env_diff": [{
+            "key": "EVENT_CONTRACT_VERSION",
+            "old_value": "",
+            "new_value": "v2",
+        }],
+        "changed_at": "2026-08-07T14:58:00Z",
+    }
+
+    with patch("app.collect_change_evidence", return_value=image_change), \
+         patch("app.collect_gitops_change_evidence", side_effect=[contract_change, None, None]):
+        service, selected = agent_app._select_change_evidence(
+            ["ride-service", "notification-service", "dispatch-service"],
+            "vroom-dev",
+            {"message": 'unknown event type "Trip.Requested.v2"'},
+            require_primary_match=True,
+        )
+
+    assert service == "ride-service"
+    assert selected == contract_change
+
+
+def test_change_selection_accepts_exact_live_hotfix_without_git_history():
+    hotfix = {
+        "image_changed": False,
+        "env_changed": True,
+        "env_diff": [{
+            "key": "EVENT_CONTRACT_VERSION",
+            "old_value": "v1",
+            "new_value": "v2",
+        }],
+        "changed_at": "2026-08-07T14:58:00Z",
+    }
+
+    with patch("app.collect_change_evidence", return_value=hotfix), \
+         patch("app.collect_gitops_change_evidence") as git_history:
+        service, selected = agent_app._select_change_evidence(
+            ["ride-service", "dispatch-service"],
+            "vroom-dev",
+            {"message": 'unknown event type "Trip.Requested.v2"'},
+            require_primary_match=True,
+        )
+
+    assert service == "ride-service"
+    assert selected == hotfix
+    git_history.assert_not_called()
+
+
 def _none_retrieval():
     return RetrievalResult.none(corpus_version=1)
 
@@ -503,7 +583,7 @@ def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_ser
     assert response.get_json()["debug"]["facts"]["provenance"]["causal_status"]["status"] == "causal_candidate"
 
 
-def test_investigate_high_confidence_replaces_insufficient_evidence_wording(client):
+def test_investigate_high_evidence_confidence_preserves_unconfirmed_cause(client):
     diagnosis = {**_FAKE_DIAGNOSIS,
                  "root_cause": "Insufficient evidence to confirm — observed: PostgreSQL unreachable"}
     with patch("app.collect_bundle", side_effect=_fake_bundle), \
@@ -517,10 +597,10 @@ def test_investigate_high_confidence_replaces_insufficient_evidence_wording(clie
         r = client.post("/investigate", data=json.dumps({
             "alert_name": "DLQEventsDetected", "service": "dispatch-service", "namespace": "vroom-dev",
         }), content_type="application/json")
-    assert r.get_json()["root_cause"] == "Confirmed by metrics, structured log, and trace — observed: PostgreSQL unreachable"
+    assert r.get_json()["root_cause"] == "Insufficient evidence to confirm — observed: PostgreSQL unreachable"
 
 
-def test_investigate_medium_confidence_uses_probable_diagnosis_wording(client):
+def test_investigate_medium_evidence_confidence_preserves_unconfirmed_cause(client):
     diagnosis = {**_FAKE_DIAGNOSIS,
                  "root_cause": "Insufficient evidence to confirm — observed: PostgreSQL unreachable"}
     with patch("app.collect_bundle", side_effect=_fake_bundle), \
@@ -534,7 +614,7 @@ def test_investigate_medium_confidence_uses_probable_diagnosis_wording(client):
         r = client.post("/investigate", data=json.dumps({
             "alert_name": "DLQEventsDetected", "service": "dispatch-service", "namespace": "vroom-dev",
         }), content_type="application/json")
-    assert r.get_json()["root_cause"] == "Probable diagnosis — observed: PostgreSQL unreachable"
+    assert r.get_json()["root_cause"] == "Insufficient evidence to confirm — observed: PostgreSQL unreachable"
 
 
 def test_investigate_forwards_pod_to_interpret(client):

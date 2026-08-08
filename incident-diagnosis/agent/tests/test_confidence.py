@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from confidence import assess_confidence
+from confidence import align_root_cause_confidence, assess_confidence
 
 ALERT = {"alert_name": "DLQEventsDetected"}
 FACTS = {"kubernetes": [], "changes": [], "dependencies": []}
@@ -30,3 +30,14 @@ def test_confidence_requires_a_scoped_log_before_returning_medium():
         {"changes": {"image_changed": True}},
     )
     assert result["level"] == "low"
+
+
+def test_evidence_confidence_does_not_promote_an_observation_to_root_cause():
+    observation = (
+        "Insufficient evidence to confirm — observed: "
+        "unknown event type 'Trip.Requested.v2'"
+    )
+
+    result = align_root_cause_confidence(observation, {"level": "high"})
+
+    assert result == observation
