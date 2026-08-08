@@ -6,7 +6,13 @@ from pathlib import Path
 from .corpus import CorpusProvider, CorpusUnavailable
 from .models import ACCEPTANCE_FLOOR, RetrievalMode, RetrievalResult
 from .reranker import MiniLMReranker, OnnxCrossEncoder, load_model_spec
-from .signals import extract_canonical_signals, serialize_incident, serialize_reranker_query
+from .signals import (
+    extract_canonical_signals,
+    serialize_incident,
+    serialize_reranker_query,
+    serialize_routed_incident,
+    serialize_routed_reranker_query,
+)
 
 
 class UnavailableReranker:
@@ -22,7 +28,7 @@ class RetrievalService:
         self.corpus = corpus
         self.reranker = reranker
 
-    def retrieve(self, alert_name: str, facts: dict) -> RetrievalResult:
+    def retrieve(self, alert_name: str, facts: dict, routing=None) -> RetrievalResult:
         started = time.perf_counter()
         bm25_ms = None
         reranker_ms = None
@@ -47,8 +53,14 @@ class RetrievalService:
             )
             return self._finish(result, started, bm25_ms, reranker_ms)
 
-        query = serialize_incident(alert_name, facts)
-        reranker_query = serialize_reranker_query(alert_name, facts)
+        if routing is not None and (
+                getattr(routing, "primary_signals", ())
+                or getattr(routing, "secondary_signals", ())):
+            query = serialize_routed_incident(routing)
+            reranker_query = serialize_routed_reranker_query(routing)
+        else:
+            query = serialize_incident(alert_name, facts)
+            reranker_query = serialize_reranker_query(alert_name, facts)
         bm25_started = time.perf_counter()
         try:
             candidates = snapshot.bm25.search(query, limit=8)

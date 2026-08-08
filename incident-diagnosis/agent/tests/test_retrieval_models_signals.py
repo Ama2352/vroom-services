@@ -3,7 +3,10 @@ from retrieval.signals import (
     extract_canonical_signals,
     select_unique_signal,
     serialize_incident,
+    serialize_routed_incident,
+    serialize_routed_reranker_query,
 )
+from routing import RoutingDecision
 
 
 def _document(source="history"):
@@ -100,3 +103,24 @@ def test_incident_serialization_labels_rich_existing_evidence():
     assert "dependency_name: registry" in text
     assert "template_env_key: IMAGE_TAG" in text
     assert "template_new_image: ride:bad" in text
+
+
+def test_routed_serializers_keep_primary_before_secondary():
+    decision = RoutingDecision(
+        incident_kind="dlq",
+        evidence_chain={},
+        primary_signals=(
+            "log_evidence.message: unknown event type Trip.Requested.v2",
+        ),
+        secondary_signals=("k8s_state.event_reason: Unhealthy",),
+        reason_codes=("explicit_incident_kind",),
+    )
+
+    lexical = serialize_routed_incident(decision)
+    semantic = serialize_routed_reranker_query(decision)
+
+    assert lexical.index("unknown event type") < lexical.index("Unhealthy")
+    assert semantic.index("unknown event type") < semantic.index("Unhealthy")
+    assert "incident_kind: dlq" in lexical
+    assert "Primary incident evidence:" in semantic
+    assert "Secondary context:" in semantic

@@ -114,3 +114,33 @@ def serialize_reranker_query(alert_name: str, facts: dict) -> str:
             if dependency.get(field) is not None and dependency.get(field) != "":
                 values.append(_clean(dependency[field]))
     return " ".join(values)
+
+
+def serialize_routed_incident(decision) -> str:
+    """Return a field-labelled lexical projection of routed evidence."""
+    lines = [f"incident_kind: {_clean(decision.incident_kind)}"]
+    lines.extend(
+        f"primary: {_clean(value)}"
+        for value in decision.primary_signals if value
+    )
+    lines.extend(
+        f"secondary: {_clean(value)}"
+        for value in decision.secondary_signals if value
+    )
+    return "\n".join(lines)
+
+
+def serialize_routed_reranker_query(decision) -> str:
+    """Return a natural-language projection with explicit evidence priority."""
+    primary = ". ".join(
+        _clean(value) for value in decision.primary_signals if value
+    )
+    secondary = ". ".join(
+        _clean(value) for value in decision.secondary_signals if value
+    )
+    parts = []
+    if primary:
+        parts.append(f"Primary incident evidence: {primary}")
+    if secondary:
+        parts.append(f"Secondary context: {secondary}")
+    return ". ".join(parts)
