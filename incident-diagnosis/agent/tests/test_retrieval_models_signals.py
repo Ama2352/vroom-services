@@ -3,7 +3,10 @@ from retrieval.signals import (
     extract_canonical_signals,
     select_unique_signal,
     serialize_incident,
+    serialize_routed_incident,
+    serialize_routed_reranker_query,
 )
+from routing import RoutingDecision
 
 
 def _document(source="history"):
@@ -100,3 +103,39 @@ def test_incident_serialization_labels_rich_existing_evidence():
     assert "dependency_name: registry" in text
     assert "template_env_key: IMAGE_TAG" in text
     assert "template_new_image: ride:bad" in text
+
+
+def test_routed_serializers_prioritize_primary_for_bm25_and_keep_context_for_minilm():
+    decision = RoutingDecision(
+        incident_kind="dlq",
+        evidence_chain={},
+        primary_signals=(
+            "log_evidence.message: unknown event type Trip.Requested.v2",
+        ),
+        secondary_signals=("k8s_state.event_reason: Unhealthy",),
+        reason_codes=("explicit_incident_kind",),
+    )
+
+    lexical = serialize_routed_incident(decision)
+    semantic = serialize_routed_reranker_query(decision)
+
+    assert "unknown event type" in lexical
+    assert "Unhealthy" not in lexical
+    assert semantic.index("unknown event type") < semantic.index("Unhealthy")
+    assert "incident_kind: dlq" in lexical
+    assert "Primary incident evidence:" in semantic
+    assert "Secondary context:" in semantic
+
+
+def test_routed_bm25_serializer_falls_back_to_secondary_when_primary_is_empty():
+    decision = RoutingDecision(
+        incident_kind="generic",
+        evidence_chain={},
+        primary_signals=(),
+        secondary_signals=("k8s_state.waiting_reason: CrashLoopBackOff",),
+        reason_codes=("generic_fallback",),
+    )
+
+    lexical = serialize_routed_incident(decision)
+
+    assert "CrashLoopBackOff" in lexical

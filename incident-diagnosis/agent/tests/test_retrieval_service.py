@@ -8,6 +8,8 @@ from retrieval.models import (
 )
 from retrieval.reranker import ScoredCandidate
 from retrieval.service import RetrievalService
+from retrieval.signals import serialize_incident
+from routing import RoutingDecision
 
 
 class StaticBM25:
@@ -96,14 +98,54 @@ def rich_facts():
     return {"log_error": "specific incident evidence"}
 
 
+def routing_decision():
+    return RoutingDecision(
+        incident_kind="dlq",
+        evidence_chain={},
+        primary_signals=("primary contract evidence",),
+        secondary_signals=("secondary readiness context",),
+        reason_codes=("explicit_incident_kind",),
+    )
+
+
 def test_unique_conclusive_exact_match_bypasses_bm25_and_reranker():
     reranker = Mock()
     result = service_for(
         snapshot_with_exact("OOMKilled", document("oom", conclusive=True)), reranker,
-    ).retrieve("Terminated", {"last_terminated_reason": "OOMKilled"})
+    ).retrieve(
+        "Terminated", {"last_terminated_reason": "OOMKilled"},
+        routing_decision(),
+    )
     assert result.mode is RetrievalMode.EXACT_CONCLUSIVE
     assert result.candidate.knowledge_key == "oom"
     reranker.rerank.assert_not_called()
+
+
+def test_retrieval_uses_routed_queries_for_advisory_search():
+    bm25 = Mock(search=Mock(return_value=(candidate("contract"),)))
+    snapshot = replace(make_snapshot(), bm25=bm25)
+    reranker = Mock(rerank=Mock(return_value=(
+        ScoredCandidate(candidate("contract"), 2.0),
+    )))
+
+    result = service_for(snapshot, reranker).retrieve(
+        "Alert", rich_facts(), routing_decision(),
+    )
+
+    assert result.mode is RetrievalMode.RERANKED_ADVISORY
+    assert "primary contract evidence" in bm25.search.call_args.args[0]
+    assert "secondary readiness context" not in bm25.search.call_args.args[0]
+    assert "primary contract evidence" in reranker.rerank.call_args.args[0]
+    assert "secondary readiness context" in reranker.rerank.call_args.args[0]
+
+
+def test_missing_routing_uses_legacy_serializers():
+    bm25 = Mock(search=Mock(return_value=()))
+    snapshot = replace(make_snapshot(), bm25=bm25)
+
+    service_for(snapshot, Mock()).retrieve("Alert", rich_facts())
+
+    assert bm25.search.call_args.args[0] == serialize_incident("Alert", rich_facts())
 
 
 def test_multiple_exact_groups_are_ambiguous_and_continue_to_reranking():

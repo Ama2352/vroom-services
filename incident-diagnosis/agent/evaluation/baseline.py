@@ -5,9 +5,37 @@ import fakeredis
 import memory
 import seed
 from evaluation.models import RankedCandidate, RetrievalCase, RetrievalOutcome
+from retrieval.bm25 import tokenize
 
 
 RUNBOOKS_DIR = Path(__file__).resolve().parents[1] / "runbooks"
+KNOWLEDGE_MATCH_THRESHOLD = 0.5
+
+
+def _derive_reason_signal(facts: dict) -> str:
+    init_last = facts.get("init_last_terminated_reason")
+    if init_last and init_last != "Unknown":
+        return f"Init:{init_last}"
+    if facts.get("init_waiting_reason"):
+        return f"Init:{facts['init_waiting_reason']}"
+    last = facts.get("last_terminated_reason")
+    if last and last != "Unknown":
+        return str(last)
+    waiting = facts.get("waiting_reason")
+    if waiting:
+        return "ImagePullBackOff" if waiting == "ErrImagePull" else str(waiting)
+    if facts.get("pods_available", 0) == 0 and facts.get("pods_desired", 0) > 0:
+        return "ZeroReplicas"
+    if facts.get("event_reason"):
+        return str(facts["event_reason"])
+    return ""
+
+
+def _token_coverage(query: str, text: str) -> float:
+    query_tokens = set(tokenize(query))
+    if not query_tokens:
+        return 0.0
+    return len(query_tokens & set(tokenize(text))) / len(query_tokens)
 
 
 def _stabilize_seeded_history_ids(rdb: fakeredis.FakeRedis) -> None:
@@ -77,7 +105,7 @@ def rank_current_coverage(
         case.facts.get("waiting_reason", ""),
         case.facts.get("log_error", ""),
     )
-    signal = memory._derive_reason_signal(case.facts)
+    signal = _derive_reason_signal(case.facts)
     knowledge_entries = memory.list_knowledge_entries(rdb)
 
     if signal:
@@ -95,8 +123,8 @@ def rank_current_coverage(
 
     candidates = []
     for history in memory.list_all_history_entries(rdb):
-        score = memory._token_coverage(query, history.get("symptom", ""))
-        if score < memory.KNOWLEDGE_MATCH_THRESHOLD:
+        score = _token_coverage(query, history.get("symptom", ""))
+        if score < KNOWLEDGE_MATCH_THRESHOLD:
             continue
         knowledge = memory.get_knowledge_entry(rdb, history["knowledge_key"])
         if not knowledge:
@@ -117,10 +145,10 @@ def rank_current_coverage(
                 entry.get("trigger_waiting_reason") == signal
                 and not entry.get("conclusive")
             ):
-                score = memory._token_coverage(
+                score = _token_coverage(
                     query, entry.get("root_cause_pattern", "")
                 )
-                if score >= memory.KNOWLEDGE_MATCH_THRESHOLD:
+                if score >= KNOWLEDGE_MATCH_THRESHOLD:
                     candidates.append(
                         _candidate(entry, score, "knowledge", entry["key"])
                     )

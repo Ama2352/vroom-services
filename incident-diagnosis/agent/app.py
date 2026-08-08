@@ -21,7 +21,7 @@ from memory import (search_memory as memory_search,
 from collector import collect_bundle, collect_impact
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
-from evidence import build_evidence_chain
+from routing import route_incident
 from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, collect_gitops_change_evidence,
@@ -168,105 +168,6 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
         print(f"[reflect] failed (non-fatal): {e}", flush=True)
 
 
-_ADMIN_UI_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Incident Agent Admin</title>
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; font-family: monospace; }
-body { background: #1a1a2e; color: #e0e0e0; padding: 20px; }
-h1 { color: #4fc3f7; margin-bottom: 20px; font-size: 1.2em; }
-.tabs { display: flex; gap: 2px; margin-bottom: 20px; }
-.tab { padding: 8px 20px; background: #2a2a4a; border: none; color: #aaa; cursor: pointer; font-size: 0.9em; }
-.tab.active { background: #0d47a1; color: #fff; }
-.panel { display: none; }
-.panel.active { display: block; }
-textarea { width: 100%; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 10px; font-size: 0.85em; resize: vertical; line-height: 1.5; }
-button { padding: 8px 16px; border: none; cursor: pointer; font-size: 0.85em; margin: 4px 2px; }
-.btn-primary { background: #0d47a1; color: white; }
-.btn-secondary { background: #37474f; color: #ccc; }
-.btn-success { background: #1b5e20; color: white; }
-.divider { border-top: 1px solid #30363d; margin: 20px 0; padding-top: 20px; }
-label { display: block; color: #8b949e; font-size: 0.8em; margin-bottom: 4px; }
-.row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-pre { background: #0d1117; border: 1px solid #30363d; padding: 12px; overflow-y: auto;
-      white-space: pre-wrap; font-size: 0.8em; line-height: 1.5; max-height: 70vh; }
-.toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px; border-radius: 4px;
-         font-size: 0.85em; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
-.toast.show { opacity: 1; }
-.toast.ok  { background: #1b5e20; color: white; }
-.toast.err { background: #b71c1c; color: white; }
-.err-msg { color: #ef5350; font-size: 0.8em; margin-top: 4px; min-height: 1.2em; }
-.kt-entry { border: 1px solid #30363d; padding: 8px; margin-bottom: 8px; }
-input { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 6px;
-        font-size: 0.85em; font-family: monospace; }
-</style>
-</head>
-<body>
-<h1>Incident Agent &#8212; Admin</h1>
-<div class="tabs">
-  <button class="tab active" onclick="switchTab('models')">Models</button>
-</div>
-
-<div id="tab-models" class="panel active">
-  <div class="row">
-    <label style="flex:1;margin:0;">Model Priority List (JSON array)</label>
-    <button class="btn-primary" onclick="saveModels()">Save</button>
-  </div>
-  <textarea id="models-text" rows="10" spellcheck="false"></textarea>
-  <div class="err-msg" id="models-error"></div>
-</div>
-
-<div class="toast" id="toast"></div>
-<script>
-const TABS = ["models"];
-function switchTab(name) {
-  TABS.forEach(t => {
-    document.getElementById("tab-"+t).classList.toggle("active", t===name);
-  });
-  document.querySelectorAll(".tab").forEach((el,i) => {
-    el.classList.toggle("active", TABS[i]===name);
-  });
-  if (name==="models") loadModels();
-}
-function showToast(msg, ok) {
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.className = "toast show " + (ok ? "ok" : "err");
-  setTimeout(() => { t.className = "toast"; }, 3000);
-}
-async function loadModels() {
-  try {
-    const r = await fetch("/admin/models");
-    const d = await r.json();
-    document.getElementById("models-text").value = JSON.stringify(d.models, null, 2);
-  } catch(e) { showToast("Failed to load models", false); }
-}
-async function saveModels() {
-  document.getElementById("models-error").textContent = "";
-  let parsed;
-  try   { parsed = JSON.parse(document.getElementById("models-text").value); }
-  catch (e) { document.getElementById("models-error").textContent = "Invalid JSON: "+e.message; return; }
-  try {
-    const r = await fetch("/admin/models", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(parsed),
-    });
-    const d = await r.json();
-    if (d.error) { document.getElementById("models-error").textContent = d.error; }
-    else {
-      showToast("Models saved", true);
-      document.getElementById("models-text").value = JSON.stringify(d.models, null, 2);
-    }
-  } catch(e) { showToast("Save failed: "+e.message, false); }
-}
-loadModels();
-</script>
-</body>
-</html>"""
-
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.route("/health")
@@ -281,11 +182,6 @@ def memory_search_endpoint():
     if not query:
         return jsonify({"result": "no relevant memory found"})
     return jsonify({"result": memory_search(rdb, query, limit=limit)})
-
-
-@app.route("/admin/ui")
-def admin_ui():
-    return _ADMIN_UI_HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 @app.route("/admin/reset-incidents", methods=["POST"])
@@ -499,7 +395,9 @@ def investigate():
         "dependency": dependency,
         "dlq_state": {"value": normalized.get("metric_value")} if normalized.get("incident_kind") == "dlq" else {},
     }
-    evidence_chain = build_evidence_chain(normalized, evidence_bundle)
+    routing = route_incident(normalized, evidence_bundle)
+    evidence_chain = routing.evidence_chain
+    _step("routing", time.time(), time.time(), **routing.to_api_dict())
     _step("evidence_chain", time.time(), time.time(), incident_kind=evidence_chain["incident_kind"],
           primary=[item["id"] for item in evidence_chain["primary"]],
           secondary=[item["id"] for item in evidence_chain["secondary"]])
@@ -512,7 +410,7 @@ def investigate():
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
     t2            = time.time()
-    retrieval     = retrieval_service.retrieve(alert_name, facts)
+    retrieval     = retrieval_service.retrieve(alert_name, facts, routing)
     trusted_match = retrieval.mode is RetrievalMode.EXACT_CONCLUSIVE
     t3            = time.time()
     _step(
@@ -598,6 +496,7 @@ def investigate():
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),
             "facts":          facts,
+            "routing":        routing.to_api_dict(include_signals=True),
         }} if debug else {}),
     })
 

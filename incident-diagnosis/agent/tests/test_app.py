@@ -291,7 +291,7 @@ def test_investigate_records_step_events_in_timeline(client):
     # by Task 11's live manual verification.
     assert step_names == [
         "collect_diagnostics", "replicaset_diff", "dependency_chase", "provenance_lookup",
-        "evidence_chain", "trusted_match_check", "record_incident",
+        "routing", "evidence_chain", "trusted_match_check", "record_incident",
     ]
     for entry in timeline:
         if entry.get("type") == "step":
@@ -539,6 +539,7 @@ def test_investigate_passes_dlq_alert_metric_into_impact_collection(client):
 
 def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_service(client):
     calls = []
+    captured = {}
     ride_diff = {
         "changed_at": "2026-08-06T10:30:00Z",
         "env_changed": True,
@@ -554,6 +555,10 @@ def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_ser
         assert template_diff["service"] == "ride-service"
         return {"classification": "gitops-commit", "changed_at": "2026-08-06T10:30:00Z"}
 
+    def retrieve(alert_name, facts, routing=None):
+        captured["routing"] = routing
+        return _none_retrieval()
+
     with patch("app.collect_bundle", side_effect=_fake_bundle), \
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
          patch("app.collect_impact", return_value={"status": "available", "errors": []}), \
@@ -568,6 +573,7 @@ def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_ser
          patch("app.collect_change_evidence", side_effect=collect_change), \
          patch("app.resolve_dependency", return_value=None), \
          patch("app.collect_provenance", side_effect=collect_provenance), \
+         patch("app.retrieval_service.retrieve", side_effect=retrieve), \
          patch("app.interpret", return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         response = client.post("/investigate?debug=true", data=json.dumps({
@@ -581,6 +587,10 @@ def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_ser
     assert ("provenance", "ride-service", "vroom-dev") in calls
     assert response.get_json()["debug"]["facts"]["template_diff"]["service"] == "ride-service"
     assert response.get_json()["debug"]["facts"]["provenance"]["causal_status"]["status"] == "causal_candidate"
+    assert captured["routing"] is not None
+    assert captured["routing"].incident_kind == "dlq"
+    assert response.get_json()["evidence_chain"] == captured["routing"].evidence_chain
+    assert response.get_json()["debug"]["routing"]["primary_signals"]
 
 
 def test_investigate_high_evidence_confidence_preserves_unconfirmed_cause(client):
@@ -634,13 +644,10 @@ def test_investigate_forwards_pod_to_interpret(client):
     assert kwargs.get("pod") == "ride-abc123"
 
 
-def test_admin_ui_returns_html(client):
+def test_obsolete_admin_ui_is_not_exposed(client):
     r = client.get("/admin/ui")
-    assert r.status_code == 200
-    assert "text/html" in r.content_type
-    body = r.data.decode()
-    assert "Models" in body
-    assert "/admin/models" in body
+    assert r.status_code == 404
+    assert client.get("/admin/models").status_code == 200
 
 
 def test_investigate_collects_diagnostics_before_memory_query(client):
@@ -650,7 +657,7 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
         call_order.append("collect_diagnostics")
         return _FAKE_FACTS
 
-    def fake_retrieve(alert_name, facts):
+    def fake_retrieve(alert_name, facts, routing=None):
         call_order.append("retrieve")
         return _none_retrieval()
 
@@ -679,8 +686,9 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
 def test_investigate_query_includes_waiting_reason_and_log_error(client):
     captured = {}
 
-    def fake_retrieve(alert_name, facts):
+    def fake_retrieve(alert_name, facts, routing=None):
         captured["facts"] = facts
+        captured["routing"] = routing
         return _none_retrieval()
 
     with patch("app.collect_bundle",         side_effect=_fake_bundle), \
@@ -698,6 +706,7 @@ def test_investigate_query_includes_waiting_reason_and_log_error(client):
 
     assert captured["facts"]["waiting_reason"] == _FAKE_FACTS["waiting_reason"]
     assert captured["facts"]["log_error"] == _FAKE_FACTS["log_error"]
+    assert captured["routing"].incident_kind == "generic"
 
 
 def test_reflect_and_store_writes_pending_suggestion_in_mock_mode():
