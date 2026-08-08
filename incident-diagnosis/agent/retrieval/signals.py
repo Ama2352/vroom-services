@@ -117,15 +117,13 @@ def serialize_reranker_query(alert_name: str, facts: dict) -> str:
 
 
 def serialize_routed_incident(decision) -> str:
-    """Return a field-labelled lexical projection of routed evidence."""
+    """Return primary lexical evidence, with secondary-only sparse fallback."""
     lines = [f"incident_kind: {_clean(decision.incident_kind)}"]
+    selected = decision.primary_signals or decision.secondary_signals
+    role = "primary" if decision.primary_signals else "secondary_fallback"
     lines.extend(
-        f"primary: {_clean(value)}"
-        for value in decision.primary_signals if value
-    )
-    lines.extend(
-        f"secondary: {_clean(value)}"
-        for value in decision.secondary_signals if value
+        f"{role}: {_clean(value)}"
+        for value in selected if value
     )
     return "\n".join(lines)
 

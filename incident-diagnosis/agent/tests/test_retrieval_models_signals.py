@@ -105,7 +105,7 @@ def test_incident_serialization_labels_rich_existing_evidence():
     assert "template_new_image: ride:bad" in text
 
 
-def test_routed_serializers_keep_primary_before_secondary():
+def test_routed_serializers_prioritize_primary_for_bm25_and_keep_context_for_minilm():
     decision = RoutingDecision(
         incident_kind="dlq",
         evidence_chain={},
@@ -119,8 +119,23 @@ def test_routed_serializers_keep_primary_before_secondary():
     lexical = serialize_routed_incident(decision)
     semantic = serialize_routed_reranker_query(decision)
 
-    assert lexical.index("unknown event type") < lexical.index("Unhealthy")
+    assert "unknown event type" in lexical
+    assert "Unhealthy" not in lexical
     assert semantic.index("unknown event type") < semantic.index("Unhealthy")
     assert "incident_kind: dlq" in lexical
     assert "Primary incident evidence:" in semantic
     assert "Secondary context:" in semantic
+
+
+def test_routed_bm25_serializer_falls_back_to_secondary_when_primary_is_empty():
+    decision = RoutingDecision(
+        incident_kind="generic",
+        evidence_chain={},
+        primary_signals=(),
+        secondary_signals=("k8s_state.waiting_reason: CrashLoopBackOff",),
+        reason_codes=("generic_fallback",),
+    )
+
+    lexical = serialize_routed_incident(decision)
+
+    assert "CrashLoopBackOff" in lexical

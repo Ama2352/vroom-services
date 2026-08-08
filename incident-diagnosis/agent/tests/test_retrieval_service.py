@@ -134,8 +134,9 @@ def test_retrieval_uses_routed_queries_for_advisory_search():
 
     assert result.mode is RetrievalMode.RERANKED_ADVISORY
     assert "primary contract evidence" in bm25.search.call_args.args[0]
-    assert "secondary readiness context" in bm25.search.call_args.args[0]
+    assert "secondary readiness context" not in bm25.search.call_args.args[0]
     assert "primary contract evidence" in reranker.rerank.call_args.args[0]
+    assert "secondary readiness context" in reranker.rerank.call_args.args[0]
 
 
 def test_missing_routing_uses_legacy_serializers():
