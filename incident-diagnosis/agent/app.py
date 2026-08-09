@@ -449,6 +449,7 @@ def investigate():
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         "evidence_chain": evidence_chain,
         "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
+        "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
     }
     t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
@@ -486,6 +487,7 @@ def investigate():
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         "evidence_chain": evidence_chain,
         "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
+        "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
         **({"debug": {
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),

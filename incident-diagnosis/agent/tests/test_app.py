@@ -275,6 +275,7 @@ def test_investigate_replaces_rejected_generated_remediation_with_safe_fallback(
     assert body["dev_action"] == "Do not run a remediation command until the diagnosis is reviewed."
     assert body["kubectl_hint"] == "kubectl get pods -n vroom-dev -l app=dispatch-service"
     assert body["diagnosis_decision"]["status"] == "rejected_after_refine"
+    assert body["causal_chain_summary"]["primary_ids"] == ["log:selected"]
 
 
 # ── /incidents routes ──────────────────────────────────────────────────────────
