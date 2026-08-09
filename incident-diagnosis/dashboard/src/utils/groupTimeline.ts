@@ -7,8 +7,12 @@ export interface Phase {
 
 export const PHASES: Phase[] = [
   { name: 'Collect Evidence', steps: ['collect_diagnostics', 'replicaset_diff', 'dependency_chase', 'provenance_lookup'] },
+  { name: 'Correlate Evidence', steps: ['routing', 'evidence_chain'] },
   { name: 'Match Knowledge',  steps: ['trusted_match_check'] },
-  { name: 'Interpret',        steps: ['llm_phase1', 'quality_check', 'llm_refine'] },
+  { name: 'Evaluate Diagnosis', steps: [
+    'exact_conclusive', 'llm_phase1', 'quality_check', 'hard_validation', 'semantic_critic',
+    'llm_refine', 'hard_validation_refine', 'semantic_critic_refine',
+  ] },
   { name: 'Record',           steps: ['record_incident'] },
 ]
 
@@ -17,7 +21,7 @@ function phaseForStep(stepName: string): Phase | undefined {
 }
 
 function computePhaseStatus(steps: TimelineStepEntry[]): 'ok' | 'error' {
-  return steps.some(s => s.metadata?.parsed === false) ? 'error' : 'ok'
+  return steps.some(s => s.metadata?.parsed === false || s.metadata?.passed === false) ? 'error' : 'ok'
 }
 
 export type PhaseItem = {
@@ -38,9 +42,6 @@ export function groupTimeline(entries: TimelineEntry[]): TimelineItem[] {
 
   function flushPhase() {
     if (!currentPhaseName || currentSteps.length === 0) return
-    const phaseDef = PHASES.find(p => p.name === currentPhaseName)
-    // unknown step name with no phase mapping — drop rather than crash (defensive; shouldn't happen with real data)
-    if (!phaseDef) { currentPhaseName = null; currentSteps = []; return }
     const durationMs = currentSteps.reduce((sum, s) => sum + (s.duration_ms || 0), 0)
     items.push({ kind: 'phase', name: currentPhaseName, steps: currentSteps, durationMs, status: computePhaseStatus(currentSteps) })
     currentPhaseName = null
