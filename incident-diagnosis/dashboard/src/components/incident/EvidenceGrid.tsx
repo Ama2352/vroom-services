@@ -1,5 +1,5 @@
 import { Activity, RefreshCw, AlertTriangle, History } from 'lucide-react'
-import type { Incident, Provenance } from '../../types/incident'
+import type { DualProvenance, Incident, Provenance, ProvenanceSource } from '../../types/incident'
 import { Card, CardTitle } from '../ui/Card'
 
 function Row({ label, value }: { label: string; value: string | number | null | undefined }) {
@@ -57,6 +57,7 @@ function ColoredDiffSnippet({ diff }: { diff: string }) {
 }
 
 function ProvenanceNote({ provenance }: { provenance: Provenance }) {
+  if ('dual' in provenance) return <DualProvenanceNote provenance={provenance} />
   if (provenance.classification === 'hotfix') {
     return (
       <div className="mt-3 rounded-md border border-root-cause bg-root-cause-soft px-3 py-2 text-xs text-root-cause-label font-medium">
@@ -92,12 +93,66 @@ function ProvenanceNote({ provenance }: { provenance: Provenance }) {
   )
 }
 
+function readableReason(value?: string) {
+  if (!value) return 'Unavailable'
+  const text = value.replaceAll('_', ' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function SourceCommit({ source }: { source: ProvenanceSource }) {
+  if (source.status !== 'found') {
+    return <span className="text-ink-faint">{readableReason(source.reason)}</span>
+  }
+  if (!source.commit) return <span className="text-ink-faint">Revision metadata unavailable</span>
+  const label = source.commit.sha.slice(0, 12)
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      {source.commit.url
+        ? <a href={source.commit.url} target="_blank" rel="noreferrer" className="font-mono text-accent hover:text-accent-strong">{label}</a>
+        : <span className="font-mono text-ink">{label}</span>}
+      {source.commit.message && <span className="text-ink-soft">{source.commit.message}</span>}
+    </span>
+  )
+}
+
+function DualProvenanceNote({ provenance }: { provenance: DualProvenance }) {
+  const statusLabels = {
+    causal_candidate: 'Causal candidate',
+    recent_context: 'Recent context',
+    conflicting: 'Conflicting evidence',
+    unavailable: 'Causality unavailable',
+  }
+  const source = provenance.dual.service_source
+  return (
+    <div className="mt-2 space-y-2 text-xs">
+      <div className="inline-flex rounded-full border border-border bg-canvas px-2 py-0.5 font-medium text-ink-soft">
+        {statusLabels[provenance.causal_status.status]}
+      </div>
+      <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-2 border-t border-border pt-2">
+        <span className="text-ink-faint">GitOps</span>
+        <SourceCommit source={provenance.dual.gitops} />
+        <span className="text-ink-faint">Service source</span>
+        <SourceCommit source={source} />
+      </div>
+      {source.source_relevance === 'no_relevant_service_files' && (
+        <p className="m-0 text-ink-faint">No relevant {provenance.service} source files changed in this image revision</p>
+      )}
+      {source.changed_paths && source.changed_paths.length > 0 && (
+        <div className="font-mono text-[11px] text-ink-faint">{source.changed_paths.join(', ')}</div>
+      )}
+    </div>
+  )
+}
+
 export function EvidenceGrid({ incident }: { incident: Incident }) {
   const td = incident.template_diff
   const dep = incident.dependency
   const prov = incident.provenance
   const hasInit = Boolean(incident.init_waiting_reason || incident.init_last_terminated_reason || incident.init_restarts > 0)
-  const hasLogEvent = Boolean(incident.log_error || incident.event_reason)
+  const canonicalLog = incident.log_evidence
+    ? (incident.log_evidence.status === 'found' ? incident.log_evidence.message : '')
+    : incident.log_error
+  const hasLogEvent = Boolean(canonicalLog || incident.event_reason)
 
   return (
     <div className="flex flex-col gap-3">
@@ -151,7 +206,7 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
       {(td || prov) && (
         <Card>
           <CardTitle><History size={14} /> Recent Change</CardTitle>
-          {prov && prov.target === 'dependency' && prov.classification === 'hotfix' ? (
+          {prov && !('dual' in prov) && prov.target === 'dependency' && prov.classification === 'hotfix' ? (
             <>
               <p className="text-xs text-ink-soft mb-3 leading-normal">
                 Dependency <span className="font-semibold text-ink">{prov.dependency_name}</span> is currently <span className="font-semibold text-root-cause">OutOfSync</span> in ArgoCD due to manual scaling/configuration drift:
@@ -176,7 +231,7 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
             </>
           ) : (
             <>
-              {td && (!prov || prov.classification === 'hotfix') && (
+              {td && (!prov || !('dual' in prov) && prov.classification === 'hotfix') && (
                 <>
                   {td.env_changed && td.env_diff.map((d, i) => (
                     <DiffBlock key={i} header={`${incident.service} · env.${d.key}`} oldValue={d.old_value} newValue={d.new_value} />
@@ -186,12 +241,12 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
                   )}
                 </>
               )}
-              {((prov && prov.classification === 'gitops-commit' && prov.commit?.date) || (td && td.changed_at)) && (
+              {((prov && !('dual' in prov) && prov.classification === 'gitops-commit' && prov.commit?.date) || (td && td.changed_at)) && (
                 <div className="mt-3 flex justify-between border-t border-border pt-2.5 text-xs text-ink-soft">
                   <span>Changed at</span>
                   <span className="font-mono text-ink">
                     {formatChangedAt(
-                      (prov?.classification === 'gitops-commit' && prov.commit?.date)
+                      (prov && !('dual' in prov) && prov.classification === 'gitops-commit' && prov.commit?.date)
                         ? prov.commit.date
                         : (td ? td.changed_at : "")
                     )}
@@ -208,7 +263,7 @@ export function EvidenceGrid({ incident }: { incident: Incident }) {
         <Card>
           <CardTitle><AlertTriangle size={14} /> Log &amp; Event</CardTitle>
           <dl className="m-0">
-            <Row label="Log error" value={incident.log_error} />
+            <Row label="Log error" value={canonicalLog} />
             <Row label="Event reason" value={incident.event_reason} />
             <Row label="Event message" value={incident.event_message} />
             <Row label="Event object" value={incident.event_object} />

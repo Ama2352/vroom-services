@@ -40,8 +40,13 @@ def _commit_summary(detail: dict) -> dict:
     }
 
 
-def _changed_files(detail: dict) -> list[dict]:
+def _changed_files(detail: dict, prefix: str = "") -> list[dict]:
     files = detail.get("files") or []
+    if prefix:
+        files = [
+            item for item in files
+            if str(item.get("filename", "")).lower().startswith(prefix)
+        ]
     return [
         {
             "path": str(item.get("filename", "")),
@@ -72,7 +77,14 @@ def _added_environment_values(patch: str) -> list[tuple[str, str]]:
     return added
 
 
-def resolve_image_commit(image: str, services_client: GitHubClient) -> dict:
+def _service_source_prefix(service: str) -> str:
+    name = (service or "").strip().lower()
+    if name.endswith("-service"):
+        name = name[:-len("-service")]
+    return f"services/{name}/" if name else ""
+
+
+def resolve_image_commit(image: str, services_client: GitHubClient, service: str = "") -> dict:
     """Resolve an immutable CI image tag to its exact service-source commit."""
     revision = _image_revision(image)
     if not revision:
@@ -82,18 +94,21 @@ def resolve_image_commit(image: str, services_client: GitHubClient) -> dict:
     if result.status != "available" or not isinstance(result.value, dict):
         return {"status": "unavailable", "reason": result.reason or "source_commit_unavailable"}
 
+    prefix = _service_source_prefix(service)
+    changed_files = _changed_files(result.value, prefix=prefix)
     return {
         "status": "found",
         "image": image,
         "source_revision": revision,
         "commit": _commit_summary(result.value),
-        "changed_files": _changed_files(result.value),
+        "changed_files": changed_files,
+        "source_relevance": "relevant_files_found" if changed_files else "no_relevant_service_files",
     }
 
 
-def collect_service_source_evidence(image: str, services_client: GitHubClient) -> dict:
+def collect_service_source_evidence(image: str, services_client: GitHubClient, service: str = "") -> dict:
     """Collect bounded source evidence for the deployed image only."""
-    return resolve_image_commit(image, services_client)
+    return resolve_image_commit(image, services_client, service=service)
 
 
 def collect_deployed_identity(service: str, namespace: str, deployment_reader) -> dict:
@@ -148,6 +163,27 @@ def combine_provenance(gitops: dict | None, service_source: dict | None) -> dict
         "gitops": dict(gitops or {"status": "unavailable", "reason": "gitops_unavailable"}),
         "service_source": dict(service_source or {"status": "unavailable", "reason": "service_source_unavailable"}),
     }
+
+
+def summarize_provenance(provenance: dict | None) -> dict | None:
+    """Return the public/persisted provenance contract without repository patch bodies."""
+    if not provenance:
+        return None
+    omitted = {"dual", "patch", "changed_files", "diff", "diff_snippet"}
+    summary = {key: value for key, value in provenance.items() if key not in omitted}
+    dual = provenance.get("dual") or {}
+    summarized_dual = {}
+    for source_name in ("gitops", "service_source"):
+        source = dict(dual.get(source_name) or {})
+        files = source.pop("changed_files", []) or []
+        source.pop("patch", None)
+        source.pop("diff", None)
+        source.pop("diff_snippet", None)
+        if files:
+            source["changed_paths"] = [str(item.get("path", "")) for item in files if item.get("path")]
+        summarized_dual[source_name] = source
+    summary["dual"] = summarized_dual
+    return summary
 
 
 def _identifiers(text: str) -> dict[str, str]:

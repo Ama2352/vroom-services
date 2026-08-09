@@ -7,8 +7,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 from memory import (search_memory as memory_search,
-                    search_memory_items, format_incidents,
-                    connect as redis_connect, build_symptom_text,
+                    connect as redis_connect,
                     store_pending_suggestion, KNOWLEDGE_INDEX,
                     record_incident_occurrence, get_incident, list_incidents,
                     get_latest_incident, get_incident_timeline, append_incident_timeline, resolve_incident,
@@ -23,13 +22,14 @@ from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
 from routing import route_incident
 from confidence import align_root_cause_confidence, assess_confidence
-from diagnostics import (collect_diagnostics, format_evidence,
+from diagnostics import (collect_diagnostics,
                           collect_change_evidence, resolve_dependency,
                           collect_workload_deployment,
                           collect_gitops_deployed_change)
 from github_client import repository_clients_from_env
 from provenance import (classify_causality, collect_deployed_identity,
-                        collect_service_source_evidence, combine_provenance)
+                        collect_service_source_evidence, combine_provenance,
+                        summarize_provenance)
 from finalization import finalize_diagnosis
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
@@ -173,6 +173,15 @@ def _reflect_and_store(rdb, incident: dict, fix_command: str) -> None:
         print(f"[reflect] failed (non-fatal): {e}", flush=True)
 
 
+def _should_reflect(diagnosis: dict, diagnosis_confidence: dict) -> bool:
+    decision = diagnosis.get("diagnosis_decision") or {}
+    return (
+        decision.get("published_generated_answer") is True
+        and decision.get("status") in {"accepted", "accepted_after_refine"}
+        and diagnosis_confidence.get("level") in {"high", "medium"}
+    )
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.route("/health")
@@ -230,7 +239,7 @@ def _collect_dual_provenance(
     deployed = collect_deployed_identity(service, namespace, collect_workload_deployment)
     image = deployed.get("image", "")
     source = (
-        collect_service_source_evidence(image, _repository_clients.services)
+        collect_service_source_evidence(image, _repository_clients.services, service=service)
         if deployed.get("status") == "found"
         else {"status": "unavailable", "reason": deployed.get("reason", "workload_image_unavailable")}
     )
@@ -241,7 +250,7 @@ def _collect_dual_provenance(
     causal = classify_causality(
         dual, service, log_evidence, trace_handoff, alert_started_at, failure_predates=False,
     )
-    return {
+    return summarize_provenance({
         **({key: value for key, value in gitops.items() if key != "status"} if gitops.get("status") == "found" else {}),
         "classification": gitops.get("classification", "unavailable"),
         "service": service,
@@ -251,7 +260,7 @@ def _collect_dual_provenance(
             "reason_codes": list(causal.reason_codes),
             "matched_identifiers": list(causal.matched_identifiers),
         },
-    }
+    })
 
 
 @app.route("/investigate", methods=["POST"])
@@ -365,6 +374,8 @@ def investigate():
         # The selected structured Loki record is canonical for diagnosis; the
         # legacy latest-error query remains only a collector fallback.
         facts["log_error"] = derive_log_error(log_evidence)
+    elif log_evidence.get("status") == "no_match":
+        facts["log_error"] = ""
 
     diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {
         "kubernetes": facts.get("waiting_reason"),
@@ -411,14 +422,9 @@ def investigate():
         retrieval_accepted=retrieval.accepted,
     )
 
-    related_incidents_unconfirmed = []
-    if not retrieval.accepted:
-        query = build_symptom_text(alert_name, facts["waiting_reason"], facts["log_error"])
-        related_incidents_unconfirmed = search_memory_items(rdb, query, limit=3)
-
     print(f"[memory] trusted_match={trusted_match} "
           f"retrieval_mode={retrieval.mode.value} "
-          f"related_incidents={len(related_incidents_unconfirmed)}", flush=True)
+          f"accepted={retrieval.accepted}", flush=True)
 
     diagnosis = dict(interpret(
         alert_name, service, namespace,
@@ -435,8 +441,6 @@ def investigate():
     )
     diagnosis["low_confidence"] = bool(diagnosis.get("low_confidence")) or diagnosis_confidence["level"] in {"low", "unknown"}
     steps.extend(diagnosis.pop("_step_log", []))
-
-    evidence = format_evidence(facts)
 
     occurrence = {
         "alert_name": alert_name, "service": service, "namespace": namespace,
@@ -459,16 +463,17 @@ def investigate():
     for s in steps:
         append_incident_timeline(rdb, incident_id, s)
 
-    threading.Thread(
-        target=_reflect_and_store,
-        args=(rdb, {
-            "alert_name": alert_name,
-            "service":    service,
-            "root_cause": diagnosis["root_cause"],
-            "id":         incident_id,
-        }, diagnosis["kubectl_hint"]),
-        daemon=True,
-    ).start()
+    if _should_reflect(diagnosis, diagnosis_confidence):
+        threading.Thread(
+            target=_reflect_and_store,
+            args=(rdb, {
+                "alert_name": alert_name,
+                "service":    service,
+                "root_cause": diagnosis["root_cause"],
+                "id":         incident_id,
+            }, diagnosis["kubectl_hint"]),
+            daemon=True,
+        ).start()
 
     return jsonify({
         "service":          service,
@@ -478,28 +483,28 @@ def investigate():
         "root_cause":       diagnosis["root_cause"],
         "dev_action":       diagnosis["dev_action"],
         "kubectl_hint":     diagnosis["kubectl_hint"],
-        "evidence_snippet": evidence,
-        "trusted_match":    trusted_match,
         "retrieval_support": retrieval.to_api_dict(debug=debug),
-        **({"related_incidents_unconfirmed": related_incidents_unconfirmed} if not retrieval.accepted else {}),
         "low_confidence":   diagnosis.get("low_confidence", False),
-        "impact": impact, "log_evidence": log_evidence,
-        "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
-        "evidence_chain": evidence_chain,
+        "trace_handoff": trace_handoff,
+        "diagnosis_confidence": diagnosis_confidence,
         "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
-        "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
         **({"debug": {
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),
             "facts":          facts,
             "routing":        routing.to_api_dict(include_signals=True),
+            "evidence_chain": evidence_chain,
         }} if debug else {}),
     })
 
 
 def _incident_detail_payload(iid: str, incident: dict) -> dict:
     timeline = get_incident_timeline(rdb, iid)
-    matches  = [p for p in list_pending_suggestions(rdb) if p.get("source_incident_id") == iid]
+    published = (incident.get("diagnosis_decision") or {}).get("published_generated_answer", True)
+    matches = [
+        p for p in list_pending_suggestions(rdb)
+        if published and p.get("source_incident_id") == iid
+    ]
     return {**incident, "timeline": timeline,
             "pending_suggestion": matches[0] if matches else None}
 

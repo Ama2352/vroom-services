@@ -56,7 +56,17 @@ def _get_path(bundle: dict[str, Any], path: str) -> Any:
 
 
 def _present(value: Any) -> bool:
-    return value is not None and value != "" and value != [] and value != {}
+    if value is None or value == "" or value == [] or value == {}:
+        return False
+    if isinstance(value, dict):
+        if value.get("status") in {
+            "no_data", "no_match", "no_trace_id", "not_found", "unavailable", "invalid",
+        }:
+            return False
+        meaningful = [item for key, item in value.items() if key != "status"]
+        if meaningful and not any(item not in (None, "", [], {}) for item in meaningful):
+            return False
+    return True
 
 
 def _item_id(path: str, value: Any) -> str:

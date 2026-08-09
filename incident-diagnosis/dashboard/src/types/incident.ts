@@ -31,7 +31,38 @@ export interface Dependency {
   waiting_reason?: string
 }
 
+export interface CommitSummary {
+  sha: string
+  author?: string
+  message?: string
+  url?: string
+  date?: string
+}
+
+export interface ProvenanceSource {
+  status: 'found' | 'unavailable'
+  reason?: string
+  classification?: string
+  commit?: CommitSummary
+  changed_at?: string
+  changed_paths?: string[]
+  source_relevance?: 'relevant_files_found' | 'no_relevant_service_files'
+}
+
+export interface DualProvenance {
+  service: string
+  causal_status: {
+    status: 'causal_candidate' | 'recent_context' | 'conflicting' | 'unavailable'
+    reason_codes: string[]
+    matched_identifiers: string[]
+  }
+  dual: { gitops: ProvenanceSource; service_source: ProvenanceSource }
+  classification?: string
+  changed_at?: string
+}
+
 export type Provenance =
+  | DualProvenance
   | { classification: 'hotfix'; target?: 'dependency'; dependency_name?: string; diff?: string; drift?: Array<{ key: string; correct: string; wrong: string }>; changed_at?: string }
   | {
       classification: 'gitops-commit'

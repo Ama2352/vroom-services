@@ -580,6 +580,26 @@ def test_generation_cannot_pass_by_omitting_evidence_references():
     assert "evidence_refs" not in result
 
 
+def test_unavailable_critic_rejects_without_spending_a_refinement_call():
+    from unittest.mock import Mock
+    from tests.test_validation import DLQ_CHAIN
+    supported = '{"root_cause":"unknown event type Trip.Requested.v2 sent to DLQ","dev_action":"restore producer compatibility","kubectl_hint":"kubectl get pods -n vroom-dev","evidence_refs":["metric:dlq_events","log:evt-42","trace:' + 'a' * 32 + '"]}'
+    llm = Mock(side_effect=[supported, ""])
+
+    result = interpret(
+        chain=DLQ_CHAIN,
+        retrieval_result=RetrievalResult.none(),
+        namespace="vroom-dev",
+        _llm=llm,
+    )
+
+    assert result["acceptance_status"] == "rejected_critic_unavailable"
+    assert llm.call_count == 2
+    assert [step["name"] for step in result["_step_log"]] == [
+        "llm_phase1", "hard_validation", "semantic_critic",
+    ]
+
+
 def test_chain_prompt_lists_citable_ids_and_requires_evidence_refs():
     from tests.test_validation import DLQ_CHAIN
     prompt = _build_grounded_prompt(

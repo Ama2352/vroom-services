@@ -133,7 +133,30 @@ def test_investigate_returns_structured_diagnosis(client):
     assert body["kubectl_hint"] == "kubectl get pods -n platform -l app=postgresql"
 
 
-def test_investigate_includes_evidence_snippet(client):
+def test_investigate_returns_only_the_compact_integration_contract(client):
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.interpret", return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        response = client.post("/investigate", data=json.dumps({
+            "alert_name": "KubePodNotReady", "service": "ride", "namespace": "vroom-dev",
+        }), content_type="application/json")
+
+    body = response.get_json()
+    assert set(body) == {
+        "alert_name", "service", "namespace", "incident_id",
+        "root_cause", "dev_action", "kubectl_hint", "low_confidence",
+        "diagnosis_confidence", "diagnosis_decision", "retrieval_support", "trace_handoff",
+    }
+    assert len(response.data) < 16_000
+    assert "changed_files" not in response.get_data(as_text=True)
+    assert "evidence_chain" not in body
+    assert "related_incidents_unconfirmed" not in body
+
+
+def test_investigate_omits_internal_evidence_snippet(client):
     with patch("app.collect_bundle",         side_effect=_fake_bundle), \
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
@@ -145,11 +168,10 @@ def test_investigate_includes_evidence_snippet(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
     body = r.get_json()
-    assert "evidence_snippet" in body
-    assert "Pods:" in body["evidence_snippet"]
+    assert "evidence_snippet" not in body
 
 
-def test_investigate_includes_trusted_match_field(client):
+def test_investigate_exposes_retrieval_decision_without_related_incident_payloads(client):
     with patch("app.collect_bundle",         side_effect=_fake_bundle), \
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
@@ -162,13 +184,12 @@ def test_investigate_includes_trusted_match_field(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
     body = r.get_json()
-    assert body["trusted_match"] is False
-    assert "related_incidents_unconfirmed" in body
+    assert body["retrieval_support"] == {"mode": "none", "accepted": False, "source": None}
+    assert "trusted_match" not in body
+    assert "related_incidents_unconfirmed" not in body
 
 
-def test_investigate_trusted_match_true_omits_related_incidents(client):
-    fake_match = {"source": "knowledge", "knowledge_key": "oom",
-                  "root_cause_pattern": "OOM", "fix_action": "increase limit", "context_notes": ""}
+def test_investigate_exact_match_is_explicit_in_retrieval_support(client):
     with patch("app.collect_bundle",         side_effect=_fake_bundle), \
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
@@ -181,7 +202,8 @@ def test_investigate_trusted_match_true_omits_related_incidents(client):
                              "service": "ride", "namespace": "vroom-dev"}),
             content_type="application/json")
     body = r.get_json()
-    assert body["trusted_match"] is True
+    assert body["retrieval_support"]["mode"] == "exact_conclusive"
+    assert body["retrieval_support"]["accepted"] is True
     assert "related_incidents_unconfirmed" not in body
     assert "memory_hits" not in body
 
@@ -275,7 +297,73 @@ def test_investigate_replaces_rejected_generated_remediation_with_safe_fallback(
     assert body["dev_action"] == "Do not run a remediation command until the diagnosis is reviewed."
     assert body["kubectl_hint"] == "kubectl get pods -n vroom-dev -l app=dispatch-service"
     assert body["diagnosis_decision"]["status"] == "rejected_after_refine"
-    assert body["causal_chain_summary"]["primary_ids"] == ["log:selected"]
+    assert body["diagnosis_decision"]["published_generated_answer"] is False
+
+
+def test_rejected_diagnosis_does_not_start_knowledge_reflection(client):
+    rejected = {
+        "root_cause": "unsupported guess",
+        "dev_action": "delete the pod",
+        "kubectl_hint": "kubectl logs <pod-name>",
+        "acceptance_status": "rejected_after_refine",
+        "low_confidence": True,
+    }
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.interpret", return_value=rejected), \
+         patch("app.threading.Thread") as thread:
+        client.post("/investigate", data=json.dumps({
+            "alert_name": "KubePodNotReady", "service": "dispatch-service", "namespace": "vroom-dev",
+        }), content_type="application/json")
+
+    thread.assert_not_called()
+
+
+def test_low_confidence_accepted_diagnosis_does_not_start_knowledge_reflection(client):
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.interpret", return_value=_FAKE_DIAGNOSIS), \
+         patch("app.threading.Thread") as thread:
+        client.post("/investigate", data=json.dumps({
+            "alert_name": "KubePodNotReady", "service": "ride-service", "namespace": "vroom-dev",
+        }), content_type="application/json")
+
+    thread.assert_not_called()
+
+
+def test_reflection_eligibility_requires_generated_acceptance_and_medium_or_high_confidence():
+    accepted = {"diagnosis_decision": {"status": "accepted", "published_generated_answer": True}}
+    exact = {"diagnosis_decision": {"status": "exact_conclusive", "published_generated_answer": True}}
+
+    assert agent_app._should_reflect(accepted, {"level": "high"}) is True
+    assert agent_app._should_reflect(accepted, {"level": "low"}) is False
+    assert agent_app._should_reflect(exact, {"level": "high"}) is False
+
+
+def test_scoped_log_no_match_clears_unrelated_latest_error_before_persistence(client):
+    import memory
+    facts = {**_FAKE_FACTS, "log_error": "unrelated trace exporter failure"}
+    with patch("app.collect_impact", return_value={"status": "no_data"}), \
+         patch("app.collect_log_evidence", return_value={"status": "no_match"}), \
+         patch("app.correlate_trace", return_value={"status": "no_trace_id"}), \
+         patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=facts), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.interpret", return_value=_FAKE_DIAGNOSIS), \
+         patch("app._reflect_and_store"):
+        response = client.post("/investigate", data=json.dumps({
+            "alert_name": "GenericAlert", "service": "dispatch-service", "namespace": "vroom-dev",
+            "starts_at": "2026-08-09T11:39:46Z",
+        }), content_type="application/json")
+
+    incident = memory.get_incident(_FAKE_REDIS, response.get_json()["incident_id"])
+    assert incident["log_error"] == ""
+    assert incident["log_evidence"] == {"status": "no_match"}
 
 
 # ── /incidents routes ──────────────────────────────────────────────────────────
@@ -328,6 +416,23 @@ def test_incident_detail_includes_timeline_and_pending_suggestion(client):
     body = r.get_json()["incident"]
     assert len(body["timeline"]) == 1
     assert body["pending_suggestion"]["source_incident_id"] == iid
+
+
+def test_incident_detail_hides_stale_suggestion_for_rejected_diagnosis(client):
+    import memory
+    _FAKE_REDIS.flushall()
+    iid = memory.record_incident_occurrence(_FAKE_REDIS, _make_fake_incident_kwargs(
+        diagnosis_decision={"status": "rejected_after_refine", "published_generated_answer": False},
+    ))
+    memory.store_pending_suggestion(_FAKE_REDIS, {
+        "service": "ride", "symptom": "unsupported", "proposed_knowledge_key": "bad",
+        "is_new_knowledge_key": True, "root_cause": "", "fix_action": "",
+        "context_notes": "", "source_incident_id": iid,
+    })
+
+    body = client.get(f"/incidents/{iid}").get_json()["incident"]
+
+    assert body["pending_suggestion"] is None
 
 
 def test_incident_detail_missing_returns_404(client):
@@ -551,7 +656,7 @@ def test_dlq_investigation_selects_generic_causal_provenance_for_upstream_trace_
     assert response.get_json()["debug"]["facts"]["provenance"]["causal_status"]["status"] == "causal_candidate"
     assert captured["routing"] is not None
     assert captured["routing"].incident_kind == "dlq"
-    assert response.get_json()["evidence_chain"] == captured["routing"].evidence_chain
+    assert response.get_json()["debug"]["evidence_chain"] == captured["routing"].evidence_chain
     assert response.get_json()["debug"]["routing"]["primary_signals"]
 
 
@@ -609,7 +714,7 @@ def test_obsolete_admin_ui_is_not_exposed(client):
     assert client.get("/admin/models").status_code == 200
 
 
-def test_investigate_collects_diagnostics_before_memory_query(client):
+def test_investigate_collects_diagnostics_before_retrieval_without_legacy_memory_query(client):
     call_order = []
 
     def fake_collect_diagnostics(service, namespace):
@@ -620,16 +725,11 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
         call_order.append("retrieve")
         return _none_retrieval()
 
-    def fake_search_memory_items(rdb, query, limit=3):
-        call_order.append("search_memory_items")
-        return []
-
     with patch("app.collect_bundle",         side_effect=_fake_bundle), \
          patch("app.collect_diagnostics",    side_effect=fake_collect_diagnostics), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
          patch("app.retrieval_service.retrieve", side_effect=fake_retrieve), \
-         patch("app.search_memory_items",    side_effect=fake_search_memory_items), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         client.post("/investigate",
@@ -638,7 +738,7 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
             content_type="application/json")
 
     assert call_order.index("collect_diagnostics") < call_order.index("retrieve")
-    assert call_order.index("retrieve") < call_order.index("search_memory_items")
+    assert call_order == ["collect_diagnostics", "retrieve"]
 
 
 def test_investigate_query_includes_waiting_reason_and_log_error(client):
