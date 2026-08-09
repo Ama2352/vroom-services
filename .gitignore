@@ -51,3 +51,5 @@ __pycache__
 incident-diagnosis/draft/
 incident-diagnosis/free-models.txt
 incident-diagnosis/agent/TESTING.html
+
+ci/
