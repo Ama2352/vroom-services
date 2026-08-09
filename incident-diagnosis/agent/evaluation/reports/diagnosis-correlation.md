@@ -1,6 +1,6 @@
 # Diagnosis correlation evaluation
 
-Fixture SHA-256: `03afdd6361f0cf648474ca22a2a599684514ac7df86ec3907aeedf4a3b47163f`
+Fixture SHA-256: `c2a1c7ef3f8901fd973d6a1c48334163198d643406eca23d3da008df9f666494`
 
 Passed: 9/9
 

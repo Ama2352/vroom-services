@@ -553,6 +553,8 @@ def test_refined_answer_must_pass_both_gates():
     result = interpret(chain=DLQ_CHAIN, retrieval_result=RetrievalResult.none(), namespace="vroom-dev", _llm=llm)
     assert result["low_confidence"] is True
     assert result["acceptance_status"] == "rejected_after_refine"
+    assert result["_evaluation"]["phase1"]["hard_validation"]["status"] == "failed"
+    assert result["_evaluation"]["refined"]["semantic_critic"]["status"] == "failed"
 
 
 def test_generation_cannot_pass_by_omitting_evidence_references():

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { EvidenceGrid } from '../components/incident/EvidenceGrid'
 import { RootCauseCard } from '../components/incident/RootCauseCard'
+import { DiagnosisDecisionCard } from '../components/incident/DiagnosisDecisionCard'
 import { ImmediateFixCard } from '../components/incident/ImmediateFixCard'
 import { KnowledgeSuggestionCard } from '../components/incident/KnowledgeSuggestionCard'
 import { ConfidenceCard } from '../components/incident/ConfidenceCard'
@@ -47,6 +48,7 @@ export function IncidentDetailPage() {
             </Button>
           )}
         </div>
+        <DiagnosisDecisionCard decision={incident.diagnosis_decision} chain={incident.causal_chain_summary} />
         <RootCauseCard incident={incident} />
         <ConfidenceCard confidence={incident.diagnosis_confidence} />
         <ImpactCard impact={incident.impact} />

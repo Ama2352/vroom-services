@@ -26,7 +26,8 @@ def validate_diagnosis(draft: dict, chain: dict) -> GateResult:
         issues.append("missing_required_primary_reference")
     if "readiness" in draft.get("root_cause", "").lower() and chain.get("incident_kind") == "dlq":
         issues.append("secondary_evidence_promoted_to_cause")
-    if re.search(r"<[^>]+>", draft.get("root_cause", "")):
+    if any(re.search(r"<[^>]+>", str(draft.get(key, "")))
+           for key in ("root_cause", "dev_action", "kubectl_hint")):
         issues.append("unresolved_placeholder")
     log_messages = [str(item.get("payload", {}).get("message", "")) for item in chain.get("primary", []) if item["id"].startswith("log:")]
     if log_messages and not any(message and message.lower() in draft.get("root_cause", "").lower() for message in log_messages):

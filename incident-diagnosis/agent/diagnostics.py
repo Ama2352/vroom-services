@@ -2,6 +2,8 @@ import os, re, time
 from datetime import datetime, timezone
 import requests as http_requests
 
+from provenance import select_gitops_change
+
 PROMETHEUS_URL = os.environ.get(
     "PROMETHEUS_URL",
     "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/prometheus/api/v1/query"
@@ -99,6 +101,7 @@ def collect_change_evidence(service: str, namespace: str) -> dict | None:
     except Exception:
         return None
 
+
     if len(items) < 2:
         return None
 
@@ -149,6 +152,68 @@ def collect_change_evidence(service: str, namespace: str) -> dict | None:
         "env_changed": env_changed, "env_diff": env_diff,
         "changed_at": changed_at,
     }
+
+
+def collect_workload_deployment(service: str, namespace: str) -> dict | None:
+    """Read the current workload deployment for identity correlation."""
+    try:
+        response = http_requests.get(
+            f"{EXECUTOR_URL}/tools/deployment",
+            params={"service": service, "namespace": namespace},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        payload = response.json() if response.ok else {}
+        deployment = payload.get("deployment")
+        return deployment if isinstance(deployment, dict) else None
+    except Exception:
+        return None
+
+
+def collect_gitops_deployed_change(
+    service: str,
+    namespace: str,
+    template_diff: dict | None,
+    gitops_client,
+) -> dict:
+    """Find the synced GitOps commit that describes the current deployed diff."""
+    if not template_diff:
+        return {"status": "unavailable", "reason": "no_deployed_configuration_diff"}
+    try:
+        response = http_requests.get(
+            f"{EXECUTOR_URL}/tools/argocd-sync",
+            params={"app": _argocd_app_name(service, namespace)},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        sync = response.json() if response.ok else {}
+    except Exception:
+        return {"status": "unavailable", "reason": "argocd_unavailable"}
+    if sync.get("sync_status") != "Synced":
+        return {"status": "unavailable", "reason": "gitops_not_synced"}
+    revision = sync.get("raw", {}).get("status", {}).get("sync", {}).get("revision", "")
+    if not revision:
+        return {"status": "unavailable", "reason": "gitops_revision_unavailable"}
+
+    history = gitops_client.list_path_commits(
+        f"apps/{_short_name(service)}/overlays/{_env_name(namespace)}",
+        revision,
+    )
+    if history.status != "available" or not isinstance(history.value, list):
+        return {"status": "unavailable", "reason": history.reason or "gitops_history_unavailable"}
+    details = []
+    for item in history.value[:20]:
+        sha = str(item.get("sha", ""))
+        if not sha:
+            continue
+        detail = gitops_client.get_commit(sha)
+        if detail.status == "available" and isinstance(detail.value, dict):
+            details.append(detail.value)
+    selected = select_gitops_change(details, template_diff)
+    if selected.get("status") == "found":
+        selected["service"] = service
+        selected["synced_revision"] = revision
+    return selected
 
 
 def resolve_dependency(log_error: str, event_message: str) -> dict | None:

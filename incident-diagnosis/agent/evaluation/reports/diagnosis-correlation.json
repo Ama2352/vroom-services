@@ -7,6 +7,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -16,6 +18,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -25,6 +29,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -34,6 +40,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -43,6 +51,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -52,6 +62,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -61,6 +73,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -70,6 +84,8 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     },
     {
@@ -79,11 +95,13 @@
       "unsupported_claim_free": true,
       "required_action_present": true,
       "confidence_matches": true,
+      "retrieval_mode_matches": true,
+      "acceptance_status_matches": true,
       "passed": true
     }
   ],
   "passed": true,
   "case_count": 9,
   "passed_count": 9,
-  "fixture_sha256": "03afdd6361f0cf648474ca22a2a599684514ac7df86ec3907aeedf4a3b47163f"
+  "fixture_sha256": "c2a1c7ef3f8901fd973d6a1c48334163198d643406eca23d3da008df9f666494"
 }

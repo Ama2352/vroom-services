@@ -725,6 +725,21 @@ def test_get_incident_includes_template_diff_when_present(rdb):
     assert incident["template_diff"]["env_diff"][0]["key"] == "REDIS_ADDR"
 
 
+def test_get_incident_roundtrips_structured_diagnosis_decision(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence(
+        diagnosis_decision={
+            "status": "rejected_after_refine",
+            "published_generated_answer": False,
+            "evaluation": {"hard": "failed", "semantic": "failed"},
+        },
+    ))
+
+    incident = memory.get_incident(rdb, iid)
+
+    assert incident["diagnosis_decision"]["status"] == "rejected_after_refine"
+    assert incident["diagnosis_decision"]["published_generated_answer"] is False
+
+
 def test_get_incident_template_diff_none_when_absent(rdb):
     iid = memory.record_incident_occurrence(rdb, _make_occurrence())
     incident = memory.get_incident(rdb, iid)

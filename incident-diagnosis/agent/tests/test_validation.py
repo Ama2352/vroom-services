@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from validation import validate_diagnosis
@@ -33,3 +34,11 @@ def test_validator_rejects_unrelated_readiness_root_cause_for_dlq():
 def test_validator_rejects_trace_id_not_in_chain():
     draft = {**VALID_DRAFT, "evidence_refs": ["metric:dlq_events", "log:evt-42", "trace:wrong"]}
     assert "unknown_evidence_reference" in validate_diagnosis(draft, DLQ_CHAIN).issues
+
+
+@pytest.mark.parametrize("field", ["root_cause", "dev_action", "kubectl_hint"])
+def test_validator_rejects_placeholder_in_every_public_field(field):
+    draft = {**VALID_DRAFT, field: "inspect <pod-name>"}
+    result = validate_diagnosis(draft, DLQ_CHAIN)
+    assert not result.passed
+    assert "unresolved_placeholder" in result.issues

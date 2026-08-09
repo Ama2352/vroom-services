@@ -5,7 +5,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance,
-                          classify_provenance, collect_gitops_change_evidence)
+                          classify_provenance, collect_gitops_change_evidence,
+                          collect_workload_deployment, collect_gitops_deployed_change)
+from github_client import GitHubResult
 
 
 def _prom_scalar(value):
@@ -78,6 +80,53 @@ class TestCollectChangeEvidence:
             "new_value": "bad-host:6379",
         }]
         assert result["changed_at"] == "2026-07-07T02:00:00Z"
+
+
+class TestCollectWorkloadDeployment:
+    @patch("diagnostics.http_requests.get")
+    def test_returns_live_deployment_for_requested_workload(self, mock_get):
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {
+            "deployment": {"spec": {"template": {"spec": {"containers": [{"image": "repo/ride:abc1234"}]}}}}
+        })
+
+        result = collect_workload_deployment("ride-service", "vroom-dev")
+
+        assert result["spec"]["template"]["spec"]["containers"][0]["image"] == "repo/ride:abc1234"
+        assert mock_get.call_args.kwargs["params"] == {"service": "ride-service", "namespace": "vroom-dev"}
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_when_executor_cannot_read_workload(self, mock_get):
+        mock_get.return_value = MagicMock(ok=False)
+
+        assert collect_workload_deployment("ride-service", "vroom-dev") is None
+
+
+class TestCollectGitopsDeployedChange:
+    @patch("diagnostics.http_requests.get")
+    def test_uses_injected_gitops_client_to_match_deployed_diff(self, mock_get):
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {
+            "sync_status": "Synced",
+            "raw": {"status": {"sync": {"revision": "sync123"}}},
+        })
+
+        client = MagicMock()
+        client.list_path_commits.return_value = GitHubResult("available", [{"sha": "change123"}])
+        client.get_commit.return_value = GitHubResult("available", {
+            "sha": "change123",
+            "html_url": "https://github.example/commit/change123",
+            "commit": {"message": "test: producer mode", "author": {"name": "Dev", "date": "2026-08-05T10:00:00Z"}},
+            "files": [{"filename": "apps/ride/overlays/dev/producer.yaml", "patch": "+- name: PRODUCER_MODE\n+  value: strict"}],
+        })
+
+        result = collect_gitops_deployed_change(
+            "ride-service", "vroom-dev",
+            {"env_diff": [{"key": "PRODUCER_MODE", "old_value": "legacy", "new_value": "strict"}]},
+            client,
+        )
+
+        assert result["status"] == "found"
+        assert result["commit"]["sha"] == "change123"
+        assert client.list_path_commits.call_args.args == ("apps/ride/overlays/dev", "sync123")
 
 
 class TestCollectChangeAndGitOpsEvidence:

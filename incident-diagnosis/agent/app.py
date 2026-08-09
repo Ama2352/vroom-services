@@ -24,9 +24,13 @@ from correlation import collect_log_evidence, correlate_trace, derive_log_error
 from routing import route_incident
 from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics, format_evidence,
-                          collect_change_evidence, collect_gitops_change_evidence,
-                          resolve_dependency, collect_provenance, classify_provenance,
-                          is_contract_field)
+                          collect_change_evidence, resolve_dependency,
+                          collect_workload_deployment,
+                          collect_gitops_deployed_change)
+from github_client import repository_clients_from_env
+from provenance import (classify_causality, collect_deployed_identity,
+                        collect_service_source_evidence, combine_provenance)
+from finalization import finalize_diagnosis
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 from retrieval.models import RetrievalMode
@@ -44,6 +48,7 @@ retrieval_service = create_retrieval_service(
     rdb,
     Path(os.environ.get("RERANKER_MODEL_DIR", "/opt/models/minilm")),
 )
+_repository_clients = repository_clients_from_env()
 
 
 def _invalidate_retrieval_snapshot() -> None:
@@ -213,48 +218,40 @@ def set_models():
     return jsonify({"models": _current_models})
 
 
-def _change_matches_primary_failure(template_diff: dict | None, log_evidence: dict) -> bool:
-    """Return whether a DLQ contract change is named by the canonical failure."""
-    message = str(log_evidence.get("message", "")).lower()
-    if "unknown event type" not in message:
-        return False
-    for change in (template_diff or {}).get("env_diff", []):
-        if not is_contract_field(change.get("key", "")):
-            continue
-        new_value = str(change.get("new_value", "")).strip().lower()
-        if new_value and re.search(rf"(?<![a-z0-9]){re.escape(new_value)}(?![a-z0-9])", message):
-            return True
-    return False
-
-
-def _select_change_evidence(change_services: list[str], namespace: str,
-                            log_evidence: dict,
-                            require_primary_match: bool = False) -> tuple[str, dict | None]:
-    """Select an exact causal match before falling back to recent change context."""
-    services = list(dict.fromkeys(change_services))
-    fallback = None
-    for candidate_service in services:
-        candidate_diff = collect_change_evidence(candidate_service, namespace)
-        if candidate_diff is not None and fallback is None:
-            fallback = (candidate_service, candidate_diff)
-        if candidate_diff is not None and (
-                not require_primary_match
-                or _change_matches_primary_failure(candidate_diff, log_evidence)):
-            return candidate_service, candidate_diff
-        if not require_primary_match:
-            continue
-
-        durable_diff = collect_gitops_change_evidence(
-            candidate_service, namespace, str(log_evidence.get("message", "")),
-        )
-        if durable_diff is not None and fallback is None:
-            fallback = (candidate_service, durable_diff)
-        if _change_matches_primary_failure(durable_diff, log_evidence):
-            return candidate_service, durable_diff
-
-    if fallback is not None:
-        return fallback
-    return (services[-1] if services else "", None)
+def _collect_dual_provenance(
+    service: str,
+    namespace: str,
+    template_diff: dict | None,
+    log_evidence: dict,
+    trace_handoff: dict,
+    alert_started_at: str,
+) -> dict:
+    """Correlate the current workload's GitOps and source revisions before classification."""
+    deployed = collect_deployed_identity(service, namespace, collect_workload_deployment)
+    image = deployed.get("image", "")
+    source = (
+        collect_service_source_evidence(image, _repository_clients.services)
+        if deployed.get("status") == "found"
+        else {"status": "unavailable", "reason": deployed.get("reason", "workload_image_unavailable")}
+    )
+    gitops = collect_gitops_deployed_change(
+        service, namespace, template_diff, _repository_clients.gitops,
+    )
+    dual = combine_provenance(gitops, source)
+    causal = classify_causality(
+        dual, service, log_evidence, trace_handoff, alert_started_at, failure_predates=False,
+    )
+    return {
+        **({key: value for key, value in gitops.items() if key != "status"} if gitops.get("status") == "found" else {}),
+        "classification": gitops.get("classification", "unavailable"),
+        "service": service,
+        "dual": dual,
+        "causal_status": {
+            "status": causal.status,
+            "reason_codes": list(causal.reason_codes),
+            "matched_identifiers": list(causal.matched_identifiers),
+        },
+    }
 
 
 @app.route("/investigate", methods=["POST"])
@@ -313,15 +310,29 @@ def investigate():
     change_services.append(service)
 
     t1a = time.time()
-    change_service, template_diff = _select_change_evidence(
-        change_services,
-        namespace,
-        log_evidence,
-        require_primary_match=normalized.get("incident_kind") == "dlq",
-    )
-    change_service = change_service or service
-    if template_diff is not None:
-        template_diff = {**template_diff, "service": change_service}
+    selected_change: tuple[str, dict, dict] | None = None
+    best_rank = -1
+    for candidate_service in dict.fromkeys(change_services):
+        candidate_diff = collect_change_evidence(candidate_service, namespace)
+        if candidate_diff is None:
+            continue
+        candidate_diff = {**candidate_diff, "service": candidate_service}
+        candidate_provenance = _collect_dual_provenance(
+            candidate_service, namespace, candidate_diff, log_evidence,
+            trace_handoff, normalized.get("starts_at", ""),
+        )
+        status = candidate_provenance.get("causal_status", {}).get("status", "unavailable")
+        rank = {"causal_candidate": 3, "recent_context": 2, "unavailable": 1, "conflicting": 0}.get(status, 0)
+        if selected_change is None or rank > best_rank:
+            selected_change = (candidate_service, candidate_diff, candidate_provenance)
+            best_rank = rank
+        if status == "causal_candidate":
+            break
+
+    if selected_change is None:
+        change_service, template_diff, provenance = service, None, None
+    else:
+        change_service, template_diff, provenance = selected_change
     t1b           = time.time()
     _step("replicaset_diff", t1a, t1b, found=template_diff is not None, service=change_service)
 
@@ -331,7 +342,6 @@ def investigate():
     _step("dependency_chase", t1c, t1d, found=dependency is not None)
 
     t1e        = time.time()
-    provenance = collect_provenance(change_service, namespace, template_diff, dependency)
     t1f        = time.time()
     _step("provenance_lookup", t1e, t1f,
           classification=(provenance or {}).get("classification"))
@@ -355,25 +365,6 @@ def investigate():
         # The selected structured Loki record is canonical for diagnosis; the
         # legacy latest-error query remains only a collector fallback.
         facts["log_error"] = derive_log_error(log_evidence)
-
-    provenance_status = classify_provenance(
-        provenance,
-        (provenance or {}).get("changed_at", (template_diff or {}).get("changed_at", "")),
-        change_service,
-        drift=bool((provenance or {}).get("drift")),
-        failure_predates=False,
-    )
-    if (normalized.get("incident_kind") == "dlq"
-            and provenance_status.get("status") == "causal_candidate"
-            and not _change_matches_primary_failure(template_diff, log_evidence)):
-        provenance_status = {
-            **provenance_status,
-            "status": "recent_context",
-            "reason_codes": [*provenance_status.get("reason_codes", []), "change_does_not_match_primary_failure"],
-        }
-    if provenance is not None:
-        provenance = {**provenance, "causal_status": provenance_status}
-        facts["provenance"] = provenance
 
     diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {
         "kubernetes": facts.get("waiting_reason"),
@@ -438,6 +429,7 @@ def investigate():
         pod=pod,
         chain=evidence_chain,
     ))
+    diagnosis = finalize_diagnosis(diagnosis, evidence_chain, namespace, service)
     diagnosis["root_cause"] = align_root_cause_confidence(
         diagnosis["root_cause"], diagnosis_confidence,
     )
@@ -456,6 +448,8 @@ def investigate():
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         "evidence_chain": evidence_chain,
+        "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
+        "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
     }
     t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
@@ -492,6 +486,8 @@ def investigate():
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         "evidence_chain": evidence_chain,
+        "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
+        "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
         **({"debug": {
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),
