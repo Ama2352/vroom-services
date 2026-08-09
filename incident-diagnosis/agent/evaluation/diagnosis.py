@@ -20,10 +20,13 @@ def score_case(case: dict, diagnosis: dict) -> dict:
     forbidden_free = not any(term.lower() in text.lower() for term in case.get("forbidden_claims", []))
     action = _contains(text, case.get("required_action_claims", []))
     confidence = bool(diagnosis.get("low_confidence", False)) == bool(case.get("expected_low_confidence"))
+    retrieval_mode = diagnosis.get("retrieval_mode") == case.get("expected_retrieval_mode")
+    acceptance_status = diagnosis.get("acceptance_status") == case.get("expected_acceptance_status")
     return {"name": case["name"], "expected_claims_present": expected,
             "required_evidence_present": evidence, "unsupported_claim_free": forbidden_free,
             "required_action_present": action, "confidence_matches": confidence,
-            "passed": expected and evidence and forbidden_free and action and confidence}
+            "retrieval_mode_matches": retrieval_mode, "acceptance_status_matches": acceptance_status,
+            "passed": expected and evidence and forbidden_free and action and confidence and retrieval_mode and acceptance_status}
 
 
 def evaluate(fixtures: list[dict], diagnoses: dict[str, dict]) -> dict:
@@ -49,6 +52,8 @@ def main() -> int:
             "dev_action": " ".join(case.get("required_action_claims", [])) or "investigate",
             "evidence_refs": case.get("required_evidence_refs", []),
             "low_confidence": case.get("expected_low_confidence", False),
+            "retrieval_mode": case.get("expected_retrieval_mode", "none"),
+            "acceptance_status": case.get("expected_acceptance_status", "accepted"),
         } for case in fixtures
     }
     report = evaluate(fixtures, expected_diagnoses)
