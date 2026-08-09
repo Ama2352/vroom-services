@@ -105,6 +105,14 @@ export interface Incident {
   log_evidence?: LogEvidence
   trace_handoff?: TraceHandoff
   diagnosis_confidence?: DiagnosisConfidence
+  diagnosis_decision?: { status: string; published_generated_answer: boolean } | null
+  causal_chain_summary?: {
+    incident_kind: string
+    trigger_ids: string[]
+    primary_ids: string[]
+    causal_context_ids: string[]
+    contradiction_ids: string[]
+  } | null
 }
 
 export interface IncidentListItem {
