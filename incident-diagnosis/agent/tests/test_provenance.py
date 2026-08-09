@@ -10,6 +10,7 @@ from provenance import (
     collect_deployed_identity,
     collect_service_source_evidence,
     resolve_image_commit,
+    select_gitops_change,
 )
 
 
@@ -194,3 +195,39 @@ def test_deployed_identity_is_unavailable_when_workload_has_no_image():
     result = collect_deployed_identity("ride-service", "vroom-dev", lambda *_: {"spec": {}})
 
     assert result == {"status": "unavailable", "reason": "workload_image_unavailable"}
+
+
+def test_gitops_selector_matches_current_config_diff_without_field_special_case():
+    commits = [{
+        "sha": "gitops123456",
+        "html_url": "https://github.example/commit/gitops123456",
+        "commit": {"message": "test: update producer mode", "author": {"name": "Dev", "date": "2026-08-05T10:00:00Z"}},
+        "files": [{
+            "filename": "apps/ride/overlays/dev/patches/producer-mode.yaml",
+            "patch": "- name: PRODUCER_MODE\n+  value: legacy\n+- name: PRODUCER_MODE\n+  value: strict",
+        }],
+    }]
+
+    result = select_gitops_change(commits, {
+        "env_diff": [{"key": "PRODUCER_MODE", "old_value": "legacy", "new_value": "strict"}],
+        "image_changed": False,
+    })
+
+    assert result["status"] == "found"
+    assert result["commit"]["sha"] == "gitops123456"
+    assert result["env_diff"] == [{"key": "PRODUCER_MODE", "old_value": "legacy", "new_value": "strict"}]
+
+
+def test_gitops_selector_does_not_pick_unrelated_recent_commit():
+    commits = [{
+        "sha": "recent123",
+        "commit": {"message": "chore: log level", "author": {"name": "Dev", "date": "2026-08-07T09:59:00Z"}},
+        "files": [{"filename": "apps/ride/overlays/dev/log.yaml", "patch": "+- name: LOG_LEVEL\n+  value: debug"}],
+    }]
+
+    result = select_gitops_change(commits, {
+        "env_diff": [{"key": "PRODUCER_MODE", "old_value": "legacy", "new_value": "strict"}],
+        "image_changed": False,
+    })
+
+    assert result == {"status": "unavailable", "reason": "no_matching_deployed_change"}

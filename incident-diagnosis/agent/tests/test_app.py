@@ -19,100 +19,41 @@ agent_app.OPENROUTER_KEY = "fake-key"
 
 import pytest
 from retrieval.models import RetrievalDocument, RetrievalResult
+from github_client import GitHubResult
 
 
-def test_event_contract_change_matches_unknown_event_signature():
-    assert agent_app._change_matches_primary_failure(
-        {"env_diff": [{"key": "EVENT_CONTRACT_VERSION", "old_value": "v1", "new_value": "v2"}]},
-        {"message": 'unknown event type "Trip.Requested.v2"'},
-    )
-
-
-def test_unrelated_env_change_does_not_match_unknown_event_signature():
-    assert not agent_app._change_matches_primary_failure(
-        {"env_diff": [{"key": "LOG_LEVEL", "old_value": "info", "new_value": "debug"}]},
-        {"message": 'unknown event type "Trip.Requested.v2"'},
-    )
-
-
-def test_unrelated_field_with_same_value_does_not_match_unknown_event_signature():
-    assert not agent_app._change_matches_primary_failure(
-        {"env_diff": [{"key": "LOG_LEVEL", "old_value": "v1", "new_value": "v2"}]},
-        {"message": 'unknown event type "Trip.Requested.v2"'},
-    )
-
-
-def test_unrelated_api_version_with_same_value_does_not_match_unknown_event_signature():
-    assert not agent_app._change_matches_primary_failure(
-        {"env_diff": [{"key": "API_VERSION", "old_value": "v1", "new_value": "v2"}]},
-        {"message": 'unknown event type "Trip.Requested.v2"'},
-    )
-
-
-def test_schema_field_discovered_from_change_matches_unknown_event_signature():
-    assert agent_app._change_matches_primary_failure(
-        {"env_diff": [{"key": "RIDE_EVENT_SCHEMA", "old_value": "v1", "new_value": "v2"}]},
-        {"message": 'unknown event type "Trip.Requested.v2"'},
-    )
-
-
-def test_change_selection_prefers_exact_upstream_contract_over_image_changes():
-    image_change = {
-        "image_changed": True,
-        "env_changed": False,
-        "env_diff": [],
-        "changed_at": "2026-08-07T15:00:00Z",
+def test_dual_provenance_promotes_exact_source_change_without_contract_field_rule():
+    deployment = {
+        "spec": {"template": {"spec": {"containers": [
+            {"image": "ghcr.io/example/ride:v1.0.0-build.z.114.dc213686"},
+        ]}}},
     }
-    contract_change = {
-        "service": "ride-service",
-        "source": "gitops_history",
-        "image_changed": False,
-        "env_changed": True,
-        "env_diff": [{
-            "key": "EVENT_CONTRACT_VERSION",
-            "old_value": "",
-            "new_value": "v2",
-        }],
-        "changed_at": "2026-08-07T14:58:00Z",
+    services_client = MagicMock()
+    services_client.get_commit.return_value = GitHubResult("available", {
+        "sha": "dc213686abcd",
+        "commit": {"message": "feat: producer", "author": {"name": "Dev", "date": "2026-08-05T10:00:00Z"}},
+        "files": [{"filename": "services/ride/producer.go", "patch": "+ Payment.Completed.v3"}],
+    })
+    clients = MagicMock(services=services_client)
+    gitops = {
+        "status": "found", "classification": "gitops-commit", "changed_at": "2026-08-05T10:00:00Z",
+        "env_diff": [{"key": "PRODUCER_MODE", "old_value": "legacy", "new_value": "strict"}],
     }
+    trace = {"status": "correlated", "involved_services": ["ride-service", "dispatch-service"], "error_message": "unknown event type Payment.Completed.v3"}
+    log = {"status": "found", "service": "dispatch-service", "message": "unknown event type Payment.Completed.v3"}
 
-    with patch("app.collect_change_evidence", return_value=image_change), \
-         patch("app.collect_gitops_change_evidence", side_effect=[contract_change, None, None]):
-        service, selected = agent_app._select_change_evidence(
-            ["ride-service", "notification-service", "dispatch-service"],
-            "vroom-dev",
-            {"message": 'unknown event type "Trip.Requested.v2"'},
-            require_primary_match=True,
+    with patch("app.collect_workload_deployment", return_value=deployment), \
+         patch("app.collect_gitops_deployed_change", return_value=gitops), \
+         patch.object(agent_app, "_repository_clients", clients):
+        result = agent_app._collect_dual_provenance(
+            "ride-service", "vroom-dev",
+            {"env_diff": [{"key": "PRODUCER_MODE", "old_value": "legacy", "new_value": "strict"}]},
+            log, trace, "2026-08-07T10:00:00Z",
         )
 
-    assert service == "ride-service"
-    assert selected == contract_change
-
-
-def test_change_selection_accepts_exact_live_hotfix_without_git_history():
-    hotfix = {
-        "image_changed": False,
-        "env_changed": True,
-        "env_diff": [{
-            "key": "EVENT_CONTRACT_VERSION",
-            "old_value": "v1",
-            "new_value": "v2",
-        }],
-        "changed_at": "2026-08-07T14:58:00Z",
-    }
-
-    with patch("app.collect_change_evidence", return_value=hotfix), \
-         patch("app.collect_gitops_change_evidence") as git_history:
-        service, selected = agent_app._select_change_evidence(
-            ["ride-service", "dispatch-service"],
-            "vroom-dev",
-            {"message": 'unknown event type "Trip.Requested.v2"'},
-            require_primary_match=True,
-        )
-
-    assert service == "ride-service"
-    assert selected == hotfix
-    git_history.assert_not_called()
+    assert result["causal_status"]["status"] == "causal_candidate"
+    assert result["dual"]["service_source"]["commit"]["sha"] == "dc213686abcd"
+    assert "Payment.Completed.v3" in result["causal_status"]["matched_identifiers"]
 
 
 def _none_retrieval():
@@ -179,7 +120,6 @@ def test_investigate_returns_structured_diagnosis(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -198,7 +138,6 @@ def test_investigate_includes_evidence_snippet(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -215,7 +154,6 @@ def test_investigate_includes_trusted_match_field(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -235,7 +173,6 @@ def test_investigate_trusted_match_true_omits_related_incidents(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.retrieval_service.retrieve", return_value=_exact_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -255,7 +192,6 @@ def test_investigate_stores_incident_and_returns_incident_id(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -275,7 +211,6 @@ def test_investigate_records_step_events_in_timeline(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=dict(_FAKE_DIAGNOSIS)), \
          patch("app._reflect_and_store"):
@@ -309,7 +244,6 @@ def test_investigate_step_log_not_in_response_body(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=fake_diagnosis_with_steps), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -404,7 +338,6 @@ def test_investigate_no_old_fields_in_response(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.retrieval_service.retrieve", return_value=_none_retrieval()), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -427,7 +360,6 @@ def test_investigate_debug_param_returns_facts(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate?debug=true",
@@ -487,7 +419,6 @@ def test_investigate_includes_low_confidence(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS_WITH_LC), \
          patch("app._reflect_and_store"):
         r = client.post("/investigate",
@@ -504,7 +435,6 @@ def test_investigate_uses_evidence_confidence_for_low_confidence(client):
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency", return_value=None), \
-         patch("app.collect_provenance", return_value=None), \
          patch("app.interpret", return_value={**_FAKE_DIAGNOSIS, "low_confidence": False}), \
          patch("app.assess_confidence", return_value={"level": "unknown", "reasons": [], "missing_evidence": []}), \
          patch("app._reflect_and_store"):
@@ -522,7 +452,6 @@ def test_investigate_passes_dlq_alert_metric_into_impact_collection(client):
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency", return_value=None), \
-         patch("app.collect_provenance", return_value=None), \
          patch("app.collect_impact", return_value=impact) as collect_impact, \
          patch("app.collect_log_evidence", return_value={"status": "found", "trace_id": "a" * 32}), \
          patch("app.correlate_trace", return_value={"status": "correlated"}), \
@@ -537,7 +466,7 @@ def test_investigate_passes_dlq_alert_metric_into_impact_collection(client):
     assert r.get_json()["low_confidence"] is False
 
 
-def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_service(client):
+def test_dlq_investigation_selects_generic_causal_provenance_for_upstream_trace_service(client):
     calls = []
     captured = {}
     ride_diff = {
@@ -550,10 +479,18 @@ def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_ser
         calls.append(("change", service, namespace))
         return ride_diff if service == "ride-service" else None
 
-    def collect_provenance(service, namespace, template_diff, dependency):
-        calls.append(("provenance", service, namespace))
+    def collect_dual(service, namespace, template_diff, log_evidence, trace_handoff, alert_started_at):
+        calls.append(("dual_provenance", service, namespace))
         assert template_diff["service"] == "ride-service"
-        return {"classification": "gitops-commit", "changed_at": "2026-08-06T10:30:00Z"}
+        return {
+            "classification": "gitops-commit",
+            "service": service,
+            "causal_status": {
+                "status": "causal_candidate",
+                "reason_codes": ["deployed_identity", "exact_failure_identifier"],
+                "matched_identifiers": ["Trip.Requested.v2"],
+            },
+        }
 
     def retrieve(alert_name, facts, routing=None):
         captured["routing"] = routing
@@ -572,7 +509,7 @@ def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_ser
          }), \
          patch("app.collect_change_evidence", side_effect=collect_change), \
          patch("app.resolve_dependency", return_value=None), \
-         patch("app.collect_provenance", side_effect=collect_provenance), \
+         patch("app._collect_dual_provenance", side_effect=collect_dual), \
          patch("app.retrieval_service.retrieve", side_effect=retrieve), \
          patch("app.interpret", return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):
@@ -584,7 +521,7 @@ def test_dlq_investigation_collects_change_and_provenance_for_upstream_trace_ser
 
     assert response.status_code == 200
     assert calls[0] == ("change", "ride-service", "vroom-dev")
-    assert ("provenance", "ride-service", "vroom-dev") in calls
+    assert ("dual_provenance", "ride-service", "vroom-dev") in calls
     assert response.get_json()["debug"]["facts"]["template_diff"]["service"] == "ride-service"
     assert response.get_json()["debug"]["facts"]["provenance"]["causal_status"]["status"] == "causal_candidate"
     assert captured["routing"] is not None
@@ -600,7 +537,6 @@ def test_investigate_high_evidence_confidence_preserves_unconfirmed_cause(client
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency", return_value=None), \
-         patch("app.collect_provenance", return_value=None), \
          patch("app.interpret", return_value=diagnosis), \
          patch("app.assess_confidence", return_value={"level": "high", "reasons": [], "missing_evidence": []}), \
          patch("app._reflect_and_store"):
@@ -617,7 +553,6 @@ def test_investigate_medium_evidence_confidence_preserves_unconfirmed_cause(clie
          patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency", return_value=None), \
-         patch("app.collect_provenance", return_value=None), \
          patch("app.interpret", return_value=diagnosis), \
          patch("app.assess_confidence", return_value={"level": "medium", "reasons": [], "missing_evidence": []}), \
          patch("app._reflect_and_store"):
@@ -632,7 +567,6 @@ def test_investigate_forwards_pod_to_interpret(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS) as mock_interpret, \
          patch("app._reflect_and_store"):
         client.post("/investigate",
@@ -669,7 +603,6 @@ def test_investigate_collects_diagnostics_before_memory_query(client):
          patch("app.collect_diagnostics",    side_effect=fake_collect_diagnostics), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.retrieval_service.retrieve", side_effect=fake_retrieve), \
          patch("app.search_memory_items",    side_effect=fake_search_memory_items), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
@@ -695,7 +628,6 @@ def test_investigate_query_includes_waiting_reason_and_log_error(client):
          patch("app.collect_diagnostics",    return_value=_FAKE_FACTS), \
          patch("app.collect_change_evidence", return_value=None), \
          patch("app.resolve_dependency",      return_value=None), \
-         patch("app.collect_provenance",      return_value=None), \
          patch("app.retrieval_service.retrieve", side_effect=fake_retrieve), \
          patch("app.interpret",              return_value=_FAKE_DIAGNOSIS), \
          patch("app._reflect_and_store"):

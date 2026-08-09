@@ -53,6 +53,25 @@ def _changed_files(detail: dict) -> list[dict]:
     ]
 
 
+def _added_environment_values(patch: str) -> list[tuple[str, str]]:
+    current_key = ""
+    added: list[tuple[str, str]] = []
+    for raw_line in (patch or "").splitlines():
+        if raw_line.startswith("@@"):
+            current_key = ""
+            continue
+        prefix = raw_line[:1] if raw_line[:1] in {"+", "-", " "} else " "
+        content = raw_line[1:] if prefix != " " or raw_line.startswith(" ") else raw_line
+        key_match = re.match(r"\s*-\s*name:\s*['\"]?([^\s#'\"]+)", content)
+        if key_match:
+            current_key = key_match.group(1)
+            continue
+        value_match = re.match(r"\s*value:\s*['\"]?([^\s#'\"]+)", content)
+        if prefix == "+" and current_key and value_match:
+            added.append((current_key, value_match.group(1)))
+    return added
+
+
 def resolve_image_commit(image: str, services_client: GitHubClient) -> dict:
     """Resolve an immutable CI image tag to its exact service-source commit."""
     revision = _image_revision(image)
@@ -88,6 +107,39 @@ def collect_deployed_identity(service: str, namespace: str, deployment_reader) -
     if not image:
         return {"status": "unavailable", "reason": "workload_image_unavailable"}
     return {"status": "found", "service": service, "namespace": namespace, "image": image}
+
+
+def select_gitops_change(commits: list[dict], template_diff: dict | None) -> dict:
+    """Select a GitOps commit that exactly describes the deployed diff, not merely a recent commit."""
+    desired = {
+        (str(change.get("key", "")), str(change.get("new_value", ""))): change
+        for change in (template_diff or {}).get("env_diff", [])
+        if change.get("key") and change.get("new_value") is not None
+    }
+    if not desired:
+        return {"status": "unavailable", "reason": "no_deployed_configuration_diff"}
+
+    for detail in commits:
+        matched: list[dict] = []
+        matched_file = ""
+        for changed_file in detail.get("files") or []:
+            entries = set(_added_environment_values(str(changed_file.get("patch", ""))))
+            for key_value, change in desired.items():
+                if key_value in entries and change not in matched:
+                    matched.append(change)
+                    matched_file = str(changed_file.get("filename", ""))
+        if not matched:
+            continue
+        summary = _commit_summary(detail)
+        return {
+            "status": "found",
+            "classification": "gitops-commit",
+            "commit": summary,
+            "changed_at": summary["date"],
+            "file_path": matched_file,
+            "env_diff": matched,
+        }
+    return {"status": "unavailable", "reason": "no_matching_deployed_change"}
 
 
 def combine_provenance(gitops: dict | None, service_source: dict | None) -> dict:
