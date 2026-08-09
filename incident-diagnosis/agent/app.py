@@ -30,6 +30,7 @@ from diagnostics import (collect_diagnostics, format_evidence,
 from github_client import repository_clients_from_env
 from provenance import (classify_causality, collect_deployed_identity,
                         collect_service_source_evidence, combine_provenance)
+from finalization import finalize_diagnosis
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 from retrieval.models import RetrievalMode
@@ -428,6 +429,7 @@ def investigate():
         pod=pod,
         chain=evidence_chain,
     ))
+    diagnosis = finalize_diagnosis(diagnosis, evidence_chain, namespace, service)
     diagnosis["root_cause"] = align_root_cause_confidence(
         diagnosis["root_cause"], diagnosis_confidence,
     )
@@ -446,6 +448,7 @@ def investigate():
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         "evidence_chain": evidence_chain,
+        "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
     }
     t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
@@ -482,6 +485,7 @@ def investigate():
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
         "evidence_chain": evidence_chain,
+        "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
         **({"debug": {
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),

@@ -253,6 +253,30 @@ def test_investigate_step_log_not_in_response_body(client):
     assert "_step_log" not in r.get_json()
 
 
+def test_investigate_replaces_rejected_generated_remediation_with_safe_fallback(client):
+    rejected = {
+        "root_cause": "unsupported guess",
+        "dev_action": "delete the pod",
+        "kubectl_hint": "kubectl logs <dispatch-service-pod-name>",
+        "acceptance_status": "rejected_after_refine",
+        "low_confidence": True,
+    }
+    with patch("app.collect_bundle", side_effect=_fake_bundle), \
+         patch("app.collect_diagnostics", return_value=_FAKE_FACTS), \
+         patch("app.collect_change_evidence", return_value=None), \
+         patch("app.resolve_dependency", return_value=None), \
+         patch("app.interpret", return_value=rejected), \
+         patch("app._reflect_and_store"):
+        response = client.post("/investigate", data=json.dumps({
+            "alert_name": "KubePodNotReady", "service": "dispatch-service", "namespace": "vroom-dev",
+        }), content_type="application/json")
+
+    body = response.get_json()
+    assert body["dev_action"] == "Do not run a remediation command until the diagnosis is reviewed."
+    assert body["kubectl_hint"] == "kubectl get pods -n vroom-dev -l app=dispatch-service"
+    assert body["diagnosis_decision"]["status"] == "rejected_after_refine"
+
+
 # ── /incidents routes ──────────────────────────────────────────────────────────
 
 def _make_fake_incident_kwargs(**overrides):

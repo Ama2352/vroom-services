@@ -379,37 +379,50 @@ def interpret(
             return _run_llm([{"role": "user", "content": critic_prompt}], _llm, models,
                             groq_key, openrouter_key, temperature=temperature)
 
-        def run_gates(draft):
+        def run_gates(draft, suffix=""):
+            hard_started = time.time()
             hard = validate_diagnosis(draft, chain)
+            hard_finished = time.time()
+            _log_step(f"hard_validation{suffix}", hard_started, hard_finished,
+                      passed=hard.passed, issues=hard.issues)
+            critic_started = time.time()
             critic = run_semantic_critic(chain, draft, _llm=critic_llm)
-            return hard, critic
+            critic_finished = time.time()
+            _log_step(f"semantic_critic{suffix}", critic_started, critic_finished,
+                      passed=critic.passed, status=critic.status, issues=critic.issues)
+            return hard, critic, {
+                "hard_validation": {"status": hard.status, "issues": hard.issues},
+                "semantic_critic": {"status": critic.status, "issues": critic.issues},
+            }
 
-        hard, critic = run_gates(phase1)
-        _log_step("hard_validation", time.time(), time.time(), passed=hard.passed, issues=hard.issues)
-        _log_step("semantic_critic", time.time(), time.time(), passed=critic.passed, status=critic.status, issues=critic.issues)
+        hard, critic, phase1_evaluation = run_gates(phase1)
         if hard.passed and critic.passed:
             phase1["acceptance_status"] = "accepted"
             phase1["low_confidence"] = False
+            phase1["_evaluation"] = {"phase1": phase1_evaluation}
             phase1["_step_log"] = step_log
             return phase1
         refine_prompt = _build_refine_prompt(
             prompt, phase1, hard.issues + critic.issues, require_evidence_refs=True,
         )
+        refine_started = time.time()
         refined_raw = _run_llm([{"role": "user", "content": refine_prompt}], _llm, models,
                                groq_key, openrouter_key, temperature=REFINE_TEMPERATURE)
         refined = _parse_output(refined_raw)
-        _log_step("llm_refine", time.time(), time.time(), parsed=refined is not None)
+        refine_finished = time.time()
+        _log_step("llm_refine", refine_started, refine_finished, parsed=refined is not None)
+        refined_evaluation = None
         if refined is not None:
-            hard2, critic2 = run_gates(refined)
-            _log_step("hard_validation_refine", time.time(), time.time(), passed=hard2.passed, issues=hard2.issues)
-            _log_step("semantic_critic_refine", time.time(), time.time(), passed=critic2.passed, status=critic2.status, issues=critic2.issues)
+            hard2, critic2, refined_evaluation = run_gates(refined, "_refine")
             if hard2.passed and critic2.passed:
                 refined["acceptance_status"] = "accepted_after_refine"
                 refined["low_confidence"] = False
+                refined["_evaluation"] = {"phase1": phase1_evaluation, "refined": refined_evaluation}
                 refined["_step_log"] = step_log
                 return refined
         phase1["acceptance_status"] = "rejected_after_refine"
         phase1["low_confidence"] = True
+        phase1["_evaluation"] = {"phase1": phase1_evaluation, "refined": refined_evaluation}
         phase1["_step_log"] = step_log
         return phase1
 
