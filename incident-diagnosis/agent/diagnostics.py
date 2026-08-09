@@ -99,6 +99,7 @@ def collect_change_evidence(service: str, namespace: str) -> dict | None:
     except Exception:
         return None
 
+
     if len(items) < 2:
         return None
 
@@ -149,6 +150,22 @@ def collect_change_evidence(service: str, namespace: str) -> dict | None:
         "env_changed": env_changed, "env_diff": env_diff,
         "changed_at": changed_at,
     }
+
+
+def collect_workload_deployment(service: str, namespace: str) -> dict | None:
+    """Read the current workload deployment for identity correlation."""
+    try:
+        response = http_requests.get(
+            f"{EXECUTOR_URL}/tools/deployment",
+            params={"service": service, "namespace": namespace},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        payload = response.json() if response.ok else {}
+        deployment = payload.get("deployment")
+        return deployment if isinstance(deployment, dict) else None
+    except Exception:
+        return None
 
 
 def resolve_dependency(log_error: str, event_message: str) -> dict | None:

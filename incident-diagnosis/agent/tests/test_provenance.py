@@ -4,7 +4,13 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from github_client import GitHubResult
-from provenance import combine_provenance, collect_service_source_evidence, resolve_image_commit
+from provenance import (
+    classify_causality,
+    combine_provenance,
+    collect_deployed_identity,
+    collect_service_source_evidence,
+    resolve_image_commit,
+)
 
 
 class FakeServicesClient:
@@ -90,3 +96,101 @@ def test_combined_provenance_keeps_gitops_and_service_evidence_separate():
     assert combined["gitops"]["commit"]["sha"] == "gitops123"
     assert combined["service_source"]["commit"]["sha"] == "service123"
     assert combined["service_source"]["changed_files"][0]["path"] == "services/ride/producer.go"
+
+
+def test_old_deployed_source_change_with_exact_failure_identifier_is_causal():
+    result = classify_causality(
+        provenance={
+            "gitops": {"status": "found", "changed_at": "2026-08-05T10:00:00Z"},
+            "service_source": {
+                "status": "found",
+                "changed_files": [{"path": "services/ride/producer.go", "patch": "+ type = Payment.Completed.v3"}],
+            },
+        },
+        candidate_service="ride-service",
+        log_evidence={"status": "found", "service": "dispatch-service", "message": "unknown event type Payment.Completed.v3"},
+        trace_handoff={"status": "correlated", "involved_services": ["ride-service", "dispatch-service"], "error_message": "unknown event type Payment.Completed.v3"},
+        alert_started_at="2026-08-07T10:00:00Z",
+        failure_predates=False,
+    )
+
+    assert result.status == "causal_candidate"
+    assert "exact_failure_identifier" in result.reason_codes
+    assert "Payment.Completed.v3" in result.matched_identifiers
+
+
+def test_generic_config_value_matches_hostname_without_special_field_rule():
+    result = classify_causality(
+        provenance={
+            "gitops": {
+                "status": "found",
+                "changed_at": "2026-08-07T09:00:00Z",
+                "env_diff": [{"key": "CACHE_ENDPOINT", "old_value": "cache:6379", "new_value": "wrong-cache-host:6379"}],
+            },
+            "service_source": {"status": "unavailable"},
+        },
+        candidate_service="ride-service",
+        log_evidence={"status": "found", "service": "ride-service", "message": "dial tcp: lookup wrong-cache-host: no such host"},
+        trace_handoff={"status": "no_trace_id"},
+        alert_started_at="2026-08-07T10:00:00Z",
+        failure_predates=False,
+    )
+
+    assert result.status == "causal_candidate"
+    assert "wrong-cache-host" in result.matched_identifiers
+
+
+def test_recent_unrelated_change_remains_context_only():
+    result = classify_causality(
+        provenance={
+            "gitops": {"status": "found", "changed_at": "2026-08-07T09:55:00Z", "env_diff": [{"key": "LOG_LEVEL", "new_value": "debug"}]},
+            "service_source": {"status": "found", "changed_files": [{"path": "services/ride/log.go", "patch": "+ debug logging"}]},
+        },
+        candidate_service="ride-service",
+        log_evidence={"status": "found", "service": "ride-service", "message": "unknown event type Payment.Completed.v3"},
+        trace_handoff={"status": "correlated", "involved_services": ["ride-service"]},
+        alert_started_at="2026-08-07T10:00:00Z",
+        failure_predates=False,
+    )
+
+    assert result.status == "recent_context"
+    assert "no_failure_linkage" in result.reason_codes
+
+
+def test_preexisting_failure_conflicts_with_matching_change():
+    result = classify_causality(
+        provenance={"gitops": {"status": "found", "changed_at": "2026-08-07T09:00:00Z", "env_diff": [{"key": "CACHE_ENDPOINT", "new_value": "wrong-cache-host"}]}, "service_source": {"status": "unavailable"}},
+        candidate_service="ride-service",
+        log_evidence={"status": "found", "service": "ride-service", "message": "lookup wrong-cache-host failed"},
+        trace_handoff={"status": "no_trace_id"},
+        alert_started_at="2026-08-07T10:00:00Z",
+        failure_predates=True,
+    )
+
+    assert result.status == "conflicting"
+    assert "failure_predates_change" in result.reason_codes
+
+
+def test_deployed_identity_reads_current_workload_image():
+    def read_deployment(service, namespace):
+        assert (service, namespace) == ("ride-service", "vroom-dev")
+        return {
+            "spec": {"template": {"spec": {"containers": [
+                {"name": "app", "image": "ghcr.io/example/ride:v1.0.0-build.z.114.dc213686"},
+            ]}}}
+        }
+
+    result = collect_deployed_identity("ride-service", "vroom-dev", read_deployment)
+
+    assert result == {
+        "status": "found",
+        "service": "ride-service",
+        "namespace": "vroom-dev",
+        "image": "ghcr.io/example/ride:v1.0.0-build.z.114.dc213686",
+    }
+
+
+def test_deployed_identity_is_unavailable_when_workload_has_no_image():
+    result = collect_deployed_identity("ride-service", "vroom-dev", lambda *_: {"spec": {}})
+
+    assert result == {"status": "unavailable", "reason": "workload_image_unavailable"}

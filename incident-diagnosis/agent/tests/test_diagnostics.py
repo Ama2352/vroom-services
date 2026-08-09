@@ -5,7 +5,8 @@ import pytest
 from unittest.mock import patch, MagicMock
 from diagnostics import (collect_diagnostics, format_evidence,
                           collect_change_evidence, resolve_dependency, collect_provenance,
-                          classify_provenance, collect_gitops_change_evidence)
+                          classify_provenance, collect_gitops_change_evidence,
+                          collect_workload_deployment)
 
 
 def _prom_scalar(value):
@@ -78,6 +79,25 @@ class TestCollectChangeEvidence:
             "new_value": "bad-host:6379",
         }]
         assert result["changed_at"] == "2026-07-07T02:00:00Z"
+
+
+class TestCollectWorkloadDeployment:
+    @patch("diagnostics.http_requests.get")
+    def test_returns_live_deployment_for_requested_workload(self, mock_get):
+        mock_get.return_value = MagicMock(ok=True, json=lambda: {
+            "deployment": {"spec": {"template": {"spec": {"containers": [{"image": "repo/ride:abc1234"}]}}}}
+        })
+
+        result = collect_workload_deployment("ride-service", "vroom-dev")
+
+        assert result["spec"]["template"]["spec"]["containers"][0]["image"] == "repo/ride:abc1234"
+        assert mock_get.call_args.kwargs["params"] == {"service": "ride-service", "namespace": "vroom-dev"}
+
+    @patch("diagnostics.http_requests.get")
+    def test_returns_none_when_executor_cannot_read_workload(self, mock_get):
+        mock_get.return_value = MagicMock(ok=False)
+
+        assert collect_workload_deployment("ride-service", "vroom-dev") is None
 
 
 class TestCollectChangeAndGitOpsEvidence:
