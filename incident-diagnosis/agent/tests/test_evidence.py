@@ -32,3 +32,18 @@ def test_dlq_policy_keeps_readiness_event_secondary():
 
 def test_alert_name_is_compatibility_fallback():
     assert resolve_incident_kind({"alert_name": "DLQEventsDetected"}) == "dlq"
+
+
+def test_status_only_failures_are_not_promoted_to_positive_evidence():
+    chain = build_evidence_chain({"alert_name": "GenericAlert"}, {
+        "impact": {"status": "no_data"},
+        "log_evidence": {"status": "no_match"},
+        "trace_handoff": {"status": "no_trace_id"},
+        "provenance": {},
+        "k8s_state": {"pods_available": 1, "pods_desired": 1},
+        "k8s_event": {"id": "", "reason": "", "message": ""},
+    })
+
+    assert chain["trigger"] == []
+    assert chain["primary"] == []
+    assert {item["id"] for item in chain["secondary"]} == {"k8s_state"}

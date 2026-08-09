@@ -10,6 +10,7 @@ from provenance import (
     collect_deployed_identity,
     collect_service_source_evidence,
     resolve_image_commit,
+    summarize_provenance,
     select_gitops_change,
 )
 
@@ -78,6 +79,66 @@ def test_service_source_evidence_is_bounded_and_preserves_changed_files():
     assert result["status"] == "found"
     assert len(result["changed_files"]) == 20
     assert result["changed_files"][0]["path"] == "services/ride/file-0.go"
+
+
+def test_service_source_evidence_keeps_only_files_for_the_affected_service():
+    client = FakeServicesClient(GitHubResult("available", {
+        "sha": "a1b2c3d4ef",
+        "commit": {"message": "monorepo build", "author": {}},
+        "files": [
+            {"filename": "incident-diagnosis/agent/app.py", "patch": "+ internal change"},
+            {"filename": "services/ride/producer.go", "patch": "+ producer change"},
+            {"filename": "services/dispatch/consumer.go", "patch": "+ consumer change"},
+        ],
+    }))
+
+    result = collect_service_source_evidence(
+        "ghcr.io/example/dispatch-service:v1.0.0-build.z.2.a1b2c3d4",
+        client,
+        service="dispatch-service",
+    )
+
+    assert [item["path"] for item in result["changed_files"]] == ["services/dispatch/consumer.go"]
+
+
+def test_service_filter_runs_before_the_changed_file_limit():
+    unrelated = [
+        {"filename": f"incident-diagnosis/agent/file-{index}.py", "patch": "+ internal"}
+        for index in range(20)
+    ]
+    client = FakeServicesClient(GitHubResult("available", {
+        "sha": "a1b2c3d4ef", "commit": {"message": "monorepo build", "author": {}},
+        "files": [*unrelated, {"filename": "services/dispatch/consumer.go", "patch": "+ relevant"}],
+    }))
+
+    result = collect_service_source_evidence(
+        "ghcr.io/example/dispatch-service:v1.0.0-build.z.2.a1b2c3d4",
+        client,
+        service="dispatch-service",
+    )
+
+    assert [item["path"] for item in result["changed_files"]] == ["services/dispatch/consumer.go"]
+
+
+def test_public_provenance_summary_never_contains_raw_patch_text():
+    summary = summarize_provenance({
+        "service": "dispatch-service",
+        "diff": "top-level private diff",
+        "causal_status": {"status": "recent_context", "reason_codes": ["no_failure_linkage"]},
+        "dual": {
+            "gitops": {"status": "unavailable", "reason": "no_deployed_configuration_diff"},
+            "service_source": {
+                "status": "found",
+                "commit": {"sha": "abc123", "url": "https://example/abc123"},
+                "changed_files": [{"path": "services/dispatch/consumer.go", "patch": "private source text"}],
+            },
+        },
+    })
+
+    encoded = str(summary)
+    assert "private source text" not in encoded
+    assert "top-level private diff" not in encoded
+    assert summary["dual"]["service_source"]["changed_paths"] == ["services/dispatch/consumer.go"]
 
 
 def test_combined_provenance_keeps_gitops_and_service_evidence_separate():

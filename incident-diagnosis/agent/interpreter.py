@@ -402,6 +402,12 @@ def interpret(
             phase1["_evaluation"] = {"phase1": phase1_evaluation}
             phase1["_step_log"] = step_log
             return phase1
+        if critic.status == "unavailable":
+            phase1["acceptance_status"] = "rejected_critic_unavailable"
+            phase1["low_confidence"] = True
+            phase1["_evaluation"] = {"phase1": phase1_evaluation}
+            phase1["_step_log"] = step_log
+            return phase1
         refine_prompt = _build_refine_prompt(
             prompt, phase1, hard.issues + critic.issues, require_evidence_refs=True,
         )
