@@ -6,11 +6,7 @@ from pathlib import Path
 from .corpus import CorpusProvider, CorpusUnavailable
 from .models import ACCEPTANCE_FLOOR, RetrievalMode, RetrievalResult
 from .reranker import MiniLMReranker, OnnxCrossEncoder, load_model_spec
-from .signals import (
-    extract_canonical_signals,
-    serialize_incident,
-    serialize_reranker_query,
-)
+from .signals import extract_canonical_signals
 
 
 class UnavailableReranker:
@@ -26,7 +22,7 @@ class RetrievalService:
         self.corpus = corpus
         self.reranker = reranker
 
-    def retrieve(self, projection_or_alert, facts: dict | None = None, routing=None) -> RetrievalResult:
+    def retrieve(self, projection) -> RetrievalResult:
         started = time.perf_counter()
         bm25_ms = None
         reranker_ms = None
@@ -38,20 +34,9 @@ class RetrievalService:
                 bm25_ms, reranker_ms,
             )
 
-        projection = projection_or_alert
-        if hasattr(projection_or_alert, "lexical_text"):
-            query = projection_or_alert.lexical_text()
-            reranker_query = projection_or_alert.semantic_text()
-            signal_input = projection_or_alert
-        else:
-            # Compatibility adapter for callers not yet migrated to the
-            # neutral projection. Routing is intentionally ignored.
-            alert_name = projection_or_alert
-            facts = facts or {}
-            from .signals import serialize_incident, serialize_reranker_query
-            query = serialize_incident(alert_name, facts)
-            reranker_query = serialize_reranker_query(alert_name, facts)
-            signal_input = facts
+        query = projection.lexical_text()
+        reranker_query = projection.semantic_text()
+        signal_input = projection
 
         signals = extract_canonical_signals(signal_input)
         exact = {

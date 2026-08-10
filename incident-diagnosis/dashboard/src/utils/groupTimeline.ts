@@ -6,11 +6,10 @@ export interface Phase {
 }
 
 export const PHASES: Phase[] = [
-  { name: 'Collect Evidence', steps: ['collect_diagnostics', 'replicaset_diff', 'dependency_chase', 'provenance_lookup'] },
-  { name: 'Correlate Evidence', steps: ['routing', 'evidence_chain'] },
+  { name: 'Collect Evidence', steps: ['collect_diagnostics', 'configuration_diff', 'dependency_chase'] },
   { name: 'Match Knowledge',  steps: ['trusted_match_check'] },
   { name: 'Evaluate Diagnosis', steps: [
-    'exact_conclusive', 'llm_phase1', 'quality_check', 'hard_validation', 'semantic_critic',
+    'exact_conclusive', 'llm_phase1', 'hard_validation', 'semantic_critic',
     'llm_refine', 'hard_validation_refine', 'semantic_critic_refine',
   ] },
   { name: 'Record',           steps: ['record_incident'] },
@@ -43,8 +42,6 @@ export type AuditPhase = {
 }
 
 const AUDIT_PHASES: Record<string, string> = {
-  routing: 'Evidence route',
-  evidence_chain: 'Evidence route',
   trusted_match_check: 'Knowledge retrieval',
   retrieval: 'Knowledge retrieval',
   exact_conclusive: 'Generate',

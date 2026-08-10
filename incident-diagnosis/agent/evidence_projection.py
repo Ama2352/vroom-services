@@ -34,26 +34,13 @@ class EvidenceProjection:
     def to_prompt_dict(self) -> dict[str, str]:
         return dict(self.facts)
 
-    def to_validation_context(self) -> dict[str, Any]:
-        """Compatibility-shaped context for the two output gates.
-
-        It is a flat evidence list; no alert-specific primary/secondary router
-        assigns causal roles. Existing validators can consume this shape while
-        the public API exposes only the labelled projection.
-        """
-        items = [
-            {"id": f"fact:{key}", "payload": {"message": value}, "label": key}
-            for key, value in self.facts
-        ]
+    def to_gate_context(self) -> dict[str, Any]:
+        """Flat, labelled context shared by the hard validator and critic."""
         return {
-            "incident_kind": "neutral",
-            "trigger": [],
-            "primary": items,
-            "causal_context": [],
-            "consequence": [],
-            "secondary": [],
-            "contradictions": [],
-            "required": [],
+            "evidence": [
+                {"id": f"fact:{key}", "label": key, "value": value}
+                for key, value in self.facts
+            ],
             "evidence_ids": sorted(self.evidence_ids),
         }
 

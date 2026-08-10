@@ -27,12 +27,7 @@ from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
 from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics,
-                          collect_change_evidence, collect_configuration_diff, resolve_dependency,
-                          collect_workload_deployment, collect_gitops_deployed_change)
-from github_client import repository_clients_from_env
-from provenance import (classify_causality, collect_deployed_identity,
-                        collect_service_source_evidence, combine_provenance,
-                        summarize_provenance)
+                          collect_configuration_diff, resolve_dependency)
 from finalization import finalize_diagnosis
 from presentation import build_presentation
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
@@ -53,7 +48,6 @@ retrieval_service = create_retrieval_service(
     rdb,
     Path(os.environ.get("RERANKER_MODEL_DIR", "/opt/models/minilm")),
 )
-_repository_clients = None
 
 
 def _rss_mib() -> int:
@@ -242,19 +236,6 @@ def set_models():
     return jsonify({"models": _current_models})
 
 
-def _collect_dual_provenance(service, namespace, template_diff, log_evidence, trace_handoff, alert_started_at):
-    """Legacy helper retained for API compatibility; investigation no longer calls it."""
-    clients = _repository_clients or repository_clients_from_env()
-    deployed = collect_deployed_identity(service, namespace, collect_workload_deployment)
-    image = deployed.get("image", "")
-    source = (collect_service_source_evidence(image, clients.services, service=service)
-              if deployed.get("status") == "found" else {"status": "unavailable"})
-    gitops = collect_gitops_deployed_change(service, namespace, template_diff, clients.gitops)
-    dual = combine_provenance(gitops, source)
-    causal = classify_causality(dual, service, log_evidence, trace_handoff, alert_started_at, failure_predates=False, template_diff=template_diff)
-    return summarize_provenance({"classification": gitops.get("classification", "unavailable"), "service": service, "dual": dual, "causal_status": {"status": causal.status, "reason_codes": list(causal.reason_codes), "matched_identifiers": list(causal.matched_identifiers)}})
-
-
 @app.route("/investigate", methods=["POST"])
 def investigate():
     data       = request.get_json(silent=True) or {}
@@ -346,7 +327,7 @@ def investigate():
     evidence_projection = build_evidence_projection(
         normalized, facts, log_evidence, trace_handoff, dependency, configuration_diff,
     )
-    evidence_chain = evidence_projection.to_validation_context()
+    evidence_context = evidence_projection.to_gate_context()
 
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
           f"reason={facts['waiting_reason']!r} last_exit={facts['last_terminated_reason']!r} "
@@ -356,12 +337,7 @@ def investigate():
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
     t2            = time.time()
-    try:
-        retrieval = retrieval_service.retrieve(evidence_projection)
-    except TypeError:
-        # Test doubles and older integrations may still expose the old call
-        # shape; production retrieval is projection-first.
-        retrieval = retrieval_service.retrieve(alert_name, facts, None)
+    retrieval = retrieval_service.retrieve(evidence_projection)
     trusted_match = retrieval.mode is RetrievalMode.EXACT_CONCLUSIVE
     t3            = time.time()
     _step(
@@ -383,12 +359,12 @@ def investigate():
             groq_key=GROQ_KEY,
             openrouter_key=OPENROUTER_KEY,
             pod=pod,
-            chain=evidence_chain,
+            chain=evidence_context,
         ))
     except MemoryError:
         print(f"[diag] investigation capacity exhausted service={service} namespace={namespace}", flush=True)
         return jsonify({"error": "investigation capacity exhausted", "retryable": True}), 503
-    diagnosis = finalize_diagnosis(diagnosis, evidence_chain, namespace, service)
+    diagnosis = finalize_diagnosis(diagnosis, evidence_context, namespace, service)
     diagnosis["root_cause"] = align_root_cause_confidence(
         diagnosis["root_cause"], diagnosis_confidence,
     )
@@ -399,7 +375,7 @@ def investigate():
         alert=normalized,
         diagnosis=diagnosis,
         diagnosis_confidence=diagnosis_confidence,
-        evidence_chain=evidence_chain,
+        evidence_context=evidence_context,
         facts=facts,
         impact=impact,
         log_evidence=log_evidence,
@@ -416,7 +392,6 @@ def investigate():
         "low_confidence": diagnosis.get("low_confidence", False),
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
-        "evidence_chain": evidence_chain,
         "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
         "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
         "presentation": presentation,

@@ -35,17 +35,8 @@ def _bounded_value(value):
     return str(value)[:_MAX_TEXT_CHARS]
 
 
-def _critic_chain_view(chain: dict) -> dict:
-    """Build a bounded semantic view; repository source belongs to causality collection."""
-    roles = ("trigger", "primary", "causal_context", "consequence", "secondary", "contradictions")
-    return {
-        "incident_kind": str(chain.get("incident_kind", "unknown")),
-        "required": list(chain.get("required", []))[:_MAX_LIST_ITEMS],
-        **{
-            role: [_bounded_value(item) for item in (chain.get(role, []) or [])[:_MAX_LIST_ITEMS]]
-            for role in roles
-        },
-    }
+def _critic_context_view(context: dict) -> dict:
+    return {"evidence": [_bounded_value(item) for item in (context.get("evidence") or [])[:_MAX_LIST_ITEMS]]}
 
 
 def parse_critic_output(raw) -> CriticResult:
@@ -62,16 +53,16 @@ def parse_critic_output(raw) -> CriticResult:
     return CriticResult(passed, issues, "passed" if passed else "failed")
 
 
-def run_semantic_critic(chain: dict, draft: dict, _llm=None) -> CriticResult:
+def run_semantic_critic(context: dict, draft: dict, _llm=None) -> CriticResult:
     if _llm is None:
         return CriticResult(False, ["critic_unavailable"], "unavailable")
     prompt = "\n".join([
         "You are an independent incident-diagnosis critic.",
-        "Check whether the cause explains the trigger, respects evidence roles, avoids unsupported causal promotion, and recommends relevant remediation.",
+        "Check whether the cause is supported by the labelled evidence and recommends relevant remediation.",
         "Return ONLY JSON matching one of these exact shapes (no markdown or explanation):",
         '{"verdict":"pass","issues":[]}',
         '{"verdict":"fail","issues":["concise_issue_code_or_reason"]}',
-        json.dumps({"chain": _critic_chain_view(chain), "draft": _bounded_value(draft)}, sort_keys=True),
+        json.dumps({"evidence_context": _critic_context_view(context), "draft": _bounded_value(draft)}, sort_keys=True),
     ])
     try:
         try:

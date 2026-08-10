@@ -1,6 +1,6 @@
 from retrieval.bm25 import BM25Index
 from retrieval.models import RetrievalDocument
-from retrieval.signals import serialize_incident
+from evidence_projection import build_evidence_projection
 
 
 def make_document(key, text, source="knowledge", source_id=None):
@@ -22,12 +22,10 @@ def test_bm25_ranks_rare_incident_terms():
         make_document("oom", "exit memory limit OOMKilled"),
         make_document("image_pull", "manifest tag not found invalid image reference"),
     )
-    ranked = BM25Index(docs).search(
-        serialize_incident("KubePodContainerWaiting", {
-            "waiting_reason": "ImagePullBackOff", "log_error": "manifest tag not found",
-        }),
-        limit=8,
-    )
+    projection = build_evidence_projection("KubePodContainerWaiting", {
+        "waiting_reason": "ImagePullBackOff", "log_error": "manifest tag not found",
+    })
+    ranked = BM25Index(docs).search(projection.lexical_text(), limit=8)
     assert ranked[0].knowledge_key == "image_pull"
     assert ranked[0].bm25_score > 0
 

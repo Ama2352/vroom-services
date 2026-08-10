@@ -41,3 +41,10 @@ def test_projection_tracks_stable_evidence_ids_without_role_classification():
 
     assert projection.evidence_ids == frozenset({"alert:KubePodCrashLooping", "runtime:waiting_reason"})
     assert projection.to_prompt_dict()["runtime.waiting_reason"] == "CrashLoopBackOff"
+
+
+def test_application_has_no_legacy_routing_or_provenance_hooks():
+    source = Path(__file__).parents[1].joinpath("app.py").read_text(encoding="utf-8")
+
+    assert "_collect_dual_provenance" not in source
+    assert "_repository_clients" not in source

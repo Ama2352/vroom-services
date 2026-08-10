@@ -78,15 +78,6 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
             f"  Last K8s event: {facts['event_reason']} on "
             f"{facts.get('event_object', '?')} — {facts.get('event_message', '')}"
         )
-    if facts.get("template_diff"):
-        td = facts["template_diff"]
-        if td.get("env_changed"):
-            diffs = "; ".join(
-                f"{d['key']}: {d['old_value']} → {d['new_value']}" for d in td["env_diff"]
-            )
-            lines.append(f"  Recent change: env changed — {diffs}")
-        elif td.get("image_changed"):
-            lines.append(f"  Recent change: image changed from {td['old_image']} to {td['new_image']}")
     if facts.get("dependency"):
         dep = facts["dependency"]
         dep_line = (
@@ -135,12 +126,10 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
         ]
     if chain is not None:
         lines += ["", "Citable evidence IDs (use these exact strings only):"]
-        for role in ("trigger", "primary", "causal_context", "consequence", "secondary"):
-            for item in chain.get(role, []):
-                lines.append(f"  - {item['id']} (role: {role})")
+        for item in chain.get("evidence", []):
+            lines.append(f"  - {item['id']} ({item.get('label', 'evidence')})")
         lines += [
-            "Cite every trigger and primary item used for the diagnosis in evidence_refs. "
-            "Do not copy IDs for evidence that your answer did not actually use.",
+            "Cite the evidence items used for the diagnosis in evidence_refs.",
         ]
     lines += [
         "",
@@ -164,13 +153,6 @@ def _tokenize_for_grounding(text: str) -> set:
 
 def _is_grounded(root_cause: str, facts: dict) -> bool:
     evidence_parts = [facts.get("log_error", ""), facts.get("event_message", "")]
-    td = facts.get("template_diff")
-    if td:
-        for d in td.get("env_diff", []):
-            evidence_parts.append(d.get("old_value", ""))
-            evidence_parts.append(d.get("new_value", ""))
-        evidence_parts.append(td.get("old_image", ""))
-        evidence_parts.append(td.get("new_image", ""))
     dep = facts.get("dependency")
     if dep and dep.get("name"):
         evidence_parts.append(dep["name"])
@@ -207,9 +189,9 @@ def _quality_check(diagnosis: dict, facts: dict, pod: str, service: str) -> dict
                 "from the evidence (exact error text, hostname, or port) — do not just ask "
                 "for information that is already present in the evidence above"
             )
-        if facts.get("template_diff") or facts.get("dependency"):
+        if facts.get("dependency"):
             issues.append(
-                "a specific change (template_diff) or dependency signal is available in the "
+                "a specific dependency signal is available in the "
                 "evidence — weigh in on whether it explains the failure instead of only citing "
                 "the symptom"
             )
@@ -335,10 +317,9 @@ def interpret(
     if chain is not None and isinstance(retrieval_result, RetrievalResult):
         # A unique, human-approved, contradiction-free match is deliberately
         # conclusive: no generator, reranker, or critic call is needed.
-        if (retrieval_result.mode is RetrievalMode.EXACT_CONCLUSIVE
-                and retrieval_result.accepted and not chain.get("contradictions")):
+        if retrieval_result.mode is RetrievalMode.EXACT_CONCLUSIVE and retrieval_result.accepted:
             document = retrieval_result.candidate.document
-            refs = [item["id"] for role in ("trigger", "primary", "causal_context") for item in chain.get(role, [])]
+            refs = [item["id"] for item in chain.get("evidence", [])]
             return {
                 "root_cause": document.root_cause_pattern,
                 "dev_action": document.fix_action,
