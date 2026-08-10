@@ -103,6 +103,75 @@ export type TimelineStepEntry = {
 
 export type TimelineEntry = TimelineFiredEntry | TimelineResolvedEntry | TimelineStepEntry
 
+export type PresentationVerdict = 'cause_confirmed' | 'review_required' | 'evaluation_unavailable'
+export type PresentationEvidenceState = 'confirmed' | 'context' | 'missing' | 'conflicting'
+export type ResponseMode = 'remediation' | 'investigation' | 'knowledge'
+export type AuditVerdict = 'passed' | 'rejected' | 'degraded' | 'informational' | 'failed'
+
+export interface PresentationEvidence {
+  id: string
+  state: PresentationEvidenceState
+  kind: 'metric' | 'log' | 'trace' | 'kubernetes' | 'change' | 'dependency' | string
+  label: string
+  value: string
+  detail?: string
+  occurred_at?: string | null
+  href?: string | null
+}
+
+export interface IncidentEvent {
+  id: string
+  occurred_at?: string | null
+  state: PresentationEvidenceState | 'review'
+  title: string
+  summary: string
+  evidence_ids: string[]
+}
+
+export interface RecommendedResponse {
+  mode: ResponseMode
+  summary: string
+  rationale?: string
+  command?: string | null
+  expected_result?: string
+}
+
+export interface IncidentPresentation {
+  verdict: PresentationVerdict
+  headline: string
+  summary: string
+  confirmed_failure: string
+  causal_basis?: string | null
+  evidence_gap?: string | null
+  evidence_confidence: ConfidenceLevel
+  answer_source: 'knowledge' | 'generated' | 'safe_fallback' | string
+  supporting_evidence: PresentationEvidence[]
+  recommended_response: RecommendedResponse
+  incident_events: IncidentEvent[]
+}
+
+export interface OccurrenceEvidence {
+  impact?: ImpactEvidence
+  log_evidence?: LogEvidence
+  trace_handoff?: TraceHandoff
+  template_diff?: TemplateDiff | null
+  dependency?: Dependency | null
+  provenance?: Provenance | null
+  pods_ready?: number
+  pods_desired?: number
+  waiting_reason?: string
+  [key: string]: unknown
+}
+
+export interface IncidentOccurrence {
+  index: number
+  fired_at: number
+  presentation: IncidentPresentation
+  agent_steps: TimelineStepEntry[]
+  evidence: OccurrenceEvidence
+  lifecycle_events?: TimelineResolvedEntry[]
+}
+
 export interface Incident {
   id: string
   alert_name: string
@@ -144,6 +213,8 @@ export interface Incident {
     causal_context_ids: string[]
     contradiction_ids: string[]
   } | null
+  occurrences?: IncidentOccurrence[]
+  selected_occurrence?: number
 }
 
 export interface IncidentListItem {

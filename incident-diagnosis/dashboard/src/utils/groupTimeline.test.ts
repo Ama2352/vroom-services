@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupTimeline } from './groupTimeline'
+import { groupAgentAudit, groupTimeline } from './groupTimeline'
 import type { TimelineEntry } from '../types/incident'
 
 describe('groupTimeline', () => {
@@ -24,5 +24,25 @@ describe('groupTimeline', () => {
       'Collect Evidence', 'Correlate Evidence', 'Match Knowledge', 'Evaluate Diagnosis', 'Record',
     ])
     expect(phases[3].durationMs).toBe(295)
+  })
+})
+
+describe('groupAgentAudit', () => {
+  const step = (name: string, metadata: Record<string, unknown>): TimelineEntry => ({
+    type: 'step', name, timestamp: 1, duration_ms: 10, metadata,
+  })
+
+  it('marks a semantic rejection as rejected instead of failed execution', () => {
+    const phases = groupAgentAudit([
+      step('hard_validation', { passed: true }),
+      step('semantic_critic', { passed: false, status: 'failed', issues: ['unsupported_causal_promotion'] }),
+    ])
+
+    expect(phases[0].verdict).toBe('rejected')
+    expect(phases[0].steps[1].metadata).toEqual({ passed: false, status: 'failed', issues: ['unsupported_causal_promotion'] })
+  })
+
+  it('preserves unknown steps under Other', () => {
+    expect(groupAgentAudit([step('future_stage', {})])[0].name).toBe('Other')
   })
 })

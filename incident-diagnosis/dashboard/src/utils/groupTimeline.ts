@@ -35,6 +35,71 @@ export type FiredItem = { kind: 'fired'; entry: TimelineFiredEntry }
 export type ResolvedItem = { kind: 'resolved'; entry: TimelineResolvedEntry }
 export type TimelineItem = PhaseItem | FiredItem | ResolvedItem
 
+export type AuditPhase = {
+  name: string
+  steps: TimelineStepEntry[]
+  durationMs: number
+  verdict: 'passed' | 'rejected' | 'degraded' | 'informational' | 'failed'
+}
+
+const AUDIT_PHASES: Record<string, string> = {
+  routing: 'Evidence route',
+  evidence_chain: 'Evidence route',
+  trusted_match_check: 'Knowledge retrieval',
+  retrieval: 'Knowledge retrieval',
+  exact_conclusive: 'Generate',
+  llm_phase1: 'Generate',
+  quality_check: 'Generate',
+  hard_validation: 'Validate',
+  semantic_critic: 'Validate',
+  llm_refine: 'Refine',
+  hard_validation_refine: 'Refine',
+  semantic_critic_refine: 'Refine',
+  record_incident: 'Finalize',
+}
+
+function auditPhaseForStep(name: string): string {
+  return AUDIT_PHASES[name] || 'Other'
+}
+
+function auditVerdict(steps: TimelineStepEntry[]): AuditPhase['verdict'] {
+  if (steps.some(step => step.metadata?.status === 'unavailable' || step.metadata?.status === 'degraded')) return 'degraded'
+  if (steps.some(step => step.metadata?.passed === false && (step.name.includes('critic') || step.name.includes('validation')))) return 'rejected'
+  if (steps.some(step => step.metadata?.parsed === false || step.metadata?.error)) return 'failed'
+  if (steps.some(step => step.name === 'trusted_match_check' && step.metadata?.trusted_match === false)) return 'informational'
+  return 'passed'
+}
+
+export function groupAgentAudit(entries: TimelineEntry[]): AuditPhase[] {
+  const phases: AuditPhase[] = []
+  let currentName: string | null = null
+  let currentSteps: TimelineStepEntry[] = []
+
+  function flush() {
+    if (!currentName || currentSteps.length === 0) return
+    phases.push({
+      name: currentName,
+      steps: currentSteps,
+      durationMs: currentSteps.reduce((sum, step) => sum + (step.duration_ms || 0), 0),
+      verdict: auditVerdict(currentSteps),
+    })
+    currentName = null
+    currentSteps = []
+  }
+
+  for (const entry of entries) {
+    if (entry.type !== 'step') continue
+    const name = auditPhaseForStep(entry.name)
+    if (name !== currentName) {
+      flush()
+      currentName = name
+    }
+    currentSteps.push(entry)
+  }
+  flush()
+  return phases
+}
+
 export function groupTimeline(entries: TimelineEntry[]): TimelineItem[] {
   const items: TimelineItem[] = []
   let currentPhaseName: string | null = null
