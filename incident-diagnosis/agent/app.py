@@ -25,12 +25,10 @@ from memory import (search_memory as memory_search,
 from collector import collect_bundle, collect_impact
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
-from routing import route_incident
 from confidence import align_root_cause_confidence, assess_confidence
 from diagnostics import (collect_diagnostics,
-                          collect_change_evidence, resolve_dependency,
-                          collect_workload_deployment,
-                          collect_gitops_deployed_change)
+                          collect_change_evidence, collect_configuration_diff, resolve_dependency,
+                          collect_workload_deployment, collect_gitops_deployed_change)
 from github_client import repository_clients_from_env
 from provenance import (classify_causality, collect_deployed_identity,
                         collect_service_source_evidence, combine_provenance,
@@ -41,6 +39,7 @@ from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTE
 from seed import seed_if_empty
 from retrieval.models import RetrievalMode
 from retrieval.service import create_retrieval_service
+from evidence_projection import build_evidence_projection
 
 app = Flask(__name__)
 CORS(app)  # the dashboard is a separate browser origin (its own NodePort)
@@ -54,7 +53,7 @@ retrieval_service = create_retrieval_service(
     rdb,
     Path(os.environ.get("RERANKER_MODEL_DIR", "/opt/models/minilm")),
 )
-_repository_clients = repository_clients_from_env()
+_repository_clients = None
 
 
 def _rss_mib() -> int:
@@ -243,41 +242,17 @@ def set_models():
     return jsonify({"models": _current_models})
 
 
-def _collect_dual_provenance(
-    service: str,
-    namespace: str,
-    template_diff: dict | None,
-    log_evidence: dict,
-    trace_handoff: dict,
-    alert_started_at: str,
-) -> dict:
-    """Correlate the current workload's GitOps and source revisions before classification."""
+def _collect_dual_provenance(service, namespace, template_diff, log_evidence, trace_handoff, alert_started_at):
+    """Legacy helper retained for API compatibility; investigation no longer calls it."""
+    clients = _repository_clients or repository_clients_from_env()
     deployed = collect_deployed_identity(service, namespace, collect_workload_deployment)
     image = deployed.get("image", "")
-    source = (
-        collect_service_source_evidence(image, _repository_clients.services, service=service)
-        if deployed.get("status") == "found"
-        else {"status": "unavailable", "reason": deployed.get("reason", "workload_image_unavailable")}
-    )
-    gitops = collect_gitops_deployed_change(
-        service, namespace, template_diff, _repository_clients.gitops,
-    )
+    source = (collect_service_source_evidence(image, clients.services, service=service)
+              if deployed.get("status") == "found" else {"status": "unavailable"})
+    gitops = collect_gitops_deployed_change(service, namespace, template_diff, clients.gitops)
     dual = combine_provenance(gitops, source)
-    causal = classify_causality(
-        dual, service, log_evidence, trace_handoff, alert_started_at, failure_predates=False,
-        template_diff=template_diff,
-    )
-    return summarize_provenance({
-        **({key: value for key, value in gitops.items() if key != "status"} if gitops.get("status") == "found" else {}),
-        "classification": gitops.get("classification", "unavailable"),
-        "service": service,
-        "dual": dual,
-        "causal_status": {
-            "status": causal.status,
-            "reason_codes": list(causal.reason_codes),
-            "matched_identifiers": list(causal.matched_identifiers),
-        },
-    })
+    causal = classify_causality(dual, service, log_evidence, trace_handoff, alert_started_at, failure_predates=False, template_diff=template_diff)
+    return summarize_provenance({"classification": gitops.get("classification", "unavailable"), "service": service, "dual": dual, "causal_status": {"status": causal.status, "reason_codes": list(causal.reason_codes), "matched_identifiers": list(causal.matched_identifiers)}})
 
 
 @app.route("/investigate", methods=["POST"])
@@ -330,81 +305,17 @@ def investigate():
           pods_available=facts["pods_available"], pods_desired=facts["pods_desired"],
           waiting_reason=facts["waiting_reason"])
 
-    change_services = []
-    if normalized.get("incident_kind") == "dlq" and trace_handoff.get("status") == "correlated":
-        change_services.extend(
-            traced_service for traced_service in trace_handoff.get("involved_services", [])
-            if traced_service and traced_service != service
-        )
-    change_services.append(service)
+    t_config = time.time()
+    configuration_diff = collect_configuration_diff(service, namespace)
+    _step("configuration_diff", t_config, time.time(), status=configuration_diff.get("status"))
 
-    t1a = time.time()
-    selected_change: tuple[str, dict, dict] | None = None
-    provenance_services: list[dict] = []
-    best_rank = -1
-    involved_services = list(trace_handoff.get("involved_services", []))
-    for candidate_service in dict.fromkeys(change_services):
-        candidate_diff = collect_change_evidence(candidate_service, namespace)
-        if candidate_diff is None:
-            continue
-        candidate_diff = {**candidate_diff, "service": candidate_service}
-        candidate_provenance = _collect_dual_provenance(
-            candidate_service, namespace, candidate_diff, log_evidence,
-            trace_handoff, normalized.get("starts_at", ""),
-        )
-        status = candidate_provenance.get("causal_status", {}).get("status", "unavailable")
-        role = "alert_target" if candidate_service == service else (
-            "producer" if candidate_service in involved_services[:involved_services.index(service)] else "downstream"
-        ) if service in involved_services else "related"
-        dual = candidate_provenance.get("dual") or {}
-        source = dual.get("service_source") or {}
-        provenance_services.append({
-            "service": candidate_service, "role": role,
-            "source": "Manual runtime change" if candidate_diff.get("env_changed") and candidate_provenance.get("classification") == "hotfix" else "Service source revision",
-            "relationship": "Confirmed cause" if status == "causal_candidate" else "Related context" if status == "recent_context" else "Unavailable",
-            "source_revision": (source.get("commit") or {}).get("sha") if isinstance(source.get("commit"), dict) else None,
-            "source_relevance": source.get("source_relevance"),
-        })
-        rank = {"causal_candidate": 3, "recent_context": 2, "unavailable": 1, "conflicting": 0}.get(status, 0)
-        if selected_change is None or rank > best_rank:
-            selected_change = (candidate_service, candidate_diff, candidate_provenance)
-            best_rank = rank
-        if status == "causal_candidate":
-            break
-
-    if selected_change is None:
-        change_service, template_diff, provenance = service, None, None
-    else:
-        change_service, template_diff, provenance = selected_change
-    t1b           = time.time()
-    _step("replicaset_diff", t1a, t1b, found=template_diff is not None, service=change_service)
 
     t1c        = time.time()
     dependency = resolve_dependency(facts["log_error"], facts["event_message"])
     t1d        = time.time()
     _step("dependency_chase", t1c, t1d, found=dependency is not None)
 
-    t1e        = time.time()
-    t1f        = time.time()
-    _step("provenance_lookup", t1e, t1f,
-          classification=(provenance or {}).get("classification"))
-
-    if provenance is not None and template_diff is not None:
-        affected_fields = [
-            f"env.{change.get('key')}" for change in template_diff.get("env_diff", [])
-            if change.get("key")
-        ]
-        if template_diff.get("image_changed"):
-            affected_fields.append("image")
-        provenance = {
-            **provenance,
-            "services": provenance_services[:3],
-            "service": change_service,
-            "alert_started_at": normalized.get("starts_at", ""),
-            "affected_fields": affected_fields,
-        }
-
-    facts = {**facts, "template_diff": template_diff, "dependency": dependency, "provenance": provenance}
+    facts = {**facts, "configuration_diff": configuration_diff, "dependency": dependency}
     if log_evidence.get("status") == "found":
         # The selected structured Loki record is canonical for diagnosis; the
         # legacy latest-error query remains only a collector fallback.
@@ -414,7 +325,7 @@ def investigate():
 
     diagnosis_confidence = assess_confidence(normalized, impact, log_evidence, trace_handoff, {
         "kubernetes": facts.get("waiting_reason"),
-        "changes": template_diff,
+        "configuration_diff": configuration_diff,
         "dependencies": dependency,
     })
 
@@ -426,19 +337,16 @@ def investigate():
         }} if impact.get("status") == "available" else {},
         "log_evidence": log_evidence,
         "trace_handoff": trace_handoff,
-        "template_diff": template_diff,
-        "provenance": provenance,
+        "configuration_diff": configuration_diff,
         "k8s_state": facts,
         "k8s_event": {"id": facts.get("event_object"), "reason": facts.get("event_reason"), "message": facts.get("event_message")},
         "dependency": dependency,
         "dlq_state": {"value": normalized.get("metric_value")} if normalized.get("incident_kind") == "dlq" else {},
     }
-    routing = route_incident(normalized, evidence_bundle)
-    evidence_chain = routing.evidence_chain
-    _step("routing", time.time(), time.time(), **routing.to_api_dict())
-    _step("evidence_chain", time.time(), time.time(), incident_kind=evidence_chain["incident_kind"],
-          primary=[item["id"] for item in evidence_chain["primary"]],
-          secondary=[item["id"] for item in evidence_chain["secondary"]])
+    evidence_projection = build_evidence_projection(
+        normalized, facts, log_evidence, trace_handoff, dependency, configuration_diff,
+    )
+    evidence_chain = evidence_projection.to_validation_context()
 
     print(f"[diag] {service}/{namespace}: pods={facts['pods_available']}/{facts['pods_desired']} "
           f"reason={facts['waiting_reason']!r} last_exit={facts['last_terminated_reason']!r} "
@@ -448,7 +356,12 @@ def investigate():
           f"log={'yes' if facts['log_error'] else 'none'} event={facts['event_reason']!r}", flush=True)
 
     t2            = time.time()
-    retrieval     = retrieval_service.retrieve(alert_name, facts, routing)
+    try:
+        retrieval = retrieval_service.retrieve(evidence_projection)
+    except TypeError:
+        # Test doubles and older integrations may still expose the old call
+        # shape; production retrieval is projection-first.
+        retrieval = retrieval_service.retrieve(alert_name, facts, None)
     trusted_match = retrieval.mode is RetrievalMode.EXACT_CONCLUSIVE
     t3            = time.time()
     _step(
@@ -546,8 +459,7 @@ def investigate():
             "bundle":         bundle,
             "retrieval_support": retrieval.to_api_dict(debug=True),
             "facts":          facts,
-            "routing":        routing.to_api_dict(include_signals=True),
-            "evidence_chain": evidence_chain,
+            "evidence_projection": evidence_projection.to_prompt_dict(),
         }} if debug else {}),
     })
 

@@ -3,7 +3,6 @@ import { DiagnosisSummary } from '../components/incident/DiagnosisSummary'
 import { SupportingEvidence } from '../components/incident/SupportingEvidence'
 import { RecommendedResponse } from '../components/incident/RecommendedResponse'
 import { EvidenceSections } from '../components/incident/EvidenceSections'
-import { IncidentTimeline } from '../components/incident/IncidentTimeline'
 import { AgentAudit } from '../components/incident/AgentAudit'
 import StatusBadge from '../components/ui/Badge'
 import { ErrorBanner } from '../components/ui/ErrorBanner'
@@ -56,7 +55,6 @@ export function LivePage() {
         <RecommendedResponse response={occurrence.presentation.recommended_response} />
         <SupportingEvidence presentation={occurrence.presentation} />
         <EvidenceSections evidence={occurrence.evidence} />
-        <IncidentTimeline occurrence={occurrence} />
         <AgentAudit occurrence={occurrence} />
     </div>
   )

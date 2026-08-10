@@ -248,6 +248,60 @@ def tool_replicasets():
         return jsonify({"items": [], "error": "Failed to parse kubectl output"})
 
 
+@app.route("/tools/workload-revisions")
+def tool_workload_revisions():
+    """Return the active workload revision and its verified predecessor.
+
+    Selection is based on the pod template hash currently serving pods, then
+    revision order—not simply the two newest ReplicaSets. Only safe workload
+    fields are projected; image/commit provenance is intentionally excluded.
+    """
+    if not _auth(request):
+        return jsonify({"status": "unavailable", "reason": "unauthorized"}), 401
+    service = request.args.get("service", "").strip()
+    ns = request.args.get("namespace", "").strip()
+    if not _NS_RE.match(service) or not _NS_RE.match(ns):
+        return jsonify({"status": "unavailable", "reason": "invalid service or namespace"}), 400
+    rs_body, _ = _run_json(["kubectl", "get", "replicasets", "-n", ns, "-l", f"app={service}", "-o", "json"])
+    pod_body, _ = _run_json(["kubectl", "get", "pods", "-n", ns, "-l", f"app={service}", "-o", "json"])
+    if rs_body.get("returncode", 0) != 0 or pod_body.get("returncode", 0) != 0:
+        return jsonify({"status": "unavailable", "reason": "workload_state_unavailable"})
+    try:
+        replica_sets = json.loads(rs_body.get("stdout", "{}" )).get("items", [])
+        pods = json.loads(pod_body.get("stdout", "{}" )).get("items", [])
+    except (json.JSONDecodeError, AttributeError):
+        return jsonify({"status": "unavailable", "reason": "invalid_workload_state"})
+    active_hashes = {
+        (((pod.get("metadata") or {}).get("labels") or {}).get("pod-template-hash"))
+        for pod in pods
+        if (pod.get("status") or {}).get("phase") in {"Running", "Pending"}
+    }
+    active = [rs for rs in replica_sets if ((rs.get("metadata") or {}).get("labels") or {}).get("pod-template-hash") in active_hashes]
+    if not active:
+        return jsonify({"status": "unavailable", "reason": "active_revision_not_identified"})
+    active.sort(key=lambda rs: int((rs.get("metadata") or {}).get("annotations", {}).get("deployment.kubernetes.io/revision", "0") or 0))
+    current = active[-1]
+    current_hash = ((current.get("metadata") or {}).get("labels") or {}).get("pod-template-hash")
+    predecessors = [rs for rs in replica_sets if rs is not current and int((rs.get("metadata") or {}).get("annotations", {}).get("deployment.kubernetes.io/revision", "0") or 0) < int((current.get("metadata") or {}).get("annotations", {}).get("deployment.kubernetes.io/revision", "0") or 0)]
+    predecessors.sort(key=lambda rs: int((rs.get("metadata") or {}).get("annotations", {}).get("deployment.kubernetes.io/revision", "0") or 0), reverse=True)
+
+    def project(rs):
+        containers = (((rs.get("spec") or {}).get("template") or {}).get("spec") or {}).get("containers", [])
+        result = {}
+        for container in containers:
+            name = container.get("name", "container")
+            env = {}
+            for item in container.get("env", []):
+                key = item.get("name", "")
+                if any(token in key.lower() for token in ("password", "token", "secret", "credential", "private_key")):
+                    continue
+                if "value" in item:
+                    env[key] = item.get("value")
+            result[name] = {"env": env, "resources": container.get("resources") or {}}
+        return result
+    return jsonify({"status": "changed" if predecessors else "unchanged", "current_revision": current_hash, "current": project(current), "previous": project(predecessors[0]) if predecessors else None})
+
+
 @app.route("/tools/resolve-service")
 def tool_resolve_service():
     if not _auth(request):

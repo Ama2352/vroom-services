@@ -15,8 +15,9 @@ function FailureSection({ evidence }: { evidence: OccurrenceEvidence }) {
   if (!impact && !log && !trace) return null
   return <Card><CardTitle><Activity size={14} /> Failure and impact</CardTitle><dl className="m-0">
     <Row label="Impact status" value={impact?.status} />
-    <Row label="Request rate" value={impact?.request_rate} />
-    <Row label="HTTP error rate" value={impact?.error_rate_percent === null ? 'No data' : impact?.error_rate_percent} />
+    <Row label="Request rate" value={impact?.request_rate === null || impact?.request_rate === undefined ? 'No data' : `${impact.request_rate.toFixed(2)} req/s`} />
+    <Row label="HTTP error rate" value={impact?.error_rate_percent === null || impact?.error_rate_percent === undefined ? 'No data' : `${impact.error_rate_percent.toFixed(2)}%`} />
+    <Row label="p99 latency" value={impact?.p99_seconds === null || impact?.p99_seconds === undefined ? 'No data' : `${(impact.p99_seconds * 1000).toFixed(0)} ms`} />
     <Row label="Structured log" value={log?.status === 'found' ? log.message : undefined} />
     <Row label="Trace" value={trace?.status === 'correlated' ? (
       trace.grafana_url
@@ -39,14 +40,10 @@ function RuntimeSection({ evidence }: { evidence: OccurrenceEvidence }) {
 }
 
 function ChangeSection({ evidence }: { evidence: OccurrenceEvidence }) {
-  const diff = evidence.template_diff
-  const provenance = evidence.provenance
-  if (!diff && !provenance) return null
-  const env = diff?.env_diff?.[0]
-  return <Card><CardTitle><GitBranch size={14} /> Configuration and provenance</CardTitle><dl className="m-0">
-    <Row label="Environment change" value={env ? `${env.key}: ${env.old_value} → ${env.new_value}` : undefined} />
-    <Row label="Image change" value={diff?.image_changed ? `${diff.old_image || 'unknown'} → ${diff.new_image || 'unknown'}` : undefined} />
-    <Row label="Provenance" value={provenance && 'dual' in provenance ? provenance.causal_status.status.replaceAll('_', ' ') : provenance?.classification} />
+  const diff = evidence.configuration_diff
+  if (!diff || diff.status !== 'changed') return null
+  return <Card><CardTitle><GitBranch size={14} /> Configuration diff</CardTitle><dl className="m-0">
+    {diff.changes.map((change) => <Row key={change.path} label={change.path} value={`${change.previous ?? 'unset'} → ${change.current ?? 'unset'}`} />)}
   </dl></Card>
 }
 

@@ -208,6 +208,16 @@ def build_presentation(*, alert: dict, diagnosis: dict, diagnosis_confidence: di
         _add_item(evidence, item_id=item.get("id", "log:selected"), state="confirmed", kind="log",
                   label="Structured log" if payload.get("log_format") != "plain" else "Runtime log",
                   value=payload.get("message") or log_message, detail=item.get("reason"))
+    configuration_diff = facts.get("configuration_diff") or {}
+    if configuration_diff.get("status") == "changed":
+        changes = configuration_diff.get("changes") or []
+        summary = "; ".join(
+            f"{change.get('path')}: {change.get('previous', 'unset')} → {change.get('current', 'unset')}"
+            for change in changes[:3] if isinstance(change, dict)
+        )
+        _add_item(evidence, item_id="config:workload", state="context", kind="change",
+                  label="Configuration diff", value=summary or "workload configuration changed",
+                  detail="Compared with the verified previous active workload revision.")
     if trace_handoff.get("status") == "correlated":
         _add_item(evidence, item_id=f"trace:{_text(trace_handoff.get('trace_id')) or 'selected'}", state="confirmed", kind="trace",
                   label="Correlated trace", value=trace_handoff.get("error_operation") or trace_handoff.get("trace_id"),

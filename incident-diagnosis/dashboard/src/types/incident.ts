@@ -23,6 +23,13 @@ export interface TemplateDiff {
   changed_at?: string
 }
 
+export interface ConfigurationDiff {
+  status: 'changed' | 'unchanged' | 'unavailable'
+  changes: Array<{ path: string; previous?: string | number | null; current?: string | number | null }>
+  observed_at?: string
+  reason?: string
+}
+
 export interface Dependency {
   namespace: string
   name: string
@@ -160,6 +167,7 @@ export interface OccurrenceEvidence {
   log_evidence?: LogEvidence
   trace_handoff?: TraceHandoff
   template_diff?: TemplateDiff | null
+  configuration_diff?: ConfigurationDiff | null
   dependency?: Dependency | null
   provenance?: Provenance | null
   pods_ready?: number

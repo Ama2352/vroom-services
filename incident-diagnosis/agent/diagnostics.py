@@ -154,6 +154,40 @@ def collect_change_evidence(service: str, namespace: str) -> dict | None:
     }
 
 
+def collect_configuration_diff(service: str, namespace: str) -> dict:
+    """Compare the active workload revision with its verified predecessor."""
+    try:
+        response = http_requests.get(
+            f"{EXECUTOR_URL}/tools/workload-revisions",
+            params={"service": service, "namespace": namespace},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        if not response.ok:
+            return {"status": "unavailable", "changes": [], "reason": "executor_unavailable"}
+        payload = response.json()
+    except Exception:
+        return {"status": "unavailable", "changes": [], "reason": "executor_unavailable"}
+    if payload.get("status") == "unavailable":
+        return {"status": "unavailable", "changes": [], "reason": payload.get("reason", "unknown")}
+    current = payload.get("current") or {}
+    previous = payload.get("previous") or {}
+    changes = []
+    for container in sorted(set(current) | set(previous)):
+        cur = current.get(container) or {}
+        old = previous.get(container) or {}
+        for key in ("env", "resources"):
+            cur_values = cur.get(key) or {}
+            old_values = old.get(key) or {}
+            if key == "resources":
+                cur_values = {str(k): str(v) for k, v in cur_values.items()}
+                old_values = {str(k): str(v) for k, v in old_values.items()}
+            for field in sorted(set(cur_values) | set(old_values)):
+                if cur_values.get(field) != old_values.get(field):
+                    changes.append({"path": f"containers.{container}.{key}.{field}", "previous": old_values.get(field), "current": cur_values.get(field)})
+    return {"status": "changed" if changes else "unchanged", "changes": changes, "current_revision": payload.get("current_revision")}
+
+
 def collect_workload_deployment(service: str, namespace: str) -> dict | None:
     """Read the current workload deployment for identity correlation."""
     try:

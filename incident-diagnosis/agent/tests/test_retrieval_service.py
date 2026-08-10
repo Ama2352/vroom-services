@@ -9,6 +9,7 @@ from retrieval.models import (
 from retrieval.reranker import ScoredCandidate
 from retrieval.service import RetrievalService
 from retrieval.signals import serialize_incident
+from evidence_projection import build_evidence_projection
 from routing import RoutingDecision
 
 
@@ -121,7 +122,7 @@ def test_unique_conclusive_exact_match_bypasses_bm25_and_reranker():
     reranker.rerank.assert_not_called()
 
 
-def test_retrieval_uses_routed_queries_for_advisory_search():
+def test_legacy_routing_is_ignored_in_favor_of_neutral_facts():
     bm25 = Mock(search=Mock(return_value=(candidate("contract"),)))
     snapshot = replace(make_snapshot(), bm25=bm25)
     reranker = Mock(rerank=Mock(return_value=(
@@ -133,10 +134,8 @@ def test_retrieval_uses_routed_queries_for_advisory_search():
     )
 
     assert result.mode is RetrievalMode.RERANKED_ADVISORY
-    assert "primary contract evidence" in bm25.search.call_args.args[0]
-    assert "secondary readiness context" not in bm25.search.call_args.args[0]
-    assert "primary contract evidence" in reranker.rerank.call_args.args[0]
-    assert "secondary readiness context" in reranker.rerank.call_args.args[0]
+    assert bm25.search.call_args.args[0] == serialize_incident("Alert", rich_facts())
+    assert reranker.rerank.call_args.args[0] == "specific incident evidence"
 
 
 def test_missing_routing_uses_legacy_serializers():
@@ -209,3 +208,38 @@ def test_stale_snapshot_marks_debug_state_but_can_retrieve():
     )
     assert result.mode is RetrievalMode.EXACT_CONCLUSIVE
     assert result.stale_snapshot is True
+
+
+def test_projection_is_the_neutral_retrieval_input():
+    bm25 = Mock(search=Mock(return_value=(candidate("contract"),)))
+    snapshot = replace(make_snapshot(), bm25=bm25)
+    reranker = Mock(rerank=Mock(return_value=(
+        ScoredCandidate(candidate("contract"), 2.0),
+    )))
+    projection = build_evidence_projection(
+        "DLQEventsDetected",
+        {"log_error": "unsupported event type Trip.Requested.v2"},
+    )
+
+    result = service_for(snapshot, reranker).retrieve(projection)
+
+    assert result.mode is RetrievalMode.RERANKED_ADVISORY
+    query = bm25.search.call_args.args[0]
+    reranker_query = reranker.rerank.call_args.args[0]
+    assert "alert.name: DLQEventsDetected" in query
+    assert "runtime.log_error: unsupported event type Trip.Requested.v2" in query
+    assert "primary" not in query.lower()
+    assert "incident_kind" not in query.lower()
+    assert "unsupported event type Trip.Requested.v2" in reranker_query
+
+
+def test_projection_preserves_exact_oom_signal():
+    projection = build_evidence_projection(
+        "IncidentAgentExactOOMTest",
+        {"last_terminated_reason": "OOMKilled"},
+    )
+    result = service_for(
+        snapshot_with_exact("OOMKilled", document("oom", conclusive=True)),
+        Mock(),
+    ).retrieve(projection)
+    assert result.mode is RetrievalMode.EXACT_CONCLUSIVE

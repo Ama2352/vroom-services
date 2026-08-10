@@ -4,7 +4,6 @@ import { DiagnosisSummary } from '../components/incident/DiagnosisSummary'
 import { SupportingEvidence } from '../components/incident/SupportingEvidence'
 import { RecommendedResponse } from '../components/incident/RecommendedResponse'
 import { EvidenceSections } from '../components/incident/EvidenceSections'
-import { IncidentTimeline } from '../components/incident/IncidentTimeline'
 import { AgentAudit } from '../components/incident/AgentAudit'
 import StatusBadge from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -88,7 +87,6 @@ export function IncidentDetailPage() {
       <RecommendedResponse response={selected.presentation.recommended_response} />
       <SupportingEvidence presentation={selected.presentation} />
       <EvidenceSections evidence={selected.evidence} />
-      <IncidentTimeline occurrence={selected} />
       <AgentAudit occurrence={selected} />
     </div>
   )

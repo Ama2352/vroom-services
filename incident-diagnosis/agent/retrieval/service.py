@@ -10,8 +10,6 @@ from .signals import (
     extract_canonical_signals,
     serialize_incident,
     serialize_reranker_query,
-    serialize_routed_incident,
-    serialize_routed_reranker_query,
 )
 
 
@@ -28,7 +26,7 @@ class RetrievalService:
         self.corpus = corpus
         self.reranker = reranker
 
-    def retrieve(self, alert_name: str, facts: dict, routing=None) -> RetrievalResult:
+    def retrieve(self, projection_or_alert, facts: dict | None = None, routing=None) -> RetrievalResult:
         started = time.perf_counter()
         bm25_ms = None
         reranker_ms = None
@@ -40,7 +38,22 @@ class RetrievalService:
                 bm25_ms, reranker_ms,
             )
 
-        signals = extract_canonical_signals(facts)
+        projection = projection_or_alert
+        if hasattr(projection_or_alert, "lexical_text"):
+            query = projection_or_alert.lexical_text()
+            reranker_query = projection_or_alert.semantic_text()
+            signal_input = projection_or_alert
+        else:
+            # Compatibility adapter for callers not yet migrated to the
+            # neutral projection. Routing is intentionally ignored.
+            alert_name = projection_or_alert
+            facts = facts or {}
+            from .signals import serialize_incident, serialize_reranker_query
+            query = serialize_incident(alert_name, facts)
+            reranker_query = serialize_reranker_query(alert_name, facts)
+            signal_input = facts
+
+        signals = extract_canonical_signals(signal_input)
         exact = {
             document.knowledge_key: document
             for signal in signals
@@ -53,14 +66,6 @@ class RetrievalService:
             )
             return self._finish(result, started, bm25_ms, reranker_ms)
 
-        if routing is not None and (
-                getattr(routing, "primary_signals", ())
-                or getattr(routing, "secondary_signals", ())):
-            query = serialize_routed_incident(routing)
-            reranker_query = serialize_routed_reranker_query(routing)
-        else:
-            query = serialize_incident(alert_name, facts)
-            reranker_query = serialize_reranker_query(alert_name, facts)
         bm25_started = time.perf_counter()
         try:
             candidates = snapshot.bm25.search(query, limit=8)

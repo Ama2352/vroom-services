@@ -311,7 +311,7 @@ _OCCURRENCE_SNAPSHOT_FIELDS = [
     "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
     "log_error", "event_reason", "event_message", "event_object",
     "impact", "log_evidence", "trace_handoff", "diagnosis_confidence",
-    "template_diff", "dependency", "provenance", "diagnosis_decision",
+    "configuration_diff", "dependency", "diagnosis_decision",
     "causal_chain_summary", "presentation", "retrieval_support",
 ]
 
@@ -352,9 +352,8 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
                 "dev_action":     occurrence.get("dev_action", ""),
                 "kubectl_hint":   occurrence.get("kubectl_hint", ""),
                 "low_confidence": "true" if occurrence.get("low_confidence") else "false",
-                "template_diff":  json.dumps(occurrence.get("template_diff")),
+                "configuration_diff": json.dumps(occurrence.get("configuration_diff")),
                 "dependency":     json.dumps(occurrence.get("dependency")),
-                "provenance":     json.dumps(occurrence.get("provenance")),
                 "diagnosis_decision": json.dumps(occurrence.get("diagnosis_decision")),
                 "causal_chain_summary": json.dumps(occurrence.get("causal_chain_summary")),
             })
@@ -376,9 +375,8 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         "dev_action":     occurrence.get("dev_action", ""),
         "kubectl_hint":   occurrence.get("kubectl_hint", ""),
         "low_confidence": "true" if occurrence.get("low_confidence") else "false",
-        "template_diff":  json.dumps(occurrence.get("template_diff")),
+        "configuration_diff": json.dumps(occurrence.get("configuration_diff")),
         "dependency":     json.dumps(occurrence.get("dependency")),
-        "provenance":     json.dumps(occurrence.get("provenance")),
         "diagnosis_decision": json.dumps(occurrence.get("diagnosis_decision")),
         "causal_chain_summary": json.dumps(occurrence.get("causal_chain_summary")),
         "presentation": json.dumps(occurrence.get("presentation")),
@@ -414,9 +412,8 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
                 d[f] = json.loads(d[f])
             except json.JSONDecodeError:
                 pass
-    d["template_diff"] = json.loads(d["template_diff"]) if "template_diff" in d else None
+    d["configuration_diff"] = json.loads(d["configuration_diff"]) if "configuration_diff" in d else None
     d["dependency"] = json.loads(d["dependency"]) if "dependency" in d else None
-    d["provenance"] = json.loads(d["provenance"]) if "provenance" in d else None
     d["diagnosis_decision"] = json.loads(d["diagnosis_decision"]) if "diagnosis_decision" in d else None
     d["causal_chain_summary"] = json.loads(d["causal_chain_summary"]) if "causal_chain_summary" in d else None
     return d
@@ -435,7 +432,7 @@ def _decode_occurrence_snapshot(snapshot: dict) -> dict:
             except (TypeError, ValueError):
                 result[field] = 0
     for field in ("impact", "log_evidence", "trace_handoff", "diagnosis_confidence",
-                  "template_diff", "dependency", "provenance", "diagnosis_decision",
+                  "configuration_diff", "dependency", "diagnosis_decision",
                   "causal_chain_summary", "presentation", "retrieval_support"):
         if isinstance(result.get(field), str) and result[field]:
             try:
@@ -478,7 +475,7 @@ def get_incident_occurrences(rdb: redis_lib.Redis, iid: str) -> list[dict]:
                     for key in (
                         "impact", "log_evidence", "trace_handoff", "pods_available",
                         "pods_desired", "pods_running", "pods_ready", "waiting_reason",
-                        "restarts", "template_diff", "dependency", "provenance",
+                        "restarts", "configuration_diff", "dependency",
                     )
                     if key in snapshot
                 },

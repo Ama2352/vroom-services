@@ -21,7 +21,21 @@ def _clean(value: Any) -> str:
     return " ".join(str(value).replace("\x00", " ").split())
 
 
-def extract_canonical_signals(facts: dict) -> frozenset[str]:
+def _legacy_facts(facts) -> dict:
+    if not hasattr(facts, "to_prompt_dict"):
+        return facts
+    projected = facts.to_prompt_dict()
+    legacy = {}
+    for key, value in projected.items():
+        if key.startswith("runtime."):
+            legacy[key.split(".", 1)[1]] = value
+        elif key.startswith("dependency."):
+            legacy.setdefault("dependency", {})[key.split(".", 1)[1]] = value
+    return legacy
+
+
+def extract_canonical_signals(facts) -> frozenset[str]:
+    facts = _legacy_facts(facts)
     signals: set[str] = set()
 
     init_last = facts.get("init_last_terminated_reason")
@@ -59,7 +73,7 @@ def extract_canonical_signals(facts: dict) -> frozenset[str]:
     return frozenset(signals)
 
 
-def select_unique_signal(facts: dict) -> str:
+def select_unique_signal(facts) -> str:
     signals = extract_canonical_signals(facts)
     return next(iter(signals)) if len(signals) == 1 else ""
 
