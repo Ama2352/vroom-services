@@ -99,6 +99,8 @@ export interface IncidentPresentation {
   evidence_gap?: string | null
   evidence_confidence: ConfidenceLevel
   answer_source: 'knowledge' | 'generated' | 'safe_fallback' | string
+  hypothesis?: string | null
+  hypothesis_evidence_refs?: string[]
   supporting_evidence: PresentationEvidence[]
   recommended_response: RecommendedResponse
   incident_events: IncidentEvent[]

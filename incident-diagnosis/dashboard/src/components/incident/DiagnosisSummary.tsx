@@ -27,6 +27,12 @@ export function DiagnosisSummary({ presentation }: { presentation: IncidentPrese
       </div>
       <h3 className="mt-2 text-[17px] font-bold leading-snug text-ink">{presentation.headline}</h3>
       {presentation.summary && <p className="mt-2 text-sm text-ink-soft">{presentation.summary}</p>}
+      {presentation.hypothesis && (
+        <div className="mt-3 rounded-md border border-border bg-surface px-3 py-2">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">Most plausible explanation — unconfirmed</div>
+          <div className="mt-1 text-xs text-ink">{presentation.hypothesis}</div>
+        </div>
+      )}
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <div className="rounded-md border border-border bg-surface px-3 py-2">
           <div className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">Confirmed failure</div>

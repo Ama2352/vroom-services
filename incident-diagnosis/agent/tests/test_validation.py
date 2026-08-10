@@ -42,3 +42,24 @@ def test_validator_rejects_placeholder_in_every_public_field(field):
     result = validate_diagnosis(draft, DLQ_CHAIN)
     assert not result.passed
     assert "unresolved_placeholder" in result.issues
+
+
+def test_validator_allows_tentative_hypothesis_when_it_cites_known_evidence():
+    draft = {
+        **VALID_DRAFT,
+        "hypothesis": "The log likely indicates an unsupported event contract.",
+        "hypothesis_evidence_refs": ["log:evt-42"],
+    }
+
+    context = {"evidence": [{"id": ref} for ref in VALID_DRAFT["evidence_refs"]]}
+    assert validate_diagnosis(draft, context).passed
+
+
+def test_validator_rejects_hypothesis_without_evidence_reference():
+    draft = {**VALID_DRAFT, "hypothesis": "The log likely indicates an unsupported event contract."}
+
+    context = {"evidence": [{"id": ref} for ref in VALID_DRAFT["evidence_refs"]]}
+    result = validate_diagnosis(draft, context)
+
+    assert not result.passed
+    assert "missing_hypothesis_evidence_reference" in result.issues

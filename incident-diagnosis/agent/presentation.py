@@ -43,6 +43,8 @@ def build_presentation(*, alert: dict, diagnosis: dict, diagnosis_confidence: di
             "confirmed_failure": log_message or f"{service} reported an operational failure",
             "evidence_confidence": _text(diagnosis_confidence.get("level")) or "unknown",
             "answer_source": "knowledge" if exact else "generated" if accepted else "safe_fallback",
+            "hypothesis": _text(diagnosis.get("hypothesis")) or None,
+            "hypothesis_evidence_refs": list(diagnosis.get("hypothesis_evidence_refs") or []),
             "supporting_evidence": evidence, "recommended_response": response,
             "incident_events": []}
 
