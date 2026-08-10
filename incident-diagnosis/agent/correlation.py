@@ -23,34 +23,62 @@ def derive_log_error(log_evidence: dict) -> str:
 
 def collect_log_evidence(service, namespace, start_epoch_s, end_epoch_s):
     query_start_epoch_s = start_epoch_s - PRE_ALERT_LOOKBACK_SECONDS
-    query = f'{{app="{service}",namespace="{namespace}"}} | json | level=~"(?i)^error$"'
-    try:
-        response = requests.get(LOKI_URL, params={
-            "query": query, "start": str(int(query_start_epoch_s * 1_000_000_000)),
-            "end": str(int(end_epoch_s * 1_000_000_000)), "limit": "50",
-        }, timeout=5)
+    params = {
+        "start": str(int(query_start_epoch_s * 1_000_000_000)),
+        "end": str(int(end_epoch_s * 1_000_000_000)), "limit": "50",
+    }
+
+    def query_candidates(query, *, plain=False):
+        response = requests.get(LOKI_URL, params={"query": query, **params}, timeout=5)
         if not response.ok:
-            return _error("unavailable", errors=[f"Loki HTTP {response.status_code}"])
+            return None, _error("unavailable", errors=[f"Loki HTTP {response.status_code}"])
         candidates = []
         for stream in response.json().get("data", {}).get("result", []):
+            stream_pod = stream.get("stream", {}).get("pod", "")
             for timestamp, raw_line in stream.get("values", []):
+                record = None
                 try:
                     record = json.loads(raw_line)
                 except (TypeError, json.JSONDecodeError):
+                    if not plain:
+                        continue
+                if plain:
+                    message = raw_line if record is None else record.get("message") or record.get("msg", "")
+                    if not message:
+                        continue
+                    candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), int(timestamp), {
+                        "message": message, "trace_id": "", "pod": stream_pod,
+                        "log_format": "plain",
+                    }))
                     continue
                 trace_id = record.get("trace_id", "")
                 if (str(record.get("level", "")).lower() != "error" or record.get("service", service) != service
                         or not TRACE_ID_RE.fullmatch(trace_id)):
                     continue
-                candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), int(timestamp), record))
+                candidates.append((abs(int(timestamp) / 1_000_000_000 - start_epoch_s), int(timestamp), {
+                    **record, "pod": stream_pod, "log_format": "structured",
+                }))
+        return candidates, None
+
+    try:
+        structured_query = f'{{app="{service}",namespace="{namespace}"}} | json | level=~"(?i)^error$"'
+        candidates, error = query_candidates(structured_query)
+        if error:
+            return error
+        if not candidates:
+            plain_query = f'{{app="{service}",namespace="{namespace}"}} |~ "(?i)(error|failed|not ready|panic|fatal|refused|lookup)"'
+            candidates, error = query_candidates(plain_query, plain=True)
+            if error:
+                return error
         if not candidates:
             return _error("no_match")
         _, timestamp_ns, record = min(candidates, key=lambda item: item[0])
         return {"status": "found", "service": service, "namespace": namespace,
-                "trace_id": record["trace_id"], "span_id": record.get("span_id", ""),
+                "trace_id": record.get("trace_id", ""), "span_id": record.get("span_id", ""),
                 "operation": record.get("operation", ""),
                 "message": record.get("message") or record.get("msg", ""),
-                "event_id": record.get("event_id", ""),
+                "event_id": record.get("event_id", ""), "pod": record.get("pod", ""),
+                "log_format": record.get("log_format", "structured"),
                 "timestamp": record.get("timestamp") or record.get("time", ""),
                 "timestamp_ns": timestamp_ns}
     except Exception as exc:
@@ -124,4 +152,4 @@ def correlate_trace(log_evidence, start_epoch_s=None, end_epoch_s=None):
     return {"status": "correlated", "trace_id": trace_id, "error_service": selected.get("service_name", ""),
             "error_operation": operation, "error_message": message,
             "involved_services": involved_services,
-            "grafana_url": f"{GRAFANA_BASE_URL.rstrip('/')}/explore?{urlencode({'left': json.dumps({'datasource': 'Tempo', 'queries': [{'queryType': 'traceql', 'query': f'{{.trace:id={trace_id}}}'}]})})}"}
+            "grafana_url": f"{GRAFANA_BASE_URL.rstrip('/')}/explore?{urlencode({'left': json.dumps({'datasource': 'Tempo', 'queries': [{'queryType': 'traceql', 'query': trace_id}]})})}"}

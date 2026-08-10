@@ -41,6 +41,18 @@ export function DiagnosisSummary({ presentation }: { presentation: IncidentPrese
           </div>
         </div>
       </div>
+      {(presentation.mechanism_status || presentation.attribution_status) && (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="rounded-md border border-border bg-surface px-3 py-2">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">Failure mechanism</div>
+            <div className="mt-1 text-xs font-semibold text-ink">{presentation.mechanism_status === 'confirmed' ? 'Confirmed by runtime evidence' : 'Not established'}</div>
+          </div>
+          <div className="rounded-md border border-border bg-surface px-3 py-2">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">Change attribution</div>
+            <div className="mt-1 text-xs font-semibold text-ink">{presentation.attribution_status === 'confirmed' ? 'Confirmed' : presentation.attribution_status === 'unproven' ? 'Not proven' : 'Unavailable'}</div>
+          </div>
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-ink-soft">
         <span>Evidence confidence: <strong className="text-ink">{presentation.evidence_confidence}</strong></span>
         <span>Response source: <strong className="text-ink">{presentation.answer_source}</strong></span>

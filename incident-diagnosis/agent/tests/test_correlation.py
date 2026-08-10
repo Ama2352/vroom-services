@@ -19,6 +19,12 @@ def _loki_response(line):
     return response
 
 
+def _empty_loki_response():
+    response = MagicMock(ok=True)
+    response.json.return_value = {"data": {"result": []}}
+    return response
+
+
 def _tempo_response(service="dispatch-service", operation="dispatch.consume.UNKNOWN_EVENT_TYPE_DEMO", message="unknown event type moved to DLQ"):
     response = MagicMock(ok=True, status_code=200)
     response.json.return_value = {"batches": [{"resource": {"attributes": [{"key": "service.name", "value": {"stringValue": service}}]},
@@ -35,6 +41,29 @@ def test_collect_log_evidence_returns_trace_fields():
     with patch("requests.get", return_value=_loki_response(line)):
         result = collect_log_evidence("dispatch-service", "vroom-dev", 1775000000, 1775000900)
     assert result["status"] == "found"
+    assert result["trace_id"] == TRACE_ID
+
+
+def test_collect_log_evidence_selects_scoped_plain_startup_error_without_trace_id():
+    line = "Redis not ready: dial tcp: lookup bad-host on 10.43.0.10:53: no such host"
+    with patch("requests.get", side_effect=[_empty_loki_response(), _loki_response(line)]):
+        result = collect_log_evidence("ride-service", "vroom-dev", 1775000000, 1775000900)
+
+    assert result["status"] == "found"
+    assert result["log_format"] == "plain"
+    assert result["trace_id"] == ""
+    assert "bad-host" in result["message"]
+
+
+def test_collect_log_evidence_prefers_structured_record_over_plain_fallback():
+    structured = json.dumps({
+        "level": "ERROR", "service": "dispatch-service",
+        "message": 'unknown event type "Trip.Requested.v2"', "trace_id": TRACE_ID,
+    })
+    with patch("requests.get", return_value=_loki_response(structured)):
+        result = collect_log_evidence("dispatch-service", "vroom-dev", 1775000000, 1775000900)
+
+    assert result["log_format"] == "structured"
     assert result["trace_id"] == TRACE_ID
 
 
@@ -89,6 +118,7 @@ def test_correlate_trace_fetches_exact_log_trace_id():
     assert get.call_args.args[0].endswith(f"/api/traces/{TRACE_ID}")
     assert trace["status"] == "correlated"
     assert trace["error_service"] == "dispatch-service"
+    assert f'"query": "{TRACE_ID}"' in trace["grafana_url"] or f'%22query%22%3A+%22{TRACE_ID}%22' in trace["grafana_url"]
 
 
 def test_correlate_trace_returns_upstream_services_from_same_trace():

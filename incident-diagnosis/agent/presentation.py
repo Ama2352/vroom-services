@@ -113,6 +113,18 @@ def _safe_fallback(service: str, namespace: str) -> tuple[str, str]:
     )
 
 
+def _metric_display(payload: dict) -> tuple[str, str]:
+    name = _text(payload.get("name")) or "Impact metric"
+    value = payload.get("value")
+    if isinstance(value, (int, float)):
+        value_text = f"{value:g} events" if "dlq" in name.lower() else f"{value:g}"
+    else:
+        value_text = _text(value)
+    threshold = payload.get("threshold")
+    detail = f"Threshold: {threshold:g} events" if isinstance(threshold, (int, float)) and "dlq" in name.lower() else ""
+    return value_text, detail
+
+
 def _incident_events(alert: dict, evidence_chain: dict, facts: dict, log_message: str,
                      verdict: Verdict, causal_state: str) -> list[dict]:
     events: list[dict] = []
@@ -150,6 +162,7 @@ def build_presentation(*, alert: dict, diagnosis: dict, diagnosis_confidence: di
     decision = diagnosis.get("diagnosis_decision") or {}
     decision_status = _status(decision)
     published = decision.get("published_generated_answer") is True
+    operator_published = decision.get("published_operator_diagnosis") is True
     retrieval_mode = _text(retrieval_support.get("mode"))
     exact_knowledge = retrieval_mode == "exact_conclusive" and retrieval_support.get("accepted") is True
     causal_state, causal_reason = _causal_state(evidence_chain)
@@ -164,26 +177,34 @@ def build_presentation(*, alert: dict, diagnosis: dict, diagnosis_confidence: di
     incident_kind = _text(evidence_chain.get("incident_kind"), 80) or "generic"
     service = _text(alert.get("service") or facts.get("service")) or "service"
     log_message = _log_message(log_evidence, facts)
+    trigger = (evidence_chain.get("trigger") or [])[:1]
+    primary = (evidence_chain.get("primary") or [])[:2]
     confirmed_failure = _failure_statement(service, log_message, incident_kind)
+    failure_status = _text(diagnosis.get("failure_status")) or ("confirmed" if log_message else "unconfirmed")
+    mechanism_status = _text(diagnosis.get("mechanism_status")) or ("confirmed" if log_message and (trigger or primary) else "unconfirmed")
+    attribution_status = _text(diagnosis.get("attribution_status")) or ("confirmed" if causal_state == "confirmed" else "unproven" if causal_state == "context" else "unavailable")
     root_cause = _without_placeholder(diagnosis.get("root_cause"))
     headline = root_cause if verdict == "cause_confirmed" and root_cause else confirmed_failure
     if verdict == "review_required":
-        headline = f"{confirmed_failure}; cause not established"
+        headline = f"{confirmed_failure}; change attribution not established" if mechanism_status == "confirmed" else f"{confirmed_failure}; cause not established"
     if verdict == "evaluation_unavailable":
         headline = confirmed_failure
 
     evidence: list[dict] = []
-    trigger = (evidence_chain.get("trigger") or [])[:1]
-    primary = (evidence_chain.get("primary") or [])[:2]
     contexts = _causal_context(evidence_chain)[:1]
     for item in trigger:
         payload = item.get("payload") or {}
+        metric_value, metric_detail = _metric_display(payload)
         _add_item(evidence, item_id=item.get("id", "metric:impact"), state="confirmed", kind="metric",
-                  label="Impact metric", value=payload.get("value") or payload.get("name"), detail=item.get("reason"))
+                  label=_text(payload.get("name")) or "Impact metric", value=metric_value,
+                  detail=metric_detail or item.get("reason"))
     for item in primary:
         payload = item.get("payload") or {}
+        if str(item.get("id", "")).startswith("trace:"):
+            continue
         _add_item(evidence, item_id=item.get("id", "log:selected"), state="confirmed", kind="log",
-                  label="Structured log", value=payload.get("message") or log_message, detail=item.get("reason"))
+                  label="Structured log" if payload.get("log_format") != "plain" else "Runtime log",
+                  value=payload.get("message") or log_message, detail=item.get("reason"))
     if trace_handoff.get("status") == "correlated":
         _add_item(evidence, item_id=f"trace:{_text(trace_handoff.get('trace_id')) or 'selected'}", state="confirmed", kind="trace",
                   label="Correlated trace", value=trace_handoff.get("error_operation") or trace_handoff.get("trace_id"),
@@ -192,10 +213,16 @@ def build_presentation(*, alert: dict, diagnosis: dict, diagnosis_confidence: di
         payload = item.get("payload") or {}
         item_state: EvidenceState = "confirmed" if causal_state == "confirmed" else causal_state  # type: ignore[assignment]
         change_value, changed_at = _change_value(facts)
+        provenance = facts.get("provenance") or {}
+        dual = provenance.get("dual") or {}
+        source = dual.get("service_source") or {}
+        source_note = ""
+        if source.get("source_relevance") == "no_relevant_service_files":
+            source_note = f"No relevant {provenance.get('service', service)} source files changed in this revision."
         _add_item(evidence, item_id=item.get("id", "change:provenance"), state=item_state, kind="change",
                   label="Related change" if item_state == "confirmed" else "Recent change",
                   value=change_value or payload.get("classification") or "change context available",
-                  detail=causal_reason, occurred_at=changed_at)
+                  detail=source_note or causal_reason, occurred_at=changed_at)
 
     answer_source = "knowledge" if exact_knowledge else "generated" if published else "safe_fallback"
     if verdict == "cause_confirmed":
@@ -211,12 +238,18 @@ def build_presentation(*, alert: dict, diagnosis: dict, diagnosis_confidence: di
         expected = "Collect the scoped runtime evidence before selecting a remediation."
 
     causal_basis = causal_reason if verdict == "cause_confirmed" else None
-    evidence_gap = None if verdict == "cause_confirmed" else causal_reason
+    evidence_gap = None if verdict == "cause_confirmed" else (
+        "The failure and mechanism are confirmed; change attribution is not proven causal."
+        if mechanism_status == "confirmed" and attribution_status != "confirmed" else causal_reason
+    )
     return {
         "verdict": verdict,
         "headline": _text(headline),
         "summary": _text(root_cause if verdict != "cause_confirmed" else causal_reason),
         "confirmed_failure": _text(confirmed_failure),
+        "failure_status": failure_status,
+        "mechanism_status": mechanism_status,
+        "attribution_status": attribution_status,
         "causal_basis": _text(causal_basis) or None,
         "evidence_gap": _text(evidence_gap) or None,
         "evidence_confidence": _text(diagnosis_confidence.get("level")) or "unknown",
