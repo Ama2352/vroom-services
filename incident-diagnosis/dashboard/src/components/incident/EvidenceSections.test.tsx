@@ -18,4 +18,9 @@ describe('EvidenceSections', () => {
     expect(screen.getByText('1 / 1')).toBeInTheDocument()
     expect(screen.getByText('event rejected')).toBeInTheDocument()
   })
+
+  it('renders a correlated trace id as a Grafana link', () => {
+    render(<EvidenceSections evidence={{ trace_handoff: { status: 'correlated', trace_id: 'abc123', grafana_url: 'http://grafana.local/explore?trace=abc123' } }} />)
+    expect(screen.getByRole('link', { name: /abc123/ })).toHaveAttribute('href', 'http://grafana.local/explore?trace=abc123')
+  })
 })
