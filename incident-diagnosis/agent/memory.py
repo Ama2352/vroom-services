@@ -301,11 +301,27 @@ _INCIDENT_EVIDENCE_FIELDS = [
     "restarts", "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
     "log_error", "event_reason", "event_message", "event_object",
     "impact", "log_evidence", "trace_handoff", "diagnosis_confidence",
+    "presentation", "retrieval_support",
+]
+
+_OCCURRENCE_SNAPSHOT_FIELDS = [
+    "root_cause", "dev_action", "kubectl_hint", "low_confidence",
+    "pods_available", "pods_desired", "pods_running", "pods_ready",
+    "waiting_reason", "last_terminated_reason", "restarts",
+    "init_waiting_reason", "init_last_terminated_reason", "init_restarts",
+    "log_error", "event_reason", "event_message", "event_object",
+    "impact", "log_evidence", "trace_handoff", "diagnosis_confidence",
+    "template_diff", "dependency", "provenance", "diagnosis_decision",
+    "causal_chain_summary", "presentation", "retrieval_support",
 ]
 
 
 def _evidence_snapshot(occurrence: dict) -> dict:
     return {f: occurrence.get(f, "") for f in _INCIDENT_EVIDENCE_FIELDS}
+
+
+def _occurrence_snapshot(occurrence: dict) -> dict:
+    return {f: occurrence.get(f, "") for f in _OCCURRENCE_SNAPSHOT_FIELDS}
 
 
 def _serialize_evidence(value):
@@ -345,6 +361,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
             rdb.hset(f"incident:{oid_str}", mapping=mapping)
             append_incident_timeline(rdb, oid_str, {
                 "type": "fired", "timestamp": int(time.time()),
+                "occurrence_snapshot": _occurrence_snapshot(occurrence),
                 "evidence_snapshot": _evidence_snapshot(occurrence),
             })
             return oid_str
@@ -364,6 +381,8 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
         "provenance":     json.dumps(occurrence.get("provenance")),
         "diagnosis_decision": json.dumps(occurrence.get("diagnosis_decision")),
         "causal_chain_summary": json.dumps(occurrence.get("causal_chain_summary")),
+        "presentation": json.dumps(occurrence.get("presentation")),
+        "retrieval_support": json.dumps(occurrence.get("retrieval_support")),
         "status":       "open",
         "resolved_at":  "",
         "resolved_by":  "",
@@ -374,6 +393,7 @@ def record_incident_occurrence(rdb: redis_lib.Redis, occurrence: dict) -> str:
     rdb.sadd(OPEN_INDEX, iid)
     append_incident_timeline(rdb, iid, {
         "type": "fired", "timestamp": int(time.time()),
+        "occurrence_snapshot": _occurrence_snapshot(occurrence),
         "evidence_snapshot": _evidence_snapshot(occurrence),
     })
     return iid
@@ -388,7 +408,7 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
     d["low_confidence"] = _to_bool(d.get("low_confidence"))
     for f in ("pods_available", "pods_desired", "pods_running", "pods_ready", "restarts", "init_restarts"):
         d[f] = int(d.get(f) or 0)
-    for f in ("impact", "log_evidence", "trace_handoff", "diagnosis_confidence"):
+    for f in ("impact", "log_evidence", "trace_handoff", "diagnosis_confidence", "presentation", "retrieval_support"):
         if isinstance(d.get(f), str) and d[f]:
             try:
                 d[f] = json.loads(d[f])
@@ -400,6 +420,69 @@ def get_incident(rdb: redis_lib.Redis, iid: str) -> dict | None:
     d["diagnosis_decision"] = json.loads(d["diagnosis_decision"]) if "diagnosis_decision" in d else None
     d["causal_chain_summary"] = json.loads(d["causal_chain_summary"]) if "causal_chain_summary" in d else None
     return d
+
+
+def _decode_occurrence_snapshot(snapshot: dict) -> dict:
+    result = dict(snapshot)
+    for field in ("low_confidence",):
+        if field in result:
+            result[field] = _to_bool(result[field])
+    for field in ("pods_available", "pods_desired", "pods_running", "pods_ready", "restarts",
+                  "init_restarts"):
+        if field in result:
+            try:
+                result[field] = int(result[field] or 0)
+            except (TypeError, ValueError):
+                result[field] = 0
+    for field in ("impact", "log_evidence", "trace_handoff", "diagnosis_confidence",
+                  "template_diff", "dependency", "provenance", "diagnosis_decision",
+                  "causal_chain_summary", "presentation", "retrieval_support"):
+        if isinstance(result.get(field), str) and result[field]:
+            try:
+                result[field] = json.loads(result[field])
+            except json.JSONDecodeError:
+                pass
+    return result
+
+
+def get_incident_occurrences(rdb: redis_lib.Redis, iid: str) -> list[dict]:
+    """Return immutable fired-to-fired views with their own steps and presentation."""
+    occurrences: list[dict] = []
+    current: dict | None = None
+    for entry in get_incident_timeline(rdb, iid):
+        if entry.get("type") == "fired":
+            if current is not None:
+                occurrences.append(current)
+            snapshot = entry.get("occurrence_snapshot") or entry.get("evidence_snapshot") or {}
+            snapshot = _decode_occurrence_snapshot(snapshot)
+            if "presentation" not in snapshot or not snapshot.get("presentation"):
+                snapshot["presentation"] = {
+                    "verdict": "evaluation_unavailable",
+                    "headline": snapshot.get("root_cause") or snapshot.get("log_error") or "Legacy incident",
+                    "summary": "Evaluation data was not stored for this occurrence.",
+                    "confirmed_failure": snapshot.get("log_error") or "Legacy incident evidence",
+                    "causal_basis": None,
+                    "evidence_gap": "Evaluation data unavailable",
+                    "evidence_confidence": "unknown",
+                    "answer_source": "safe_fallback",
+                    "supporting_evidence": [],
+                    "recommended_response": {"mode": "investigation", "summary": "Review the stored incident evidence.", "command": None},
+                    "incident_events": [],
+                }
+            current = {
+                "index": len(occurrences),
+                "fired_at": int(entry.get("timestamp") or 0),
+                **snapshot,
+                "agent_steps": [],
+            }
+        elif current is not None:
+            if entry.get("type") == "step":
+                current["agent_steps"].append(entry)
+            elif entry.get("type") == "resolved":
+                current.setdefault("lifecycle_events", []).append(entry)
+    if current is not None:
+        occurrences.append(current)
+    return occurrences
 
 
 def list_incidents(rdb: redis_lib.Redis, status: str | None = None) -> list:

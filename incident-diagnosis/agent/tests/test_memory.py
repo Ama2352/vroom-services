@@ -714,6 +714,40 @@ def test_record_incident_occurrence_second_fire_appends_second_timeline_entry(rd
     assert len(memory.get_incident_timeline(rdb, iid)) == 2
 
 
+def test_get_incident_occurrences_keeps_each_presentation_with_its_steps(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence(
+        presentation={"headline": "first", "verdict": "review_required"},
+        retrieval_support={"mode": "none", "accepted": False},
+    ))
+    memory.append_incident_timeline(rdb, iid, {"type": "step", "name": "routing", "timestamp": 10})
+    memory.record_incident_occurrence(rdb, _make_occurrence(
+        presentation={"headline": "second", "verdict": "cause_confirmed"},
+        retrieval_support={"mode": "exact_conclusive", "accepted": True},
+    ))
+    memory.append_incident_timeline(rdb, iid, {"type": "step", "name": "record_incident", "timestamp": 20})
+
+    occurrences = memory.get_incident_occurrences(rdb, iid)
+
+    assert [o["presentation"]["headline"] for o in occurrences] == ["first", "second"]
+    assert [len(o["agent_steps"]) for o in occurrences] == [1, 1]
+    assert occurrences[0]["retrieval_support"]["mode"] == "none"
+    assert occurrences[1]["retrieval_support"]["mode"] == "exact_conclusive"
+
+
+def test_legacy_fired_snapshot_maps_to_evaluation_unavailable(rdb):
+    iid = memory.record_incident_occurrence(rdb, _make_occurrence())
+    timeline_key = f"incident:{iid}:timeline"
+    raw = rdb.lrange(timeline_key, 0, -1)[0]
+    entry = json.loads(raw)
+    entry.pop("occurrence_snapshot", None)
+    entry["evidence_snapshot"] = {"log_error": "legacy failure"}
+    rdb.lset(timeline_key, 0, json.dumps(entry))
+
+    occurrences = memory.get_incident_occurrences(rdb, iid)
+
+    assert occurrences[0]["presentation"]["verdict"] == "evaluation_unavailable"
+
+
 def test_get_incident_includes_template_diff_when_present(rdb):
     iid = memory.record_incident_occurrence(rdb, _make_occurrence(template_diff={
         "image_changed": False, "old_image": "", "new_image": "",
