@@ -1,10 +1,11 @@
 import { Activity, AlertTriangle, GitBranch, Server } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { OccurrenceEvidence } from '../../types/incident'
 import { Card, CardTitle } from '../ui/Card'
 
-function Row({ label, value }: { label: string; value: string | number | null | undefined }) {
+function Row({ label, value }: { label: string; value: ReactNode }) {
   if (value === null || value === undefined || value === '') return null
-  return <div className="flex justify-between gap-3 border-t border-border py-1.5 text-xs first:border-0 first:pt-0"><dt className="text-ink-soft">{label}</dt><dd className="break-words text-right font-mono text-ink">{String(value)}</dd></div>
+  return <div className="flex justify-between gap-3 border-t border-border py-1.5 text-xs first:border-0 first:pt-0"><dt className="text-ink-soft">{label}</dt><dd className="break-words text-right font-mono text-ink">{value}</dd></div>
 }
 
 function FailureSection({ evidence }: { evidence: OccurrenceEvidence }) {
@@ -17,7 +18,11 @@ function FailureSection({ evidence }: { evidence: OccurrenceEvidence }) {
     <Row label="Request rate" value={impact?.request_rate} />
     <Row label="HTTP error rate" value={impact?.error_rate_percent === null ? 'No data' : impact?.error_rate_percent} />
     <Row label="Structured log" value={log?.status === 'found' ? log.message : undefined} />
-    <Row label="Trace" value={trace?.status === 'correlated' ? `${trace.trace_id || 'linked'}${trace.grafana_url ? ' ↗' : ''}` : undefined} />
+    <Row label="Trace" value={trace?.status === 'correlated' ? (
+      trace.grafana_url
+        ? <a className="text-accent underline decoration-accent/50 underline-offset-2 hover:text-accent-strong" href={trace.grafana_url} target="_blank" rel="noreferrer">{trace.trace_id || 'Open correlated trace'} ↗</a>
+        : trace.trace_id || 'Correlated trace'
+    ) : undefined} />
     {trace && trace.status !== 'correlated' && <div className="border-t border-border pt-1.5 text-xs text-ink-faint"><strong className="text-root-cause-label">Trace unavailable:</strong> {trace.status.replaceAll('_', ' ')}</div>}
   </dl></Card>
 }
