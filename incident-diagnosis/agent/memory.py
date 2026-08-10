@@ -473,6 +473,15 @@ def get_incident_occurrences(rdb: redis_lib.Redis, iid: str) -> list[dict]:
                 "index": len(occurrences),
                 "fired_at": int(entry.get("timestamp") or 0),
                 **snapshot,
+                "evidence": {
+                    key: snapshot.get(key)
+                    for key in (
+                        "impact", "log_evidence", "trace_handoff", "pods_available",
+                        "pods_desired", "pods_running", "pods_ready", "waiting_reason",
+                        "restarts", "template_diff", "dependency", "provenance",
+                    )
+                    if key in snapshot
+                },
                 "agent_steps": [],
             }
         elif current is not None:

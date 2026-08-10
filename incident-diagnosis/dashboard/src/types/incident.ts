@@ -213,6 +213,8 @@ export interface Incident {
     causal_context_ids: string[]
     contradiction_ids: string[]
   } | null
+  presentation?: IncidentPresentation
+  retrieval_support?: { mode: string; accepted: boolean; source?: string | null }
   occurrences?: IncidentOccurrence[]
   selected_occurrence?: number
 }

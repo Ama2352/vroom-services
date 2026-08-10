@@ -1,14 +1,11 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { EvidenceGrid } from '../components/incident/EvidenceGrid'
-import { RootCauseCard } from '../components/incident/RootCauseCard'
-import { DiagnosisDecisionCard } from '../components/incident/DiagnosisDecisionCard'
-import { ImmediateFixCard } from '../components/incident/ImmediateFixCard'
-import { KnowledgeSuggestionCard } from '../components/incident/KnowledgeSuggestionCard'
-import { ConfidenceCard } from '../components/incident/ConfidenceCard'
-import { TraceHandoffCard } from '../components/incident/TraceHandoffCard'
-import { ImpactCard } from '../components/incident/ImpactCard'
-import { Timeline } from '../components/incident/Timeline'
+import { DiagnosisSummary } from '../components/incident/DiagnosisSummary'
+import { SupportingEvidence } from '../components/incident/SupportingEvidence'
+import { RecommendedResponse } from '../components/incident/RecommendedResponse'
+import { EvidenceSections } from '../components/incident/EvidenceSections'
+import { IncidentTimeline } from '../components/incident/IncidentTimeline'
+import { AgentAudit } from '../components/incident/AgentAudit'
 import StatusBadge from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { ErrorBanner } from '../components/ui/ErrorBanner'
@@ -16,7 +13,35 @@ import { SkeletonCard } from '../components/ui/Skeleton'
 import { useApiResource } from '../hooks/useApiResource'
 import { api } from '../lib/api'
 import { getActor } from '../lib/actor'
-import type { Incident } from '../types/incident'
+import type { Incident, IncidentOccurrence, IncidentPresentation, OccurrenceEvidence } from '../types/incident'
+
+function fallbackPresentation(incident: Incident): IncidentPresentation {
+  return {
+    verdict: incident.low_confidence ? 'review_required' : 'evaluation_unavailable',
+    headline: incident.root_cause,
+    summary: 'The stored incident does not include the redesigned presentation.',
+    confirmed_failure: incident.log_error || incident.root_cause,
+    causal_basis: null,
+    evidence_gap: 'Presentation data unavailable',
+    evidence_confidence: incident.diagnosis_confidence?.level || 'unknown',
+    answer_source: 'safe_fallback',
+    supporting_evidence: [],
+    recommended_response: { mode: 'investigation', summary: incident.dev_action, command: incident.kubectl_hint },
+    incident_events: [],
+  }
+}
+
+function latestOccurrence(incident: Incident): IncidentOccurrence {
+  const fromApi = incident.occurrences?.[incident.selected_occurrence ?? (incident.occurrences.length - 1)]
+  if (fromApi) return fromApi
+  return {
+    index: 0,
+    fired_at: incident.timestamp,
+    presentation: incident.presentation || fallbackPresentation(incident),
+    evidence: incident as unknown as OccurrenceEvidence,
+    agent_steps: incident.timeline.filter(entry => entry.type === 'step'),
+  }
+}
 
 export function IncidentDetailPage() {
   const { id } = useParams()
@@ -25,6 +50,7 @@ export function IncidentDetailPage() {
     [id],
   )
   const [resolving, setResolving] = useState(false)
+  const [occurrenceIndex, setOccurrenceIndex] = useState<number | null>(null)
 
   function resolve() {
     setResolving(true)
@@ -36,28 +62,34 @@ export function IncidentDetailPage() {
   if (error) return <ErrorBanner message={error} onRetry={reload} />
   if (loading || !incident) return <SkeletonCard lines={4} />
 
+  const occurrences = incident.occurrences || []
+  const selected = occurrenceIndex === null ? latestOccurrence(incident) : occurrences[occurrenceIndex] || latestOccurrence(incident)
+
   return (
-    <div className="flex items-start gap-6 max-[1100px]:flex-col">
-      <div className="min-w-0 flex-1 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-bold text-ink">{incident.alert_name} — {incident.service}</h2>
-          <StatusBadge status={incident.status} />
-          {incident.status === 'open' && (
-            <Button className="ml-auto" onClick={resolve} disabled={resolving}>
-              {resolving ? 'Resolving…' : 'Resolve Incident'}
-            </Button>
-          )}
-        </div>
-        <DiagnosisDecisionCard decision={incident.diagnosis_decision} chain={incident.causal_chain_summary} />
-        <RootCauseCard incident={incident} />
-        <ConfidenceCard confidence={incident.diagnosis_confidence} />
-        <ImpactCard impact={incident.impact} />
-        <EvidenceGrid incident={incident} />
-        <TraceHandoffCard trace={incident.trace_handoff} />
-        <ImmediateFixCard incident={incident} />
-        {incident.pending_suggestion && <KnowledgeSuggestionCard suggestion={incident.pending_suggestion} />}
+    <div className="min-w-0 space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-base font-bold text-ink">{incident.alert_name} — {incident.service}</h2>
+        <StatusBadge status={incident.status} />
+        {incident.status === 'open' && (
+          <Button className="ml-auto" onClick={resolve} disabled={resolving}>
+            {resolving ? 'Resolving…' : 'Resolve Incident'}
+          </Button>
+        )}
       </div>
-      <Timeline entries={incident.timeline} mode="full" />
+      {occurrences.length > 1 && (
+        <label className="flex items-center gap-2 text-xs text-ink-soft">
+          Occurrence
+          <select className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-ink" value={occurrenceIndex ?? occurrences.length - 1} onChange={event => setOccurrenceIndex(Number(event.target.value))}>
+            {occurrences.map(occurrence => <option key={occurrence.index} value={occurrence.index}>#{occurrence.index + 1} · {new Date(occurrence.fired_at * 1000).toLocaleString()}</option>)}
+          </select>
+        </label>
+      )}
+      <DiagnosisSummary presentation={selected.presentation} />
+      <RecommendedResponse response={selected.presentation.recommended_response} />
+      <SupportingEvidence presentation={selected.presentation} />
+      <EvidenceSections evidence={selected.evidence} />
+      <IncidentTimeline occurrence={selected} />
+      <AgentAudit occurrence={selected} />
     </div>
   )
 }
