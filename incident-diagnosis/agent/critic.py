@@ -58,7 +58,8 @@ def run_semantic_critic(context: dict, draft: dict, _llm=None) -> CriticResult:
         return CriticResult(False, ["critic_unavailable"], "unavailable")
     prompt = "\n".join([
         "You are an independent incident-diagnosis critic.",
-        "Check whether the cause is supported by the labelled evidence and recommends relevant remediation.",
+        "Check whether root_cause and remediation are supported by the labelled evidence.",
+        "If present, hypothesis is explicitly unconfirmed: it may use tentative language such as likely or possibly. It must be grounded in its cited hypothesis_evidence_refs, but must not be treated as a confirmed cause or a basis for automatic remediation.",
         "Return ONLY JSON matching one of these exact shapes (no markdown or explanation):",
         '{"verdict":"pass","issues":[]}',
         '{"verdict":"fail","issues":["concise_issue_code_or_reason"]}',

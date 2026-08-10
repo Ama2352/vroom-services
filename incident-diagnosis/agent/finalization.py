@@ -5,8 +5,8 @@ def finalize_diagnosis(result: dict, context: dict, namespace: str, service: str
     status = str(result.get("acceptance_status", "accepted"))
     if not status.startswith("rejected"):
         return {**result, "diagnosis_decision": {"status": status, "published_generated_answer": True, "published_operator_diagnosis": True}}
-    hypothesis = str(result.get("root_cause") or "").strip()
-    hypothesis_refs = list(result.get("evidence_refs") or [])
+    hypothesis = str(result.get("hypothesis") or "").strip()
+    hypothesis_refs = list(result.get("hypothesis_evidence_refs") or [])
     return {
         "root_cause": "Insufficient evidence to confirm a safe root cause. Need diagnosis review.",
         "dev_action": "Do not run a remediation command until the diagnosis is reviewed.",

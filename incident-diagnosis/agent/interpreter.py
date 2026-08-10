@@ -129,7 +129,7 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
         for item in chain.get("evidence", []):
             lines.append(f"  - {item['id']} ({item.get('label', 'evidence')})")
         lines += [
-            "Cite the evidence items used for the diagnosis in evidence_refs.",
+        "Cite confirmed diagnosis evidence in evidence_refs. Also provide a separate hypothesis when evidence suggests a plausible explanation but cannot confirm it. A hypothesis may say likely/may/possibly, must be grounded in evidence, and must cite only its supporting evidence in hypothesis_evidence_refs. Use an empty hypothesis and [] if none is supported.",
         ]
     lines += [
         "",
@@ -137,7 +137,8 @@ def _build_grounded_prompt(alert_name: str, service: str, namespace: str,
         "",
         "Output exactly this JSON (no markdown, no explanation):",
         ('{"root_cause":"...","dev_action":"...","kubectl_hint":"...",'
-         '"evidence_refs":["exact-evidence-id"]}' if chain is not None else
+         '"evidence_refs":["exact-evidence-id"],"hypothesis":"...",'
+         '"hypothesis_evidence_refs":["exact-evidence-id"]}' if chain is not None else
          '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}'),
     ]
     return "\n".join(lines)
@@ -258,7 +259,8 @@ def _build_refine_prompt(original_prompt: str, diagnosis: dict, issues: list,
         "Fix ONLY these issues. Keep all other fields the same.",
         "Output exactly this JSON (no markdown, no explanation):",
         ('{"root_cause":"...","dev_action":"...","kubectl_hint":"...",'
-         '"evidence_refs":["exact-evidence-id"]}' if require_evidence_refs else
+         '"evidence_refs":["exact-evidence-id"],"hypothesis":"...",'
+         '"hypothesis_evidence_refs":["exact-evidence-id"]}' if require_evidence_refs else
          '{"root_cause":"...","dev_action":"...","kubectl_hint":"..."}'),
     ]
     return "\n".join(lines)

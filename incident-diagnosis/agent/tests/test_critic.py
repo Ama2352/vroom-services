@@ -19,3 +19,20 @@ def test_critic_receives_only_flat_labelled_evidence():
     assert result.passed
     assert "Trip.Requested.v2" in captured["prompt"]
     assert "causal_context" not in captured["prompt"]
+
+
+def test_critic_treats_a_cited_hypothesis_as_tentative_not_confirmed():
+    captured = {}
+
+    def llm(prompt, temperature=0.0):
+        captured["prompt"] = prompt
+        return json.dumps({"verdict": "pass", "issues": []})
+
+    result = run_semantic_critic(
+        {"evidence": [{"id": "fact:log.message", "label": "log.message", "value": "unknown event type Trip.Requested.v2"}]},
+        {"root_cause": "Insufficient evidence to confirm a safe root cause.", "dev_action": "Do not remediate automatically.", "kubectl_hint": "kubectl get pods", "evidence_refs": ["fact:log.message"], "hypothesis": "The log likely indicates an unsupported event contract.", "hypothesis_evidence_refs": ["fact:log.message"]},
+        _llm=llm,
+    )
+
+    assert result.passed
+    assert "may use tentative language" in captured["prompt"]
