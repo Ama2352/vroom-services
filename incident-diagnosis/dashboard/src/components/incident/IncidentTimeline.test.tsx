@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
-import { render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { test, expect } from 'vitest'
+import { afterEach } from 'vitest'
 import { IncidentTimeline } from './IncidentTimeline'
 import { AgentAudit } from './AgentAudit'
 import type { IncidentOccurrence } from '../../types/incident'
@@ -19,6 +20,8 @@ const occurrence: IncidentOccurrence = {
   agent_steps: [{ type: 'step', timestamp: 101, name: 'collect_diagnostics', duration_ms: 20, metadata: { parsed: true } }],
 }
 
+afterEach(cleanup)
+
 test('renders chronology without agent internals', () => {
   render(<IncidentTimeline occurrence={occurrence} />)
   expect(screen.getByText('Incident chronology')).toBeInTheDocument()
@@ -29,4 +32,10 @@ test('renders chronology without agent internals', () => {
 test('keeps audit details collapsed until requested', () => {
   render(<AgentAudit occurrence={occurrence} />)
   expect(screen.queryByText('collect_diagnostics')).not.toBeInTheDocument()
+})
+
+test('uses audit start time when a step has no legacy timestamp', () => {
+  render(<AgentAudit occurrence={{ ...occurrence, agent_steps: [{ type: 'step', started_at: 1786275600, finished_at: 1786275601, name: 'collect_diagnostics', duration_ms: 1000, metadata: {} }] }} />)
+  fireEvent.click(screen.getByRole('button', { name: /Agent audit/ }))
+  expect(screen.queryByText('Invalid Date')).not.toBeInTheDocument()
 })

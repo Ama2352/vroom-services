@@ -251,6 +251,7 @@ def _collect_dual_provenance(
     dual = combine_provenance(gitops, source)
     causal = classify_causality(
         dual, service, log_evidence, trace_handoff, alert_started_at, failure_predates=False,
+        template_diff=template_diff,
     )
     return summarize_provenance({
         **({key: value for key, value in gitops.items() if key != "status"} if gitops.get("status") == "found" else {}),

@@ -223,10 +223,30 @@ def classify_causality(
     trace_handoff: dict,
     alert_started_at: str,
     failure_predates: bool,
+    template_diff: dict | None = None,
 ) -> CausalityResult:
     """Classify a deployment candidate from generic identity, ordering, and linkage signals."""
     gitops = provenance.get("gitops") or {}
     source = provenance.get("service_source") or {}
+    direct_env_diff = (template_diff or {}).get("env_diff") or []
+    if direct_env_diff:
+        changed_at = str((template_diff or {}).get("changed_at") or "")
+        if failure_predates:
+            return CausalityResult("conflicting", ("failure_predates_change",), ())
+        if changed_at and alert_started_at and changed_at > alert_started_at:
+            return CausalityResult("conflicting", ("change_after_alert",), ())
+        observed = _identifiers(
+            "\n".join((str(log_evidence.get("message", "")), str(trace_handoff.get("error_message", ""))))
+        )
+        changed = _identifiers("\n".join(str(change.get("new_value", "")) for change in direct_env_diff))
+        shared = tuple(observed[key] for key in observed.keys() & changed.keys())
+        log_service = str(log_evidence.get("service", ""))
+        if shared and (not log_service or log_service == candidate_service):
+            return CausalityResult(
+                "causal_candidate",
+                ("direct_runtime_change", "exact_failure_identifier", "change_precedes_alert"),
+                shared,
+            )
     has_deployed_identity = gitops.get("status") == "found" or source.get("status") == "found"
     if not has_deployed_identity:
         return CausalityResult("unavailable", ("deployed_identity_unavailable",), ())

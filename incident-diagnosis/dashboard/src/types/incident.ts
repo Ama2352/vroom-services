@@ -95,7 +95,9 @@ export type TimelineResolvedEntry = {
 
 export type TimelineStepEntry = {
   type: 'step'
-  timestamp: number
+  timestamp?: number
+  started_at?: number
+  finished_at?: number
   name: string
   duration_ms?: number
   metadata?: Record<string, unknown>
