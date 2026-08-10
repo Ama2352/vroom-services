@@ -1,4 +1,8 @@
 import os, json, uuid, threading, time, re
+try:
+    import resource
+except ImportError:  # pragma: no cover - Windows local development
+    resource = None
 from datetime import datetime, timezone
 from pathlib import Path
 import redis as redis_lib
@@ -51,6 +55,16 @@ retrieval_service = create_retrieval_service(
     Path(os.environ.get("RERANKER_MODEL_DIR", "/opt/models/minilm")),
 )
 _repository_clients = repository_clients_from_env()
+
+
+def _rss_mib() -> int:
+    """Return process high-water RSS in MiB without exposing host details."""
+    if resource is None:
+        return 0
+    value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    # Linux reports KiB; macOS reports bytes. The service runs on Linux, but
+    # keeping this portable makes the audit helper safe in local tests.
+    return max(0, value // 1024 if value > 10_000 else value // (1024 * 1024))
 
 
 def _invalidate_retrieval_snapshot() -> None:
@@ -298,6 +312,9 @@ def investigate():
     })
 
     def _step(name: str, started_at: float, finished_at: float, **metadata) -> None:
+        if debug and name in {"trusted_match_check", "llm_phase1", "llm_refine", "hard_validation",
+                              "semantic_critic", "hard_validation_refine", "semantic_critic_refine"}:
+            metadata["rss_mib"] = _rss_mib()
         steps.append({
             "type": "step", "name": name,
             "started_at": started_at, "finished_at": finished_at,
@@ -323,7 +340,9 @@ def investigate():
 
     t1a = time.time()
     selected_change: tuple[str, dict, dict] | None = None
+    provenance_services: list[dict] = []
     best_rank = -1
+    involved_services = list(trace_handoff.get("involved_services", []))
     for candidate_service in dict.fromkeys(change_services):
         candidate_diff = collect_change_evidence(candidate_service, namespace)
         if candidate_diff is None:
@@ -334,6 +353,18 @@ def investigate():
             trace_handoff, normalized.get("starts_at", ""),
         )
         status = candidate_provenance.get("causal_status", {}).get("status", "unavailable")
+        role = "alert_target" if candidate_service == service else (
+            "producer" if candidate_service in involved_services[:involved_services.index(service)] else "downstream"
+        ) if service in involved_services else "related"
+        dual = candidate_provenance.get("dual") or {}
+        source = dual.get("service_source") or {}
+        provenance_services.append({
+            "service": candidate_service, "role": role,
+            "source": "Manual runtime change" if candidate_diff.get("env_changed") and candidate_provenance.get("classification") == "hotfix" else "Service source revision",
+            "relationship": "Confirmed cause" if status == "causal_candidate" else "Related context" if status == "recent_context" else "Unavailable",
+            "source_revision": (source.get("commit") or {}).get("sha") if isinstance(source.get("commit"), dict) else None,
+            "source_relevance": source.get("source_relevance"),
+        })
         rank = {"causal_candidate": 3, "recent_context": 2, "unavailable": 1, "conflicting": 0}.get(status, 0)
         if selected_change is None or rank > best_rank:
             selected_change = (candidate_service, candidate_diff, candidate_provenance)
@@ -367,6 +398,7 @@ def investigate():
             affected_fields.append("image")
         provenance = {
             **provenance,
+            "services": provenance_services[:3],
             "service": change_service,
             "alert_started_at": normalized.get("starts_at", ""),
             "affected_fields": affected_fields,
@@ -390,6 +422,7 @@ def investigate():
         "impact": {"triggering_metric": {
             "name": "dlq_events" if normalized.get("incident_kind") == "dlq" else "service_impact",
             "value": normalized.get("metric_value"),
+            "threshold": normalized.get("threshold"),
         }} if impact.get("status") == "available" else {},
         "log_evidence": log_evidence,
         "trace_handoff": trace_handoff,
@@ -429,15 +462,19 @@ def investigate():
           f"retrieval_mode={retrieval.mode.value} "
           f"accepted={retrieval.accepted}", flush=True)
 
-    diagnosis = dict(interpret(
-        alert_name, service, namespace,
-        facts, bundle, retrieval,
-        models=_current_models,
-        groq_key=GROQ_KEY,
-        openrouter_key=OPENROUTER_KEY,
-        pod=pod,
-        chain=evidence_chain,
-    ))
+    try:
+        diagnosis = dict(interpret(
+            alert_name, service, namespace,
+            facts, bundle, retrieval,
+            models=_current_models,
+            groq_key=GROQ_KEY,
+            openrouter_key=OPENROUTER_KEY,
+            pod=pod,
+            chain=evidence_chain,
+        ))
+    except MemoryError:
+        print(f"[diag] investigation capacity exhausted service={service} namespace={namespace}", flush=True)
+        return jsonify({"error": "investigation capacity exhausted", "retryable": True}), 503
     diagnosis = finalize_diagnosis(diagnosis, evidence_chain, namespace, service)
     diagnosis["root_cause"] = align_root_cause_confidence(
         diagnosis["root_cause"], diagnosis_confidence,

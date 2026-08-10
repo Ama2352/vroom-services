@@ -118,6 +118,7 @@ def test_correlate_trace_fetches_exact_log_trace_id():
     assert get.call_args.args[0].endswith(f"/api/traces/{TRACE_ID}")
     assert trace["status"] == "correlated"
     assert trace["error_service"] == "dispatch-service"
+    assert f'"query": "{TRACE_ID}"' in trace["grafana_url"] or f'%22query%22%3A+%22{TRACE_ID}%22' in trace["grafana_url"]
 
 
 def test_correlate_trace_returns_upstream_services_from_same_trace():

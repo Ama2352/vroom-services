@@ -1,6 +1,7 @@
 export interface DiagnosisDecision {
   status: string
   published_generated_answer: boolean
+  published_operator_diagnosis?: boolean
 }
 
 export interface CausalChainSummary {
@@ -28,17 +29,19 @@ export function DiagnosisDecisionCard({ decision, chain }: {
   chain?: CausalChainSummary | null
 }) {
   if (!decision && !chain) return null
-  const reviewRequired = !decision?.published_generated_answer
+  const operatorDiagnosis = decision?.published_operator_diagnosis === true
+  const reviewRequired = !decision?.published_generated_answer && !operatorDiagnosis
   return (
     <section className={`rounded-[10px] border px-4 py-3.5 ${reviewRequired ? 'border-root-cause bg-root-cause-soft' : 'border-border bg-surface'}`}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10.5px] font-bold uppercase tracking-wide text-ink-soft">Diagnosis decision</span>
         <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${reviewRequired ? 'bg-surface text-root-cause-label' : 'bg-healthy-soft text-healthy'}`}>
-          {reviewRequired ? 'Review required' : 'Accepted'}
+          {reviewRequired ? 'Review required' : operatorDiagnosis ? 'Mechanism confirmed · attribution review' : 'Accepted'}
         </span>
         {chain?.incident_kind && <span className="text-xs text-ink-faint">{chain.incident_kind} evidence path</span>}
       </div>
       {reviewRequired && <p className="mt-2 text-sm text-ink-soft">Generated remediation was withheld.</p>}
+      {operatorDiagnosis && <p className="mt-2 text-sm text-ink-soft">The observed failure and bounded mechanism are retained; unsupported remediation or change attribution was withheld.</p>}
       {chain && (
         <div className="mt-3 grid gap-3 border-t border-border pt-3">
           <EvidenceList label="Trigger" ids={chain.trigger_ids} />

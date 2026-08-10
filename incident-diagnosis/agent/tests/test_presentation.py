@@ -89,6 +89,50 @@ def test_confirmed_dlq_failure_without_related_change_withholds_cause():
     assert "<dispatch-service-pod-name>" not in json.dumps(view)
 
 
+def test_presentation_labels_metric_units_and_does_not_duplicate_trace_as_log():
+    view = build_presentation(
+        alert={"alert_name": "DLQEventsDetected", "service": "dispatch-service"},
+        diagnosis={"diagnosis_decision": {"status": "rejected_after_refine"}},
+        diagnosis_confidence={"level": "high", "reasons": [], "missing_evidence": []},
+        evidence_chain={**DLQ_CHAIN, "primary": [
+            {"id": "log:selected", "payload": {"message": "unknown event type Trip.Requested.v2", "log_format": "structured"}},
+            {"id": "trace:trace-dlq", "payload": {"trace_id": "trace-dlq", "status": "correlated"}},
+        ]}, facts=DLQ_FACTS, impact=DLQ_IMPACT, log_evidence=DLQ_LOG,
+        trace_handoff={**DLQ_TRACE, "grafana_url": "http://grafana/explore?left=%7B%22query%22%3A%20%22trace-dlq%22%7D"},
+        retrieval_support={"mode": "none", "accepted": False},
+    )
+    kinds = [item["kind"] for item in view["supporting_evidence"]]
+    assert kinds.count("log") == 1
+    assert kinds.count("trace") == 1
+    metric = next(item for item in view["supporting_evidence"] if item["kind"] == "metric")
+    assert metric["value"].endswith("events")
+
+
+def test_dlq_presentation_distinguishes_confirmed_mechanism_from_unproven_attribution():
+    diagnosis = {
+        "root_cause": 'dispatch rejected event type "Trip.Requested.v2"; event-contract compatibility is unproven',
+        "dev_action": "Do not run a remediation command until the diagnosis is reviewed.",
+        "diagnosis_decision": {
+            "status": "accepted_with_unproven_attribution",
+            "published_generated_answer": False,
+            "published_operator_diagnosis": True,
+        },
+        "failure_status": "confirmed", "mechanism_status": "confirmed", "attribution_status": "unproven",
+    }
+    view = build_presentation(
+        alert={"alert_name": "DLQEventsDetected", "service": "dispatch-service"}, diagnosis=diagnosis,
+        diagnosis_confidence={"level": "high", "reasons": [], "missing_evidence": []},
+        evidence_chain=DLQ_CHAIN, facts=DLQ_FACTS, impact=DLQ_IMPACT,
+        log_evidence=DLQ_LOG, trace_handoff=DLQ_TRACE,
+        retrieval_support={"mode": "none", "accepted": False},
+    )
+    assert view["confirmed_failure"] == 'dispatch-service rejected event type "Trip.Requested.v2"'
+    assert view["mechanism_status"] == "confirmed"
+    assert view["attribution_status"] == "unproven"
+    assert "cause not established" not in view["headline"].lower()
+    assert "attribution" in view["evidence_gap"].lower()
+
+
 def test_presentation_uses_operational_copy_and_bounds_evidence():
     view = build_presentation(
         alert={"alert_name": "ServiceDown"}, diagnosis={"root_cause": "unknown"},

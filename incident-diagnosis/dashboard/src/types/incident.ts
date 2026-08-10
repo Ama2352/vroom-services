@@ -143,6 +143,9 @@ export interface IncidentPresentation {
   headline: string
   summary: string
   confirmed_failure: string
+  failure_status?: 'confirmed' | 'unconfirmed' | string
+  mechanism_status?: 'confirmed' | 'unconfirmed' | string
+  attribution_status?: 'confirmed' | 'unproven' | 'conflicting' | 'unavailable' | string
   causal_basis?: string | null
   evidence_gap?: string | null
   evidence_confidence: ConfidenceLevel

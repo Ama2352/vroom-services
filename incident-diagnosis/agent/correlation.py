@@ -152,4 +152,4 @@ def correlate_trace(log_evidence, start_epoch_s=None, end_epoch_s=None):
     return {"status": "correlated", "trace_id": trace_id, "error_service": selected.get("service_name", ""),
             "error_operation": operation, "error_message": message,
             "involved_services": involved_services,
-            "grafana_url": f"{GRAFANA_BASE_URL.rstrip('/')}/explore?{urlencode({'left': json.dumps({'datasource': 'Tempo', 'queries': [{'queryType': 'traceql', 'query': f'{{.trace:id={trace_id}}}'}]})})}"}
+            "grafana_url": f"{GRAFANA_BASE_URL.rstrip('/')}/explore?{urlencode({'left': json.dumps({'datasource': 'Tempo', 'queries': [{'queryType': 'traceql', 'query': trace_id}]})})}"}
