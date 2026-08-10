@@ -31,9 +31,10 @@ function RuntimeSection({ evidence }: { evidence: OccurrenceEvidence }) {
   const hasRuntime = evidence.pods_desired !== undefined || evidence.pods_ready !== undefined || evidence.waiting_reason
   if (!hasRuntime) return null
   return <Card><CardTitle><Server size={14} /> Runtime and Kubernetes</CardTitle><dl className="m-0">
-    <Row label="Ready pods" value={evidence.pods_ready !== undefined && evidence.pods_desired !== undefined ? `${evidence.pods_ready} / ${evidence.pods_desired}` : undefined} />
-    <Row label="Waiting reason" value={evidence.waiting_reason} />
-    <Row label="Restarts" value={evidence.restarts as number | undefined} />
+    <Row label="Ready pods (snapshot)" value={evidence.pods_ready !== undefined && evidence.pods_desired !== undefined ? `${evidence.pods_ready} / ${evidence.pods_desired}` : undefined} />
+    <Row label="Waiting reason (snapshot)" value={evidence.waiting_reason} />
+    <Row label="Restarts (snapshot)" value={evidence.restarts as number | undefined} />
+    {evidence.waiting_reason && evidence.pods_ready === evidence.pods_desired && <p className="mt-2 border-t border-border pt-2 text-[11px] text-ink-faint">Readiness and waiting state were captured at different points in the runtime snapshot.</p>}
   </dl></Card>
 }
 

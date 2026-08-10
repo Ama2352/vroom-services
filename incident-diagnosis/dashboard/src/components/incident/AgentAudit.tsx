@@ -41,7 +41,7 @@ export function AgentAudit({ occurrence }: { occurrence: IncidentOccurrence }) {
                         <span className="text-ink-soft">{step.name}</span>
                         <span className="font-mono text-ink-faint">{formatDuration(step.duration_ms || 0)}</span>
                         {Object.entries(step.metadata || {}).map(([key, value]) => <span key={key} className="rounded border border-border px-1.5 py-0.5 font-mono text-ink-faint">{key}: {String(value)}</span>)}
-                        <span className="ml-auto text-[10px] text-ink-faint">{formatTimestamp(step.timestamp)}</span>
+                        <span className="ml-auto text-[10px] text-ink-faint">{formatTimestamp(step.timestamp ?? step.started_at)}</span>
                       </div>
                     ))}
                   </div>

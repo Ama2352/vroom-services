@@ -202,6 +202,22 @@ def test_generic_config_value_matches_hostname_without_special_field_rule():
     assert "wrong-cache-host" in result.matched_identifiers
 
 
+def test_live_environment_diff_matches_runtime_dns_failure_without_knowledge():
+    result = classify_causality(
+        provenance={"gitops": {"status": "unavailable"}, "service_source": {"status": "unavailable"}},
+        candidate_service="ride-service",
+        log_evidence={"status": "found", "service": "ride-service", "message": "lookup bad-host: no such host"},
+        trace_handoff={"status": "no_trace_id"},
+        alert_started_at="2026-08-10T12:00:00Z",
+        failure_predates=False,
+        template_diff={"changed_at": "2026-08-10T11:59:00Z", "env_diff": [{"key": "REDIS_ADDR", "old_value": "redis:6379", "new_value": "bad-host:6379"}]},
+    )
+
+    assert result.status == "causal_candidate"
+    assert "direct_runtime_change" in result.reason_codes
+    assert "bad-host" in result.matched_identifiers
+
+
 def test_recent_unrelated_change_remains_context_only():
     result = classify_causality(
         provenance={
