@@ -135,3 +135,11 @@ def test_collect_impact_uses_alert_metric_for_dlq_when_http_metrics_are_sparse()
     assert impact["triggering_metric"] == {
         "name": "DLQ events", "value": 1.11, "threshold": 0.0,
     }
+
+
+def test_collect_impact_queries_dlq_counter_when_alert_has_no_metric_value():
+    with patch("requests.get", side_effect=[_prom_ok(1.2), _prom_ok(0.1), _prom_ok(0.2), _prom_ok(2)]):
+        impact = collector.collect_impact(
+            "dispatch-service", "vroom-dev", alert={"alert_name": "DLQEventsDetected"},
+        )
+    assert impact["triggering_metric"] == {"name": "DLQ events", "value": 2.0, "threshold": 0.0}

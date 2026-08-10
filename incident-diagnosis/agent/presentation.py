@@ -113,16 +113,19 @@ def _safe_fallback(service: str, namespace: str) -> tuple[str, str]:
     )
 
 
-def _metric_display(payload: dict) -> tuple[str, str]:
-    name = _text(payload.get("name")) or "Impact metric"
+def _metric_display(payload: dict, incident_kind: str = "") -> tuple[str, str, str]:
+    name = "DLQ events" if incident_kind == "dlq" else _text(payload.get("name")) or "Impact metric"
     value = payload.get("value")
-    if isinstance(value, (int, float)):
-        value_text = f"{value:g} events" if "dlq" in name.lower() else f"{value:g}"
+    if isinstance(value, (int, float)) and incident_kind == "dlq":
+        count = int(round(value))
+        value_text = f"{count} event" + ("" if count == 1 else "s") + " in the last 5 min"
+    elif isinstance(value, (int, float)):
+        value_text = f"{value:g}"
     else:
         value_text = _text(value)
     threshold = payload.get("threshold")
-    detail = f"Threshold: {threshold:g} events" if isinstance(threshold, (int, float)) and "dlq" in name.lower() else ""
-    return value_text, detail
+    detail = f"Alert threshold: > {threshold:g} event" if isinstance(threshold, (int, float)) and incident_kind == "dlq" else ""
+    return name, value_text, detail
 
 
 def _incident_events(alert: dict, evidence_chain: dict, facts: dict, log_message: str,
@@ -194,9 +197,9 @@ def build_presentation(*, alert: dict, diagnosis: dict, diagnosis_confidence: di
     contexts = _causal_context(evidence_chain)[:1]
     for item in trigger:
         payload = item.get("payload") or {}
-        metric_value, metric_detail = _metric_display(payload)
+        metric_name, metric_value, metric_detail = _metric_display(payload, incident_kind)
         _add_item(evidence, item_id=item.get("id", "metric:impact"), state="confirmed", kind="metric",
-                  label=_text(payload.get("name")) or "Impact metric", value=metric_value,
+                  label=metric_name, value=metric_value,
                   detail=metric_detail or item.get("reason"))
     for item in primary:
         payload = item.get("payload") or {}

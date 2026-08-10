@@ -19,6 +19,7 @@ export function SupportingEvidence({ presentation }: { presentation: IncidentPre
             </div>
             <div className="mt-1 text-xs font-semibold text-ink">{item.label}</div>
             <div className="mt-1 break-words text-[11px] text-ink-soft" title={item.detail || undefined}>{item.value}</div>
+            {item.detail && <div className="mt-1 break-words text-[10px] text-ink-faint">{item.detail}</div>}
             {item.href && <a className="mt-2 inline-flex items-center gap-1 text-[11px] text-accent hover:text-accent-strong" href={item.href} target="_blank" rel="noreferrer">Open source <ExternalLink size={11} aria-hidden="true" /></a>}
           </div>
         ))}

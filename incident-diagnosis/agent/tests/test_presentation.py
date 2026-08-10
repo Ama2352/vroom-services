@@ -105,7 +105,7 @@ def test_presentation_labels_metric_units_and_does_not_duplicate_trace_as_log():
     assert kinds.count("log") == 1
     assert kinds.count("trace") == 1
     metric = next(item for item in view["supporting_evidence"] if item["kind"] == "metric")
-    assert metric["value"].endswith("events")
+    assert "event in the last 5 min" in metric["value"]
 
 
 def test_dlq_presentation_distinguishes_confirmed_mechanism_from_unproven_attribution():

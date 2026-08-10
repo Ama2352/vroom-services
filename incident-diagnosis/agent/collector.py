@@ -75,10 +75,16 @@ def collect_impact(service: str, namespace: str, window: str = "5m", alert: dict
     if (alert or {}).get("alert_name") == "DLQEventsDetected":
         metric_value = (alert or {}).get("metric_value")
         threshold = (alert or {}).get("threshold")
+        if metric_value is None:
+            metric_value, metric_status, metric_error = _prom_value(
+                f'increase(vroom_dlq_events_total{{namespace="{namespace}"}}[5m])'
+            )
+            if metric_error:
+                errors.append(f"dlq_events: {metric_error}")
         if metric_value is not None:
             impact["status"] = "available"
             impact["triggering_metric"] = {
-                "name": "DLQ events", "value": metric_value, "threshold": threshold,
+                "name": "DLQ events", "value": metric_value, "threshold": 0.0 if threshold is None else threshold,
             }
     return impact
 
