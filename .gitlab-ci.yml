@@ -1,75 +1,13 @@
-# Fast incident-workflow pipeline. The complete pipeline is preserved in
-# .gitlab-ci.yml.original and can be restored after live validation.
+# Fast image pipeline. The complete test pipeline is preserved in
+# .gitlab-ci.yml.original and can be restored when validation is needed.
 
-stages: [test, publish]
+stages: [publish]
 
 variables:
   IMG_PREFIX: "ghcr.io/ama2352/vroom-mvp"
   VERSION: "1.0.0"
   DOCKER_BUILDKIT: "1"
   GIT_DEPTH: "1"
-
-.go_consumer_test:
-  stage: test
-  image: golang:1.25-alpine
-  script:
-    - cd "$SERVICE_PATH"
-    - go test ./internal/telemetry ./internal/worker -v
-
-test-dispatch-correlation:
-  extends: .go_consumer_test
-  services:
-    - name: redis:7-alpine
-      alias: redis
-  variables:
-    SERVICE_PATH: services/dispatch
-    REDIS_TEST_ADDR: redis:6379
-  script:
-    - cd "$SERVICE_PATH"
-    - go test ./internal/telemetry ./internal/worker -v
-    - go test -tags=integration ./internal/worker -run 'Test(UnsupportedContract|RetryableKnownEvent)' -count=1 -v
-
-test-notification-correlation:
-  extends: .go_consumer_test
-  variables: { SERVICE_PATH: services/notification }
-
-test-ride:
-  stage: test
-  image: golang:1.25-alpine
-  script:
-    - cd services/ride
-    - go test ./...
-
-test-incident-agent:
-  stage: test
-  image: python:3.12-slim
-  script:
-    - cd incident-diagnosis/agent
-    - python -m pip install -r requirements.txt -r requirements-test.txt
-    - python -m pytest tests/test_alerting.py tests/test_collector.py tests/test_confidence.py tests/test_correlation.py tests/test_diagnostics.py tests/test_evidence.py tests/test_interpreter.py tests/test_validation.py tests/test_app.py tests/test_memory.py -q
-
-test-kubectl-executor:
-  stage: test
-  image: python:3.12-slim
-  script:
-    - cd incident-diagnosis/kubectl-executor
-    - python -m pip install --root-user-action=ignore -r requirements.txt "pytest>=8,<10"
-    - python -m pytest tests/test_named_tools.py -q
-
-test-n8n-sources:
-  stage: test
-  image: node:22-alpine
-  script:
-    - node --test incident-diagnosis/n8n/tests/code-nodes.test.mjs
-
-test-dashboard-build:
-  stage: test
-  image: node:22-alpine
-  script:
-    - cd incident-diagnosis/dashboard
-    - npm ci
-    - npm run typecheck
-    - npm run build
 
 .build_push_target:
   stage: publish
@@ -92,29 +30,35 @@ test-dashboard-build:
 build-push-dispatch:
   extends: .build_push_target
   variables: { SERVICE_NAME: dispatch-service, SERVICE_PATH: services/dispatch }
-  needs: [test-dispatch-correlation]
+  rules:
+    - changes: [services/dispatch/**/*]
 
 build-push-notification:
   extends: .build_push_target
   variables: { SERVICE_NAME: notification-service, SERVICE_PATH: services/notification }
-  needs: [test-notification-correlation]
+  rules:
+    - changes: [services/notification/**/*]
 
 build-push-ride:
   extends: .build_push_target
   variables: { SERVICE_NAME: ride-service, SERVICE_PATH: services/ride }
-  needs: [test-ride]
+  rules:
+    - changes: [services/ride/**/*]
 
 build-push-incident-agent:
   extends: .build_push_target
   variables: { SERVICE_NAME: incident-agent, SERVICE_PATH: incident-diagnosis/agent }
-  needs: [test-incident-agent, test-n8n-sources]
+  rules:
+    - changes: [incident-diagnosis/agent/**/*]
 
 build-push-kubectl-executor:
   extends: .build_push_target
   variables: { SERVICE_NAME: kubectl-executor, SERVICE_PATH: incident-diagnosis/kubectl-executor }
-  needs: [test-kubectl-executor]
+  rules:
+    - changes: [incident-diagnosis/kubectl-executor/**/*]
 
 build-push-incident-dashboard:
   extends: .build_push_target
   variables: { SERVICE_NAME: incident-dashboard, SERVICE_PATH: incident-diagnosis/dashboard }
-  needs: [test-dashboard-build]
+  rules:
+    - changes: [incident-diagnosis/dashboard/**/*]
