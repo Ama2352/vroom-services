@@ -11,6 +11,7 @@ from memory import (search_memory as memory_search,
                     store_pending_suggestion, KNOWLEDGE_INDEX,
                     record_incident_occurrence, get_incident, list_incidents,
                     get_latest_incident, get_incident_timeline, append_incident_timeline, resolve_incident,
+                    get_incident_occurrences,
                     list_pending_suggestions, get_pending_suggestion,
                     approve_pending_suggestion, reject_pending_suggestion,
                     list_knowledge_entries, get_knowledge_entry, update_knowledge_entry,
@@ -31,6 +32,7 @@ from provenance import (classify_causality, collect_deployed_identity,
                         collect_service_source_evidence, combine_provenance,
                         summarize_provenance)
 from finalization import finalize_diagnosis
+from presentation import build_presentation
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
 from seed import seed_if_empty
 from retrieval.models import RetrievalMode
@@ -442,6 +444,18 @@ def investigate():
     diagnosis["low_confidence"] = bool(diagnosis.get("low_confidence")) or diagnosis_confidence["level"] in {"low", "unknown"}
     steps.extend(diagnosis.pop("_step_log", []))
 
+    presentation = build_presentation(
+        alert=normalized,
+        diagnosis=diagnosis,
+        diagnosis_confidence=diagnosis_confidence,
+        evidence_chain=evidence_chain,
+        facts=facts,
+        impact=impact,
+        log_evidence=log_evidence,
+        trace_handoff=trace_handoff,
+        retrieval_support=retrieval.to_api_dict(debug=False),
+    )
+
     occurrence = {
         "alert_name": alert_name, "service": service, "namespace": namespace,
         **facts,
@@ -454,6 +468,8 @@ def investigate():
         "evidence_chain": evidence_chain,
         "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
         "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
+        "presentation": presentation,
+        "retrieval_support": retrieval.to_api_dict(debug=False),
     }
     t6          = time.time()
     incident_id = record_incident_occurrence(rdb, occurrence)
@@ -500,12 +516,14 @@ def investigate():
 
 def _incident_detail_payload(iid: str, incident: dict) -> dict:
     timeline = get_incident_timeline(rdb, iid)
+    occurrences = get_incident_occurrences(rdb, iid)
     published = (incident.get("diagnosis_decision") or {}).get("published_generated_answer", True)
     matches = [
         p for p in list_pending_suggestions(rdb)
         if published and p.get("source_incident_id") == iid
     ]
-    return {**incident, "timeline": timeline,
+    return {**incident, "timeline": timeline, "occurrences": occurrences,
+            "selected_occurrence": max(len(occurrences) - 1, 0),
             "pending_suggestion": matches[0] if matches else None}
 
 
