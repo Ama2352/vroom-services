@@ -61,3 +61,15 @@ def test_failed_diagnosis_with_string_action_becomes_safe_investigation_action()
         "kind": "investigation",
         "summary": "Collect the cited runtime evidence before selecting remediation.",
     }
+
+
+def test_validator_requires_grouped_evidence_analysis():
+    draft = {
+        "incident_summary": "dispatch-service rejected an event.",
+        "evidence_analysis": "a scalar explanation",
+        "recommended_action": {"kind": "investigation", "summary": "Compare the contracts."},
+        "evidence_refs": ["log:selected"],
+    }
+    result = validate_diagnosis_v2(draft, CURRENT)
+    assert not result.passed
+    assert "invalid_evidence_analysis" in result.issues

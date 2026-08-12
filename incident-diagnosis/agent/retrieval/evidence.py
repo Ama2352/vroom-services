@@ -7,6 +7,10 @@ from .bm25 import BM25Index
 from .models import RetrievalDocument
 
 
+# These are template/domain glue words, never decisive observations.
+_NON_DECISIVE_TERMS = {"service", "namespace", "alert", "metric", "configuration"}
+
+
 class EvidenceRetrievalMode(str, Enum):
     EXACT = "exact"
     NEAREST = "nearest"
@@ -37,6 +41,19 @@ def _serialized(document: dict) -> str:
     return f"{evidence}\napproved_hints: {hints}".strip()
 
 
+def _retrieval_text(serialized: str) -> str:
+    """Compare observed values, not the shared fixed-template field names."""
+    values = []
+    for line in serialized.splitlines():
+        if ":" not in line:
+            continue
+        _, value = line.split(":", 1)
+        value = value.strip()
+        if value:
+            values.append(value)
+    return "\n".join(values)
+
+
 class EvidenceRetrievalService:
     def __init__(self, corpus, reranker):
         self.corpus = corpus
@@ -61,13 +78,15 @@ class EvidenceRetrievalService:
                 return EvidenceRetrievalResult(EvidenceRetrievalMode.NONE, exact_ambiguous=len(keys) > 1)
             retrieval_docs = tuple(_as_document(item) for item in documents)
             index = BM25Index(retrieval_docs)
-            ranked = index.search(template.serialize(), limit=8)
+            ranked = index.search(_retrieval_text(template.serialize()), limit=8)
             if not ranked:
                 return EvidenceRetrievalResult(EvidenceRetrievalMode.NONE, exact_ambiguous=len(keys) > 1)
             by_id = {item["example_id"]: item for item in documents}
             candidates = []
             for ranked_item in ranked:
                 raw = by_id[ranked_item.document.source_id]
+                if not set(ranked_item.matched_terms).difference(_NON_DECISIVE_TERMS):
+                    continue
                 candidates.append(EvidenceCandidate(
                     raw["knowledge_key"], raw["example_id"], _serialized(raw), ranked_item.bm25_score,
                 ))
@@ -99,5 +118,5 @@ def _as_document(item: dict) -> RetrievalDocument:
         conclusive=False,
         root_cause_pattern="",
         fix_action="",
-        document_text=_serialized(item),
+        document_text=_retrieval_text(_serialized(item)),
     )

@@ -19,12 +19,17 @@ def build_generation_prompt(current_evidence: dict, candidates: list[dict]) -> s
         json.dumps(candidates[:3], sort_keys=True),
         "Use only current evidence references for confirmed causes and hypotheses.",
         "Return JSON with evidence_analysis, incident_summary, diagnosis_cause, hypothesis, recommended_action, used_knowledge_keys, evidence_refs, hypothesis_evidence_refs.",
+        "evidence_analysis must be an object keyed only by evidence groups (alert_metrics, logs, traces, kubernetes, configuration), with short strings as values.",
+        "recommended_action must be an object: {\"kind\":\"investigation\"|\"remediation\",\"summary\":\"...\"}.",
     ])
 
 
 def validate_diagnosis_v2(draft: dict, context: dict) -> DiagnosisGate:
     known = {item.get("id") for item in context.get("evidence", []) if isinstance(item, dict)}
     issues = []
+    analysis = draft.get("evidence_analysis")
+    if not isinstance(analysis, dict):
+        issues.append("invalid_evidence_analysis")
     for ref in draft.get("evidence_refs") or []:
         if ref not in known:
             issues.append("unknown_evidence_reference")
@@ -46,6 +51,15 @@ def validate_diagnosis_v2(draft: dict, context: dict) -> DiagnosisGate:
     return DiagnosisGate(not unique, unique)
 
 
+def build_refinement_prompt(original_prompt: str, draft: dict, issues: list[str]) -> str:
+    return "\n".join([
+        original_prompt,
+        "Your previous JSON was:", json.dumps(draft, sort_keys=True),
+        "Correct only these validation issues:", json.dumps(issues),
+        "Return the complete JSON object with the required object shapes.",
+    ])
+
+
 def finalize_diagnosis_v2(draft: dict, context: dict, *, accepted: bool) -> dict:
     result = dict(draft)
     if accepted:
@@ -56,6 +70,8 @@ def finalize_diagnosis_v2(draft: dict, context: dict, *, accepted: bool) -> dict
     action["kind"] = "investigation"
     action["summary"] = "Collect the cited runtime evidence before selecting remediation."
     result["recommended_action"] = action
+    if not isinstance(result.get("evidence_analysis"), dict):
+        result["evidence_analysis"] = {}
     refs = set(context.get("evidence_ids") or {
         item.get("id") for item in context.get("evidence", []) if isinstance(item, dict)
     })

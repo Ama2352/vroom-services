@@ -7,7 +7,8 @@ must retain a grounded hypothesis plus the nearest three examples.
 
 from __future__ import annotations
 
-from diagnosis_v2 import build_generation_prompt, finalize_diagnosis_v2, validate_diagnosis_v2
+from diagnosis_v2 import (build_generation_prompt, build_refinement_prompt,
+                          finalize_diagnosis_v2, validate_diagnosis_v2)
 from retrieval.evidence import EvidenceRetrievalMode
 
 
@@ -71,6 +72,17 @@ def decide_diagnosis(template, retrieval, generate, *, knowledge: dict | None = 
     if not isinstance(draft, dict):
         draft = _fallback(template)
     gate = validate_diagnosis_v2(draft, context)
+    if not gate.passed:
+        try:
+            refined = generate(build_refinement_prompt(
+                build_generation_prompt(context, advisory), draft, gate.issues,
+            ))
+        except Exception:
+            refined = None
+        if isinstance(refined, dict):
+            refined_gate = validate_diagnosis_v2(refined, context)
+            if refined_gate.passed:
+                draft, gate = refined, refined_gate
     result = finalize_diagnosis_v2(draft, context, accepted=gate.passed)
     result["advisory_examples"] = advisory
     return result

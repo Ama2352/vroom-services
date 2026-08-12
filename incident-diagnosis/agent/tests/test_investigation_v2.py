@@ -54,3 +54,25 @@ def test_exact_result_reuses_approved_cause_without_llm():
     )
     assert result["diagnosis_cause"] == "Producer and consumer contracts differ."
     assert result["hypothesis"] is None
+
+
+def test_advisory_refines_invalid_first_draft_once():
+    template = _template()
+    retrieval = EvidenceRetrievalResult(EvidenceRetrievalMode.NONE)
+    calls = []
+
+    def generate(_prompt):
+        calls.append(_prompt)
+        if len(calls) == 1:
+            return {"incident_summary": "dispatch-service rejected an event.", "evidence_analysis": "bad",
+                    "recommended_action": "bad", "evidence_refs": ["log:selected"]}
+        return {"incident_summary": "dispatch-service rejected an event.",
+                "evidence_analysis": {"logs": "The consumer rejected the event."},
+                "hypothesis": "The event contract may differ.",
+                "hypothesis_evidence_refs": ["log:selected"],
+                "recommended_action": {"kind": "investigation", "summary": "Compare the event contracts."},
+                "evidence_refs": ["log:selected"]}
+
+    result = decide_diagnosis(template, retrieval, generate)
+    assert len(calls) == 2
+    assert result["recommended_action"]["summary"] == "Compare the event contracts."
