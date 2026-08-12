@@ -88,6 +88,37 @@ def collect_impact(service: str, namespace: str, window: str = "5m", alert: dict
             }
     return impact
 
+
+def _metric_observation(value, unit: str, status: str, window: str = "5m") -> dict:
+    return {"value": value, "unit": unit, "status": status, "window": window}
+
+
+def collect_operational_metrics(service: str, namespace: str, window: str = "5m", alert: dict | None = None) -> dict:
+    """Collect common service/resource context without collapsing missing data to zero."""
+    queries = {
+        "request_rate": (f'sum(rate(gin_requests_total{{service="{service}",namespace="{namespace}"}}[{window}]))', "req/s", 1.0),
+        "http_error_rate": (f'sum(rate(gin_requests_total{{service="{service}",namespace="{namespace}",code=~"5.."}}[{window}]))', "%", 1.0),
+        "p95_latency": ("histogram_quantile(0.95, sum by (le) "
+                         f'(rate(gin_request_duration_seconds_bucket{{service="{service}",namespace="{namespace}"}}[{window}])))', "ms", 1000.0),
+        "cpu_usage": (f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}",pod=~"{service}-.*",container!="POD"}}[{window}]))', "cores", 1.0),
+        "memory_working_set": (f'sum(container_memory_working_set_bytes{{namespace="{namespace}",pod=~"{service}-.*",container!="POD"}}) / 1048576', "MiB", 1.0),
+        "ephemeral_storage": (f'sum(container_fs_usage_bytes{{namespace="{namespace}",pod=~"{service}-.*",container!="POD"}}) / 1048576', "MiB", 1.0),
+        "cpu_throttling": (f'sum(rate(container_cpu_cfs_throttled_seconds_total{{namespace="{namespace}",pod=~"{service}-.*"}}[{window}])) * 100', "%", 1.0),
+    }
+    result = {}
+    for name, (query, unit, multiplier) in queries.items():
+        value, status, _ = _prom_value(query)
+        result[name] = _metric_observation(None if value is None else value * multiplier, unit, status, window)
+    if alert and alert.get("metric_value") is not None:
+        result["triggering_metric"] = {
+            "name": alert.get("alert_name", "alert metric"),
+            "value": alert.get("metric_value"),
+            "threshold": alert.get("threshold"),
+            "unit": alert.get("metric_unit") or "events",
+            "window": alert.get("metric_window") or window,
+        }
+    return result
+
 def _prom(query: str) -> float:
     try:
         r = requests.get(PROMETHEUS_URL, params={"query": query}, timeout=5)
