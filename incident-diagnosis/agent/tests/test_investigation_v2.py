@@ -76,3 +76,20 @@ def test_advisory_refines_invalid_first_draft_once():
     result = decide_diagnosis(template, retrieval, generate)
     assert len(calls) == 2
     assert result["recommended_action"]["summary"] == "Compare the event contracts."
+
+
+def test_advisory_never_publishes_a_diagnosis_cause():
+    template = _template()
+    retrieval = EvidenceRetrievalResult(EvidenceRetrievalMode.NEAREST, (
+        EvidenceCandidate("event_contract", "example-1", "event mismatch"),
+    ))
+    result = decide_diagnosis(template, retrieval, lambda _prompt: {
+        "incident_summary": "dispatch-service rejected an event.",
+        "evidence_analysis": {"logs": "The consumer rejected the event."},
+        "diagnosis_cause": "The event contract is incompatible.",
+        "hypothesis": "The event contract may differ.",
+        "hypothesis_evidence_refs": ["log:selected"],
+        "recommended_action": {"kind": "investigation", "summary": "Compare event contracts."},
+        "evidence_refs": ["log:selected"],
+    })
+    assert result["diagnosis_cause"] is None

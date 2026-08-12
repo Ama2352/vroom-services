@@ -84,5 +84,8 @@ def decide_diagnosis(template, retrieval, generate, *, knowledge: dict | None = 
             if refined_gate.passed:
                 draft, gate = refined, refined_gate
     result = finalize_diagnosis_v2(draft, context, accepted=gate.passed)
+    # Only an identical human-approved example can publish a diagnosis cause.
+    # Advisory retrieval can inform a hypothesis, never promote it to fact.
+    result["diagnosis_cause"] = None
     result["advisory_examples"] = advisory
     return result

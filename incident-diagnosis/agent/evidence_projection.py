@@ -91,7 +91,9 @@ class EvidenceTemplate:
 
 
 def _template_value(value: Any) -> str:
-    return _clean(value) if value is not None else ""
+    cleaned = _clean(value) if value is not None else ""
+    # Kubernetes uses Unknown as a placeholder, not an observed terminal reason.
+    return "" if cleaned.lower() == "unknown" else cleaned
 
 
 def _configuration_text(configuration: dict[str, Any] | None) -> str:

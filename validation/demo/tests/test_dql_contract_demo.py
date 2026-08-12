@@ -25,3 +25,9 @@ def test_dlq_demo_restores_the_healthy_contract():
     assert "EVENT_CONTRACT_VERSION=v1" in source
     assert "trap" in source
     assert "kubectl rollout status deployment/ride-service" in source
+
+
+def test_dlq_demo_waits_for_ingress_after_the_contract_rollout():
+    source = SCRIPT_PATHS[0].read_text(encoding="utf-8")
+    assert "wait_for_ride_endpoint" in source
+    assert "Waiting for ride endpoint to accept requests" in source
