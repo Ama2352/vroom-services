@@ -22,6 +22,10 @@ from memory import (search_memory as memory_search,
                     delete_knowledge_entry, list_history_entries_for_knowledge,
                     get_history_entry, update_history_entry, delete_history_entry,
                     store_knowledge_entry, list_all_history_entries)
+from memory import (store_knowledge_v2, get_knowledge_v2, list_knowledge_v2,
+                    store_example_v2, get_example_v2, list_examples_v2, update_example_v2,
+                    store_hint_v2, search_hints_v2, link_knowledge_hints_v2,
+                    list_knowledge_hint_ids_v2, V2_PREFIX)
 from collector import collect_bundle, collect_impact, collect_operational_metrics
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
@@ -656,6 +660,101 @@ def delete_history_route(hid):
         return jsonify({"error": "not found"}), 404
     _invalidate_retrieval_snapshot()
     return jsonify({"deleted": True})
+
+
+def _dev_admin_enabled() -> bool:
+    return os.environ.get("ENABLE_DEV_ADMIN", "false").lower() == "true"
+
+
+@app.route("/v2/knowledge", methods=["POST"])
+def create_knowledge_v2_route():
+    data = request.get_json(silent=True) or {}
+    if not data.get("knowledge_key") or not data.get("diagnosis_cause") or not data.get("remediation"):
+        return jsonify({"error": "knowledge_key, diagnosis_cause, and remediation are required"}), 400
+    key = store_knowledge_v2(rdb, data)
+    return jsonify({"created": True, "knowledge_key": key}), 201
+
+
+@app.route("/v2/knowledge", methods=["GET"])
+def list_knowledge_v2_route():
+    return jsonify({"knowledge": [
+        {**item, "example_count": len(list_examples_v2(rdb, item["knowledge_key"])),
+         "hint_ids": list_knowledge_hint_ids_v2(rdb, item["knowledge_key"])}
+        for item in list_knowledge_v2(rdb)
+    ]})
+
+
+@app.route("/v2/knowledge/<key>", methods=["GET"])
+def knowledge_detail_v2_route(key):
+    item = get_knowledge_v2(rdb, key)
+    if not item:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"knowledge": item, "examples": list_examples_v2(rdb, key),
+                    "hint_ids": list_knowledge_hint_ids_v2(rdb, key)})
+
+
+@app.route("/v2/knowledge/<key>/examples", methods=["POST"])
+def create_example_v2_route(key):
+    if not get_knowledge_v2(rdb, key):
+        return jsonify({"error": "knowledge not found"}), 404
+    data = request.get_json(silent=True) or {}
+    data["knowledge_key"] = key
+    if not data.get("evidence") or not data.get("fingerprint"):
+        return jsonify({"error": "fingerprint and immutable evidence are required"}), 400
+    return jsonify({"example_id": store_example_v2(rdb, data)}), 201
+
+
+@app.route("/v2/examples/<example_id>", methods=["PATCH"])
+def update_example_v2_route(example_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        ok = update_example_v2(rdb, example_id, data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return (jsonify({"updated": True}) if ok else jsonify({"error": "not found"}), 200 if ok else 404)
+
+
+@app.route("/v2/hints", methods=["GET", "POST"])
+def hints_v2_route():
+    if request.method == "GET":
+        return jsonify({"hints": search_hints_v2(rdb, request.args.get("query", ""))})
+    data = request.get_json(silent=True) or {}
+    if not data.get("text"):
+        return jsonify({"error": "text is required"}), 400
+    return jsonify({"hint_id": store_hint_v2(rdb, data["text"])}), 201
+
+
+@app.route("/v2/knowledge/<key>/hints", methods=["PUT"])
+def link_hints_v2_route(key):
+    if not get_knowledge_v2(rdb, key):
+        return jsonify({"error": "knowledge not found"}), 404
+    data = request.get_json(silent=True) or {}
+    link_knowledge_hints_v2(rdb, key, data.get("hint_ids") or [])
+    return jsonify({"updated": True})
+
+
+@app.route("/admin/dev/corpus/<operation>", methods=["POST", "GET"])
+def dev_corpus_route(operation):
+    if not _dev_admin_enabled():
+        return jsonify({"error": "not found"}), 404
+    if operation == "export":
+        return jsonify({"knowledge": list_knowledge_v2(rdb), "examples": list_examples_v2(rdb),
+                        "hints": search_hints_v2(rdb), "prefix": V2_PREFIX})
+    if operation == "reset":
+        keys = list(rdb.scan_iter(match=f"{V2_PREFIX}:*"))
+        if keys:
+            rdb.delete(*keys)
+        return jsonify({"reset": True})
+    if operation == "import":
+        data = request.get_json(silent=True) or {}
+        for item in data.get("knowledge", []): store_knowledge_v2(rdb, item)
+        for item in data.get("examples", []): store_example_v2(rdb, item)
+        for text_value in data.get("hints", []): store_hint_v2(rdb, text_value)
+        return jsonify({"imported": True})
+    if operation == "seed":
+        seed_if_empty(rdb)
+        return jsonify({"seeded": True})
+    return jsonify({"error": "unknown operation"}), 404
 
 
 if __name__ == "__main__":
