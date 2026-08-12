@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, GitBranch, Server } from 'lucide-react'
+import { Activity, GitBranch, Server } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { OccurrenceEvidence } from '../../types/incident'
 import { Card, CardTitle } from '../ui/Card'
@@ -17,7 +17,7 @@ function FailureSection({ evidence }: { evidence: OccurrenceEvidence }) {
     <Row label="Impact status" value={impact?.status} />
     <Row label="Request rate" value={impact?.request_rate === null || impact?.request_rate === undefined ? 'No data' : `${impact.request_rate.toFixed(2)} req/s`} />
     <Row label="HTTP error rate" value={impact?.error_rate_percent === null || impact?.error_rate_percent === undefined ? 'No data' : `${impact.error_rate_percent.toFixed(2)}%`} />
-    <Row label="p99 latency" value={impact?.p99_seconds === null || impact?.p99_seconds === undefined ? 'No data' : `${(impact.p99_seconds * 1000).toFixed(0)} ms`} />
+    <Row label="p95 latency" value={impact?.p95_latency_ms !== undefined ? (impact.p95_latency_ms === null ? 'No data' : `${impact.p95_latency_ms.toFixed(0)} ms`) : impact?.p99_seconds === null || impact?.p99_seconds === undefined ? 'No data' : `${(impact.p99_seconds * 1000).toFixed(0)} ms`} />
     <Row label="Structured log" value={log?.status === 'found' ? log.message : undefined} />
     <Row label="Trace" value={trace?.status === 'correlated' ? (
       trace.grafana_url
@@ -32,9 +32,10 @@ function RuntimeSection({ evidence }: { evidence: OccurrenceEvidence }) {
   const hasRuntime = evidence.pods_desired !== undefined || evidence.pods_ready !== undefined || evidence.waiting_reason
   if (!hasRuntime) return null
   return <Card><CardTitle><Server size={14} /> Runtime and Kubernetes</CardTitle><dl className="m-0">
-    <Row label="Ready pods (snapshot)" value={evidence.pods_ready !== undefined && evidence.pods_desired !== undefined ? `${evidence.pods_ready} / ${evidence.pods_desired}` : undefined} />
+    <Row label="Ready pods" value={evidence.pods_ready !== undefined ? `${evidence.pods_ready} pod${evidence.pods_ready === 1 ? '' : 's'}` : undefined} />
+    <Row label="Desired pods" value={evidence.pods_desired !== undefined ? `${evidence.pods_desired} pod${evidence.pods_desired === 1 ? '' : 's'}` : undefined} />
     <Row label="Waiting reason (snapshot)" value={evidence.waiting_reason} />
-    <Row label="Restarts (snapshot)" value={evidence.restarts as number | undefined} />
+    <Row label="Pod restarts" value={evidence.restarts !== undefined ? `${evidence.restarts} pod restarts` : undefined} />
     {evidence.waiting_reason && evidence.pods_ready === evidence.pods_desired && <p className="mt-2 border-t border-border pt-2 text-[11px] text-ink-faint">Readiness and waiting state were captured at different points in the runtime snapshot.</p>}
   </dl></Card>
 }
@@ -47,16 +48,6 @@ function ChangeSection({ evidence }: { evidence: OccurrenceEvidence }) {
   </dl></Card>
 }
 
-function DependencySection({ evidence }: { evidence: OccurrenceEvidence }) {
-  const dependency = evidence.dependency
-  if (!dependency) return null
-  return <Card className={dependency.pods_available === dependency.pods_desired && !dependency.waiting_reason ? '' : 'border-critical bg-critical-soft'}><CardTitle><AlertTriangle size={14} /> Dependency</CardTitle><dl className="m-0">
-    <Row label="Name" value={`${dependency.namespace}/${dependency.name}`} />
-    <Row label="Ready pods" value={`${dependency.pods_available} / ${dependency.pods_desired}`} />
-    <Row label="Waiting reason" value={dependency.waiting_reason} />
-  </dl></Card>
-}
-
 export function EvidenceSections({ evidence }: { evidence: OccurrenceEvidence }) {
-  return <div className="grid gap-3 md:grid-cols-2"><FailureSection evidence={evidence} /><RuntimeSection evidence={evidence} /><ChangeSection evidence={evidence} /><DependencySection evidence={evidence} /></div>
+  return <div className="grid gap-3 md:grid-cols-2"><FailureSection evidence={evidence} /><RuntimeSection evidence={evidence} /><ChangeSection evidence={evidence} /></div>
 }

@@ -6,7 +6,7 @@ export interface Phase {
 }
 
 export const PHASES: Phase[] = [
-  { name: 'Collect Evidence', steps: ['collect_diagnostics', 'configuration_diff', 'dependency_chase'] },
+  { name: 'Collect Evidence', steps: ['collect_diagnostics', 'configuration_diff', 'collect_operational_metrics'] },
   { name: 'Match Knowledge',  steps: ['trusted_match_check'] },
   { name: 'Evaluate Diagnosis', steps: [
     'exact_conclusive', 'llm_phase1', 'hard_validation', 'semantic_critic',
@@ -18,6 +18,8 @@ export const PHASES: Phase[] = [
 function phaseForStep(stepName: string): Phase | undefined {
   return PHASES.find(p => p.steps.includes(stepName))
 }
+
+const REMOVED_STEPS = new Set(['routing', 'evidence_chain', 'dependency_chase'])
 
 function computePhaseStatus(steps: TimelineStepEntry[]): 'ok' | 'error' {
   return steps.some(s => s.metadata?.parsed === false || s.metadata?.passed === false) ? 'error' : 'ok'
@@ -112,6 +114,7 @@ export function groupTimeline(entries: TimelineEntry[]): TimelineItem[] {
 
   for (const entry of entries) {
     if (entry.type === 'step') {
+      if (REMOVED_STEPS.has(entry.name)) continue
       const phaseDef = phaseForStep(entry.name)
       const name = phaseDef ? phaseDef.name : entry.name
       if (name !== currentPhaseName) {

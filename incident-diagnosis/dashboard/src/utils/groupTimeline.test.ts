@@ -3,7 +3,7 @@ import { groupAgentAudit, groupTimeline } from './groupTimeline'
 import type { TimelineEntry } from '../types/incident'
 
 describe('groupTimeline', () => {
-  it('keeps routing and both evaluation gates as visible ordered phases', () => {
+  it('omits removed routing and evidence-chain stages', () => {
     const entries: TimelineEntry[] = [
       { type: 'step', name: 'collect_diagnostics', timestamp: 1, duration_ms: 20 },
       { type: 'step', name: 'routing', timestamp: 2, duration_ms: 10 },
@@ -21,9 +21,9 @@ describe('groupTimeline', () => {
     const phases = groupTimeline(entries).filter(item => item.kind === 'phase')
 
     expect(phases.map(phase => phase.name)).toEqual([
-      'Collect Evidence', 'Correlate Evidence', 'Match Knowledge', 'Evaluate Diagnosis', 'Record',
+      'Collect Evidence', 'Match Knowledge', 'Evaluate Diagnosis', 'Record',
     ])
-    expect(phases[3].durationMs).toBe(295)
+    expect(phases[2].durationMs).toBe(295)
   })
 })
 

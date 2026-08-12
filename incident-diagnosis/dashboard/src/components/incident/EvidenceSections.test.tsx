@@ -15,7 +15,7 @@ describe('EvidenceSections', () => {
 
   it('keeps meaningful runtime state for an application incident', () => {
     render(<EvidenceSections evidence={{ pods_ready: 1, pods_desired: 1, waiting_reason: '', log_evidence: { status: 'found', message: 'event rejected' } }} />)
-    expect(screen.getByText('1 / 1')).toBeInTheDocument()
+    expect(screen.getAllByText('1 pod', { selector: 'dd' })).toHaveLength(2)
     expect(screen.getByText('event rejected')).toBeInTheDocument()
   })
 
