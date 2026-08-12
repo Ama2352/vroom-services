@@ -11,6 +11,7 @@ def test_dlq_demo_uses_normal_ride_requests_not_redis_injection():
     canonical, wrapper = SCRIPT_PATHS
     source = canonical.read_text(encoding="utf-8")
     assert "EVENT_CONTRACT_VERSION=v2" in source
+    assert "ROLLOUT_TIMEOUT=\"${ROLLOUT_TIMEOUT:-300s}\"" in source
     assert "/ride-service/v1/trips" in source
     assert "X-Correlation-ID" in source
     assert "XADD" not in source
