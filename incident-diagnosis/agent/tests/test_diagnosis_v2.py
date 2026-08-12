@@ -47,3 +47,17 @@ def test_validator_rejects_candidate_only_citation():
     result = validate_diagnosis_v2(draft, CURRENT)
     assert not result.passed
     assert "unknown_evidence_reference" in result.issues
+
+
+def test_failed_diagnosis_with_string_action_becomes_safe_investigation_action():
+    draft = {
+        "incident_summary": "dispatch-service rejected an event.",
+        "hypothesis": "The event contract may differ.",
+        "hypothesis_evidence_refs": ["log:selected"],
+        "recommended_action": "Compare event contracts.",
+    }
+    final = finalize_diagnosis_v2(draft, CURRENT, accepted=False)
+    assert final["recommended_action"] == {
+        "kind": "investigation",
+        "summary": "Collect the cited runtime evidence before selecting remediation.",
+    }

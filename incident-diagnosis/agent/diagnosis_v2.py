@@ -51,7 +51,8 @@ def finalize_diagnosis_v2(draft: dict, context: dict, *, accepted: bool) -> dict
     if accepted:
         return result
     result["diagnosis_cause"] = None
-    action = dict(result.get("recommended_action") or {})
+    raw_action = result.get("recommended_action")
+    action = dict(raw_action) if isinstance(raw_action, dict) else {}
     action["kind"] = "investigation"
     action["summary"] = "Collect the cited runtime evidence before selecting remediation."
     result["recommended_action"] = action
