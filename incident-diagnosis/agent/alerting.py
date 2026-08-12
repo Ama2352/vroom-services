@@ -25,6 +25,8 @@ def normalize_alert(data: dict[str, Any]) -> dict[str, Any]:
         "pod": data.get("pod", ""),
         "severity": data.get("severity", "warning"),
         "status": data.get("status", "firing"),
+        "metric_unit": data.get("metric_unit") or "",
+        "metric_window": data.get("metric_window") or "",
     }
     for field in ("metric_value", "threshold"):
         value = data.get(field)

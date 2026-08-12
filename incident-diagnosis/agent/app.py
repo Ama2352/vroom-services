@@ -22,7 +22,7 @@ from memory import (search_memory as memory_search,
                     delete_knowledge_entry, list_history_entries_for_knowledge,
                     get_history_entry, update_history_entry, delete_history_entry,
                     store_knowledge_entry, list_all_history_entries)
-from collector import collect_bundle, collect_impact
+from collector import collect_bundle, collect_impact, collect_operational_metrics
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
 from confidence import align_root_cause_confidence, assess_confidence
@@ -34,7 +34,7 @@ from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTE
 from seed import seed_if_empty
 from retrieval.models import RetrievalMode
 from retrieval.service import create_retrieval_service
-from evidence_projection import build_evidence_projection
+from evidence_projection import build_evidence_projection, normalize_evidence
 
 app = Flask(__name__)
 CORS(app)  # the dashboard is a separate browser origin (its own NodePort)
@@ -281,6 +281,7 @@ def investigate():
     t0     = time.time()
     bundle = collect_bundle(service, namespace)
     facts  = collect_diagnostics(service, namespace)
+    operational_metrics = collect_operational_metrics(service, namespace, alert=normalized)
     t1     = time.time()
     _step("collect_diagnostics", t0, t1,
           pods_available=facts["pods_available"], pods_desired=facts["pods_desired"],
@@ -326,6 +327,9 @@ def investigate():
     }
     evidence_projection = build_evidence_projection(
         normalized, facts, log_evidence, trace_handoff, dependency, configuration_diff,
+    )
+    evidence_template = normalize_evidence(
+        normalized, facts, log_evidence, trace_handoff, configuration_diff,
     )
     evidence_context = evidence_projection.to_gate_context()
 
@@ -392,6 +396,8 @@ def investigate():
         "low_confidence": diagnosis.get("low_confidence", False),
         "impact": impact, "log_evidence": log_evidence,
         "trace_handoff": trace_handoff, "diagnosis_confidence": diagnosis_confidence,
+        "operational_metrics": operational_metrics,
+        "evidence_template": evidence_template.serialize(),
         "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
         "causal_chain_summary": diagnosis.get("causal_chain_summary", {}),
         "presentation": presentation,
@@ -428,6 +434,8 @@ def investigate():
         "retrieval_support": retrieval.to_api_dict(debug=debug),
         "low_confidence":   diagnosis.get("low_confidence", False),
         "trace_handoff": trace_handoff,
+        "operational_metrics": operational_metrics,
+        "evidence_template": evidence_template.serialize(),
         "diagnosis_confidence": diagnosis_confidence,
         "diagnosis_decision": diagnosis.get("diagnosis_decision", {}),
         **({"debug": {
@@ -435,6 +443,8 @@ def investigate():
             "retrieval_support": retrieval.to_api_dict(debug=True),
             "facts":          facts,
             "evidence_projection": evidence_projection.to_prompt_dict(),
+            "evidence_template": evidence_template.serialize(),
+            "operational_metrics": operational_metrics,
         }} if debug else {}),
     })
 
