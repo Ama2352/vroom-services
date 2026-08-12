@@ -26,6 +26,7 @@ from memory import (store_knowledge_v2, get_knowledge_v2, list_knowledge_v2,
                     store_example_v2, get_example_v2, list_examples_v2, update_example_v2,
                     store_hint_v2, search_hints_v2, link_knowledge_hints_v2,
                     list_knowledge_hint_ids_v2, V2_PREFIX)
+from memory import record_incident_v2, get_incident_v2, list_incidents_v2, resolve_incident_v2
 from collector import collect_bundle, collect_impact, collect_operational_metrics
 from alerting import normalize_alert, incident_window
 from correlation import collect_log_evidence, correlate_trace, derive_log_error
@@ -317,6 +318,7 @@ def investigate():
         }),
         "trace_handoff": trace_handoff,
     }
+    response["incident_id"] = record_incident_v2(rdb, response)
     return jsonify(response)
 
 
@@ -548,30 +550,29 @@ def _incident_detail_payload(iid: str, incident: dict) -> dict:
 @app.route("/incidents", methods=["GET"])
 def list_incidents_route():
     status    = request.args.get("status")
-    incidents = list_incidents(rdb, status=status)
-    incidents.sort(key=lambda i: int(i.get("timestamp") or 0), reverse=True)
+    incidents = list_incidents_v2(rdb, status=status)
     return jsonify({"incidents": [
         {"id": i["id"], "alert_name": i["alert_name"], "service": i["service"],
          "status": i["status"], "timestamp": int(i.get("timestamp") or 0),
-         "root_cause": i.get("root_cause", "")}
+         "incident_summary": (i.get("diagnosis") or {}).get("incident_summary", "")}
         for i in incidents
     ]})
 
 
 @app.route("/incidents/latest", methods=["GET"])
 def latest_incident_route():
-    incident = get_latest_incident(rdb)
-    if incident is None:
+    incidents = list_incidents_v2(rdb)
+    if not incidents:
         return jsonify({"incident": None})
-    return jsonify({"incident": _incident_detail_payload(incident["id"], incident)})
+    return jsonify({"incident": incidents[0]})
 
 
 @app.route("/incidents/<iid>", methods=["GET"])
 def incident_detail_route(iid):
-    incident = get_incident(rdb, iid)
+    incident = get_incident_v2(rdb, iid)
     if incident is None:
         return jsonify({"error": "not found"}), 404
-    return jsonify({"incident": _incident_detail_payload(iid, incident)})
+    return jsonify({"incident": incident})
 
 
 @app.route("/incidents/<iid>/resolve", methods=["POST"])
@@ -580,7 +581,7 @@ def resolve_incident_route(iid):
     actor = (data.get("actor") or "").strip()
     if not actor:
         return jsonify({"error": "actor is required"}), 400
-    if not resolve_incident(rdb, iid, actor):
+    if not resolve_incident_v2(rdb, iid, actor):
         return jsonify({"error": "not found"}), 404
     return jsonify({"resolved": True})
 

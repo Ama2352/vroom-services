@@ -619,6 +619,8 @@ V2_EXAMPLE_INDEX = f"{V2_PREFIX}:example:index"
 V2_HINT_INDEX = f"{V2_PREFIX}:hint:index"
 V2_HINT_TEXT_INDEX = f"{V2_PREFIX}:hint:text"
 V2_CORPUS_VERSION_KEY = f"{V2_PREFIX}:corpus:version"
+V2_INCIDENT_INDEX = f"{V2_PREFIX}:incident:index"
+V2_OPEN_INCIDENT_INDEX = f"{V2_PREFIX}:incident:open"
 
 
 def _v2_json(raw, default):
@@ -753,5 +755,55 @@ def link_knowledge_hints_v2(rdb, knowledge_key: str, hint_ids: list[str]) -> Non
 
 def list_knowledge_hint_ids_v2(rdb, knowledge_key: str) -> list[str]:
     return _v2_json(rdb.get(f"{V2_PREFIX}:knowledge:{knowledge_key}:hints"), [])
+
+
+def record_incident_v2(rdb, occurrence: dict) -> str:
+    """Persist the v2 public response without translating it to legacy fields."""
+    for raw_id in rdb.smembers(V2_OPEN_INCIDENT_INDEX):
+        incident_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+        existing = get_incident_v2(rdb, incident_id)
+        if existing and existing.get("alert_name") == occurrence["alert_name"] and existing.get("service") == occurrence["service"]:
+            rdb.hset(f"{V2_PREFIX}:incident:{incident_id}", mapping={
+                "occurrence": json.dumps(occurrence), "timestamp": str(int(time.time())),
+            })
+            return incident_id
+    incident_id = str(uuid.uuid4())
+    rdb.hset(f"{V2_PREFIX}:incident:{incident_id}", mapping={
+        "alert_name": occurrence["alert_name"], "service": occurrence["service"],
+        "namespace": occurrence.get("namespace", ""), "status": "open",
+        "timestamp": str(int(time.time())), "occurrence": json.dumps(occurrence),
+    })
+    rdb.sadd(V2_INCIDENT_INDEX, incident_id)
+    rdb.sadd(V2_OPEN_INCIDENT_INDEX, incident_id)
+    return incident_id
+
+
+def get_incident_v2(rdb, incident_id: str) -> dict | None:
+    raw = rdb.hgetall(f"{V2_PREFIX}:incident:{incident_id}")
+    if not raw:
+        return None
+    item = _hash_to_dict(raw)
+    occurrence = _v2_json(item.pop("occurrence", None), {})
+    item["id"] = incident_id
+    item["timestamp"] = int(item.get("timestamp") or 0)
+    return {**item, **occurrence}
+
+
+def list_incidents_v2(rdb, status: str | None = None) -> list[dict]:
+    items = []
+    for raw_id in rdb.smembers(V2_INCIDENT_INDEX):
+        incident_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+        item = get_incident_v2(rdb, incident_id)
+        if item and (status is None or item.get("status") == status):
+            items.append(item)
+    return sorted(items, key=lambda item: item["timestamp"], reverse=True)
+
+
+def resolve_incident_v2(rdb, incident_id: str, actor: str) -> bool:
+    if not rdb.exists(f"{V2_PREFIX}:incident:{incident_id}"):
+        return False
+    rdb.hset(f"{V2_PREFIX}:incident:{incident_id}", mapping={"status": "resolved", "resolved_by": actor})
+    rdb.srem(V2_OPEN_INCIDENT_INDEX, incident_id)
+    return True
 
 

@@ -177,6 +177,26 @@ export interface IncidentListItem {
   id: string
   alert_name: string
   service: string
-  root_cause: string
+  incident_summary: string
   timestamp: number
+}
+
+export type EvidenceCardState = 'confirmed' | 'context' | 'not_found'
+export interface EvidenceRow { field: string; value: string | number | null; unit?: string; status?: 'available' | 'no_data' }
+export interface RawEvidenceCard { state: EvidenceCardState; title: string; rows: EvidenceRow[]; href?: string }
+export interface V2Diagnosis {
+  evidence_analysis: Record<string, string>
+  incident_summary: string
+  diagnosis_cause: string | null
+  hypothesis: string | null
+  recommended_action: { kind: 'investigation' | 'remediation'; summary: string }
+  used_knowledge_keys?: string[]
+  evidence_refs?: string[]
+  hypothesis_evidence_refs?: string[]
+}
+export interface V2Incident {
+  id?: string; alert_name: string; service: string; namespace?: string; status: IncidentStatus
+  diagnosis: V2Diagnosis
+  raw_evidence: Record<string, RawEvidenceCard>
+  retrieval: { mode: 'exact' | 'nearest' | 'none' | 'degraded'; advisory_examples: Array<{ knowledge_key: string; example_id: string; evidence_template: string }> }
 }

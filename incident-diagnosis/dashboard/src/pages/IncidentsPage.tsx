@@ -37,14 +37,14 @@ export function IncidentsPage() {
       {!loading && !error && data && data.length > 0 && (
         <Table>
           <thead>
-            <tr><Th>Alert</Th><Th>Service</Th><Th>Root cause</Th><Th>Last activity</Th></tr>
+            <tr><Th>Alert</Th><Th>Service</Th><Th>Incident summary</Th><Th>Last activity</Th></tr>
           </thead>
           <tbody>
             {data.map(i => (
               <Tr key={i.id}>
                 <Td><Link to={`/incidents/${i.id}`} className="font-semibold text-accent hover:text-accent-strong">{i.alert_name}</Link></Td>
                 <Td>{i.service}</Td>
-                <Td>{i.root_cause}</Td>
+                <Td>{i.incident_summary}</Td>
                 <Td>{formatTimestamp(i.timestamp)}</Td>
               </Tr>
             ))}
