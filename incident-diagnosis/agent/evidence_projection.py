@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +44,105 @@ class EvidenceProjection:
             ],
             "evidence_ids": sorted(self.evidence_ids),
         }
+
+
+TEMPLATE_FIELDS = (
+    "alert_name", "service", "triggering_metric", "waiting_reason",
+    "last_terminated_reason", "event_reason", "event_message", "log_error",
+    "trace_error_service", "trace_error_operation", "trace_error_message",
+    "configuration_diff",
+)
+
+
+@dataclass(frozen=True)
+class EvidenceTemplate:
+    """Stable, answer-free incident representation used by retrieval."""
+
+    values: tuple[tuple[str, str], ...]
+    evidence: tuple[dict[str, Any], ...] = ()
+
+    def serialize(self) -> str:
+        return "\n".join(f"{key}: {value}" for key, value in self.values)
+
+    def fingerprint(self) -> str:
+        return hashlib.sha256(self.serialize().encode("utf-8")).hexdigest()
+
+    def to_prompt_groups(self) -> dict[str, dict[str, str]]:
+        grouped = {"alert_metrics": {}, "logs": {}, "traces": {}, "kubernetes": {}, "configuration": {}}
+        for key, value in self.values:
+            if key in {"alert_name", "service", "triggering_metric"}:
+                grouped["alert_metrics"][key] = value
+            elif key == "log_error":
+                grouped["logs"][key] = value
+            elif key.startswith("trace_"):
+                grouped["traces"][key] = value
+            elif key == "configuration_diff":
+                grouped["configuration"][key] = value
+            else:
+                grouped["kubernetes"][key] = value
+        return grouped
+
+    def to_gate_context(self) -> dict[str, Any]:
+        return {
+            "evidence": list(self.evidence),
+            "evidence_ids": sorted(item["id"] for item in self.evidence if item.get("id")),
+            "template": self.serialize(),
+        }
+
+
+def _template_value(value: Any) -> str:
+    return _clean(value) if value is not None else ""
+
+
+def _configuration_text(configuration: dict[str, Any] | None) -> str:
+    if not isinstance(configuration, dict) or configuration.get("status") != "changed":
+        return ""
+    changes = []
+    for change in configuration.get("changes", ()):
+        if not isinstance(change, dict) or not change.get("path"):
+            continue
+        changes.append(
+            f"{_clean(change['path'])}: {_template_value(change.get('previous'))} -> {_template_value(change.get('current'))}"
+        )
+    return "; ".join(sorted(set(changes)))
+
+
+def normalize_evidence(
+    alert: dict[str, Any], facts: dict[str, Any], log: dict[str, Any] | None = None,
+    trace: dict[str, Any] | None = None, configuration: dict[str, Any] | None = None,
+) -> EvidenceTemplate:
+    """Create the fixed retrieval template and retain source observations separately."""
+    log = log or {}
+    trace = trace or {}
+    values = {
+        "alert_name": _template_value(alert.get("alert_name")),
+        "service": _template_value(alert.get("service")),
+        "triggering_metric": _template_value(alert.get("metric_value")),
+        "waiting_reason": _template_value(facts.get("waiting_reason")),
+        "last_terminated_reason": _template_value(facts.get("last_terminated_reason")),
+        "event_reason": _template_value(facts.get("event_reason")),
+        "event_message": _template_value(facts.get("event_message")),
+        "log_error": _template_value(log.get("message") or facts.get("log_error")),
+        "trace_error_service": _template_value(trace.get("error_service")),
+        "trace_error_operation": _template_value(trace.get("error_operation")),
+        "trace_error_message": _template_value(trace.get("error_message")),
+        "configuration_diff": _configuration_text(configuration),
+    }
+    evidence = []
+    if values["alert_name"]:
+        evidence.append({"id": "alert:trigger", "label": "Alert", "value": values["alert_name"], "state": "confirmed"})
+    if values["log_error"]:
+        evidence.append({"id": "log:selected", "label": "Structured log", "value": values["log_error"], "state": "confirmed"})
+    if any(values[key] for key in ("trace_error_service", "trace_error_operation", "trace_error_message")):
+        evidence.append({"id": "trace:selected", "label": "Correlated trace", "value": values["trace_error_operation"], "state": "confirmed"})
+    if values["configuration_diff"]:
+        evidence.append({"id": "config:workload", "label": "Configuration diff", "value": values["configuration_diff"], "state": "context"})
+    if any(values[key] for key in ("waiting_reason", "last_terminated_reason", "event_reason", "event_message")):
+        evidence.append({"id": "k8s:state", "label": "Kubernetes", "value": "runtime observation", "state": "confirmed"})
+    return EvidenceTemplate(
+        values=tuple((field, values[field]) for field in TEMPLATE_FIELDS),
+        evidence=tuple(evidence),
+    )
 
 
 def _runtime_facts(facts: dict[str, Any]) -> dict[str, str]:
