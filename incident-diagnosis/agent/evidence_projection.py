@@ -117,7 +117,10 @@ def normalize_evidence(
     values = {
         "alert_name": _template_value(alert.get("alert_name")),
         "service": _template_value(alert.get("service")),
-        "triggering_metric": _template_value(alert.get("metric_value")),
+        # A measured value is volatile and makes identical failures impossible
+        # to reuse exactly. The alert identity is the stable triggering signal;
+        # the numeric value remains raw operational evidence.
+        "triggering_metric": _template_value(alert.get("metric_name") or alert.get("alert_name")),
         "waiting_reason": _template_value(facts.get("waiting_reason")),
         "last_terminated_reason": _template_value(facts.get("last_terminated_reason")),
         "event_reason": _template_value(facts.get("event_reason")),

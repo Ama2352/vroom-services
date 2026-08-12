@@ -72,9 +72,18 @@ class EvidenceRetrievalService:
                     raw["knowledge_key"], raw["example_id"], _serialized(raw), ranked_item.bm25_score,
                 ))
             reranked = self.reranker.rerank(template.serialize(), tuple(candidates))
+            families = []
+            seen = set()
+            for candidate in reranked:
+                if candidate.knowledge_key in seen:
+                    continue
+                seen.add(candidate.knowledge_key)
+                families.append(candidate)
+                if len(families) == 3:
+                    break
             return EvidenceRetrievalResult(
                 EvidenceRetrievalMode.NEAREST,
-                tuple(reranked[:3]),
+                tuple(families),
                 exact_ambiguous=len(keys) > 1,
             )
         except Exception as exc:

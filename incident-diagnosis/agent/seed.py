@@ -1,6 +1,9 @@
 import os, re
 import redis as redis_lib
-from memory import store_knowledge_entry, store_history_entry, KNOWLEDGE_INDEX
+from memory import (store_knowledge_entry, store_history_entry, KNOWLEDGE_INDEX,
+                    V2_KNOWLEDGE_INDEX, store_knowledge_v2, store_example_v2,
+                    store_hint_v2, link_knowledge_hints_v2)
+from evidence_projection import EvidenceTemplate, TEMPLATE_FIELDS
 
 DOCS_DIR = os.environ.get("DOCS_DIR", "/docs")
 
@@ -158,3 +161,39 @@ def seed_if_empty(rdb: redis_lib.Redis, docs_dir: str = DOCS_DIR) -> int:
         count += 1
 
     return count
+
+
+def seed_v2_if_empty(rdb) -> int:
+    """Ephemeral approved examples used by the evidence-only live pipeline."""
+    if rdb.scard(V2_KNOWLEDGE_INDEX):
+        return 0
+    examples = [
+        ("unsupported_event_contract", "Producer and consumer event contracts differ.",
+         "Align the producer and consumer event contract versions.", {
+             "alert_name": "DLQEventsDetected", "service": "dispatch-service",
+             "triggering_metric": "DLQEventsDetected", "log_error": 'unknown event type "Trip.Requested.v2"',
+             "trace_error_service": "dispatch-service", "trace_error_operation": "dispatch.consume.Trip.Requested.v2",
+             "trace_error_message": 'unknown event type "Trip.Requested.v2"',
+         }, "unsupported event contract"),
+        ("redis_endpoint_configuration", "The configured Redis endpoint is unavailable to the workload.",
+         "Restore the approved Redis endpoint configuration and verify connectivity.", {
+             "alert_name": "ServiceDown", "service": "ride-service", "triggering_metric": "ServiceDown",
+             "log_error": "redis connection refused", "configuration_diff": "env.REDIS_ADDR: redis.platform.svc.cluster.local:6379 -> bad-host:6379",
+         }, "redis endpoint configuration"),
+        ("container_memory_limit", "The container exceeded its configured memory limit.",
+         "Increase the deployment memory limit after checking the workload demand.", {
+             "alert_name": "KubePodCrashLooping", "service": "ride-service", "triggering_metric": "KubePodCrashLooping",
+             "last_terminated_reason": "OOMKilled",
+         }, "container memory limit"),
+    ]
+    for key, cause, remediation, values, hint in examples:
+        store_knowledge_v2(rdb, {"knowledge_key": key, "diagnosis_cause": cause, "remediation": remediation,
+                                 "created_by": "bootstrap"})
+        template_values = tuple((field, values.get(field, "")) for field in TEMPLATE_FIELDS)
+        template = EvidenceTemplate(template_values)
+        hint_id = store_hint_v2(rdb, hint)
+        link_knowledge_hints_v2(rdb, key, [hint_id])
+        store_example_v2(rdb, {"knowledge_key": key, "fingerprint": template.fingerprint(),
+                               "evidence": dict(template_values), "hint_ids": [hint_id],
+                               "exact_reusable": True, "approved_by": "bootstrap"})
+    return len(examples)

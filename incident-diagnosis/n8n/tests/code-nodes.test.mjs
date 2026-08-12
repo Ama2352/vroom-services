@@ -15,7 +15,7 @@ test('extract-alerts expands every Alertmanager alert independently', async () =
   assert.equal(result[1].json.fingerprint, 'fp-b');
   assert.equal(result[1].json.service, 'dispatch-service');
   assert.equal(result[1].json.starts_at, '2026-08-04T10:16:00Z');
-  assert.equal(result[1].json.incident_kind, 'dlq');
+  assert.equal('incident_kind' in result[1].json, false);
 });
 
 test('build-slack-message preserves suggestions and correlated trace link', async () => {

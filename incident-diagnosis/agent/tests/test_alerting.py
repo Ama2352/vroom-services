@@ -15,6 +15,7 @@ def test_normalize_alert_preserves_correlation_fields():
     assert alert["fingerprint"] == "fp-123"
     assert alert["service"] == "dispatch-service"
     assert alert["metric_value"] == 1.0
+    assert "incident_kind" not in alert
 
 
 def test_incident_window_is_anchored_to_alert_start():

@@ -35,10 +35,14 @@ from diagnostics import (collect_diagnostics,
 from finalization import finalize_diagnosis
 from presentation import build_presentation
 from interpreter import interpret, _run_llm, DEFAULT_MODELS, GROQ_URL, OPENROUTER_URL
-from seed import seed_if_empty
+from seed import seed_if_empty, seed_v2_if_empty
 from retrieval.models import RetrievalMode
 from retrieval.service import create_retrieval_service
 from evidence_projection import build_evidence_projection, normalize_evidence
+from investigation_v2 import decide_diagnosis
+from runtime_v2 import build_raw_evidence, build_v2_occurrence
+from retrieval.evidence import EvidenceRetrievalService
+from retrieval.v2_corpus import RedisEvidenceCorpus, MiniLMEvidenceReranker
 
 app = Flask(__name__)
 CORS(app)  # the dashboard is a separate browser origin (its own NodePort)
@@ -52,6 +56,19 @@ retrieval_service = create_retrieval_service(
     rdb,
     Path(os.environ.get("RERANKER_MODEL_DIR", "/opt/models/minilm")),
 )
+
+
+def _v2_retrieval():
+    """Use the same loaded MiniLM backend, but only against v2 evidence docs."""
+    backend = getattr(retrieval_service.reranker, "backend", None)
+    if backend is None:
+        class _Unavailable:
+            def rerank(self, *_args):
+                raise RuntimeError("minilm_unavailable")
+        reranker = _Unavailable()
+    else:
+        reranker = MiniLMEvidenceReranker(backend)
+    return EvidenceRetrievalService(RedisEvidenceCorpus(rdb), reranker)
 
 
 def _rss_mib() -> int:
@@ -90,7 +107,8 @@ _current_models: list = _load_models(rdb)
 def _background_seed():
     try:
         n = seed_if_empty(rdb)
-        print(f"[seed] seeded {n} knowledge/history entries", flush=True)
+        n_v2 = seed_v2_if_empty(rdb)
+        print(f"[seed] seeded {n} knowledge/history entries; {n_v2} v2 examples", flush=True)
     except Exception as e:
         print(f"[seed] cold-start seed failed: {e}", flush=True)
 
@@ -240,8 +258,70 @@ def set_models():
     return jsonify({"models": _current_models})
 
 
+def _parse_v2_llm(prompt: str) -> dict | None:
+    raw = _run_llm([{"role": "user", "content": prompt}], None, _current_models, GROQ_KEY, OPENROUTER_KEY)
+    if not raw:
+        return None
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        start, end = raw.find("{"), raw.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(raw[start:end + 1])
+            except json.JSONDecodeError:
+                pass
+    return None
+
+
 @app.route("/investigate", methods=["POST"])
 def investigate():
+    """Evidence-first public contract used by n8n and the redesigned dashboard."""
+    normalized = normalize_alert(request.get_json(silent=True) or {})
+    seed_v2_if_empty(rdb)
+    service, namespace = normalized["service"], normalized["namespace"]
+    impact = {"status": "unavailable", "request_rate": None, "error_rate_percent": None, "p95_latency_ms": None}
+    log_evidence, trace_handoff = {"status": "unavailable"}, {"status": "unavailable"}
+    if normalized.get("starts_at") and not normalized.get("starts_at_error"):
+        try:
+            start_s, end_s = incident_window(normalized["starts_at"], datetime.now(timezone.utc))
+            impact = collect_impact(service, namespace, alert=normalized)
+            log_evidence = collect_log_evidence(service, namespace, start_s, end_s)
+            trace_handoff = correlate_trace(log_evidence, start_s, end_s)
+        except (TypeError, ValueError) as exc:
+            impact["errors"] = [str(exc)]
+
+    facts = collect_diagnostics(service, namespace)
+    if log_evidence.get("status") == "found":
+        facts["log_error"] = derive_log_error(log_evidence)
+    elif log_evidence.get("status") == "no_match":
+        facts["log_error"] = ""
+    configuration_diff = collect_configuration_diff(service, namespace)
+    operational_metrics = collect_operational_metrics(service, namespace, alert=normalized)
+    template = normalize_evidence(normalized, facts, log_evidence, trace_handoff, configuration_diff)
+    v2_retrieval = _v2_retrieval()
+    retrieval = v2_retrieval.retrieve(template)
+    corpus = v2_retrieval.corpus
+    knowledge = corpus.knowledge(retrieval.candidates[0].knowledge_key) if retrieval.mode.value == "exact" and retrieval.candidates else None
+    diagnosis = decide_diagnosis(template, retrieval, _parse_v2_llm, knowledge=knowledge)
+    raw_evidence = build_raw_evidence(template, facts, impact, log_evidence, trace_handoff,
+                                      configuration_diff, operational_metrics)
+    response = {
+        "alert_name": normalized["alert_name"], "service": service, "namespace": namespace,
+        **build_v2_occurrence(template, raw_evidence, diagnosis, {
+            "mode": retrieval.mode.value,
+            "exact_ambiguous": retrieval.exact_ambiguous,
+            "degraded_reason": retrieval.degraded_reason,
+            "advisory_examples": diagnosis["advisory_examples"],
+        }),
+        "trace_handoff": trace_handoff,
+    }
+    return jsonify(response)
+
+
+@app.route("/investigate/legacy", methods=["POST"])
+def investigate_legacy():
     data       = request.get_json(silent=True) or {}
     normalized = normalize_alert(data)
     alert_name = normalized["alert_name"]
@@ -317,7 +397,7 @@ def investigate():
 
     evidence_bundle = {
         "impact": {"triggering_metric": {
-            "name": "dlq_events" if normalized.get("incident_kind") == "dlq" else "service_impact",
+            "name": normalized["alert_name"],
             "value": normalized.get("metric_value"),
             "threshold": normalized.get("threshold"),
         }} if impact.get("status") == "available" else {},
@@ -327,7 +407,6 @@ def investigate():
         "k8s_state": facts,
         "k8s_event": {"id": facts.get("event_object"), "reason": facts.get("event_reason"), "message": facts.get("event_message")},
         "dependency": dependency,
-        "dlq_state": {"value": normalized.get("metric_value")} if normalized.get("incident_kind") == "dlq" else {},
     }
     evidence_projection = build_evidence_projection(
         normalized, facts, log_evidence, trace_handoff, dependency, configuration_diff,

@@ -12,7 +12,6 @@ return (body.alerts ?? []).map((alert) => {
     fingerprint: alert.fingerprint ?? '',
     starts_at: alert.startsAt ?? '',
     alert_name: labels.alertname ?? body.groupLabels?.alertname ?? 'UnknownAlert',
-    incident_kind: labels.incident_kind ?? ({ DLQEventsDetected: 'dlq', KubePodCrashLooping: 'crashloop' }[labels.alertname] ?? ''),
     service: labels.service || labels.job || podService || 'unknown',
     namespace: labels.namespace ?? 'unknown',
     pod,
