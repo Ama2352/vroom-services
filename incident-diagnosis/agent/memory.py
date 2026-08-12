@@ -611,3 +611,147 @@ def search_memory(rdb: redis_lib.Redis, query: str, limit: int = 3) -> str:
     return format_incidents(items)
 
 
+# Current evidence-template corpus. These names are deliberately suffixed while
+# callers migrate; cleanup removes the legacy history functions and aliases.
+V2_PREFIX = "diagnosis:v2"
+V2_KNOWLEDGE_INDEX = f"{V2_PREFIX}:knowledge:index"
+V2_EXAMPLE_INDEX = f"{V2_PREFIX}:example:index"
+V2_HINT_INDEX = f"{V2_PREFIX}:hint:index"
+V2_HINT_TEXT_INDEX = f"{V2_PREFIX}:hint:text"
+V2_CORPUS_VERSION_KEY = f"{V2_PREFIX}:corpus:version"
+
+
+def _v2_json(raw, default):
+    if raw is None:
+        return default
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _v2_bump(rdb):
+    return int(rdb.incr(V2_CORPUS_VERSION_KEY))
+
+
+def store_knowledge_v2(rdb, entry: dict) -> str:
+    key = str(entry["knowledge_key"])
+    rdb.hset(f"{V2_PREFIX}:knowledge:{key}", mapping={
+        "knowledge_key": key,
+        "diagnosis_cause": entry.get("diagnosis_cause", ""),
+        "remediation": entry.get("remediation", ""),
+        "created_by": entry.get("created_by", ""),
+        "updated_at": str(int(time.time())),
+    })
+    rdb.sadd(V2_KNOWLEDGE_INDEX, key)
+    _v2_bump(rdb)
+    return key
+
+
+def get_knowledge_v2(rdb, key: str) -> dict | None:
+    raw = rdb.hgetall(f"{V2_PREFIX}:knowledge:{key}")
+    return _hash_to_dict(raw) if raw else None
+
+
+def list_knowledge_v2(rdb) -> list[dict]:
+    out = []
+    for raw_key in sorted(rdb.smembers(V2_KNOWLEDGE_INDEX)):
+        key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+        item = get_knowledge_v2(rdb, key)
+        if item:
+            out.append(item)
+    return out
+
+
+def store_example_v2(rdb, example: dict) -> str:
+    example_id = str(example.get("example_id") or uuid.uuid4())
+    rdb.hset(f"{V2_PREFIX}:example:{example_id}", mapping={
+        "example_id": example_id,
+        "knowledge_key": example["knowledge_key"],
+        "fingerprint": example.get("fingerprint", ""),
+        "evidence": json.dumps(example.get("evidence") or {}, sort_keys=True),
+        "hint_ids": json.dumps(sorted(set(example.get("hint_ids") or ()))),
+        "exact_reusable": "true" if example.get("exact_reusable", True) else "false",
+        "approved_by": example.get("approved_by", ""),
+        "approved_at": example.get("approved_at", str(int(time.time()))),
+    })
+    rdb.sadd(V2_EXAMPLE_INDEX, example_id)
+    _v2_bump(rdb)
+    return example_id
+
+
+def get_example_v2(rdb, example_id: str) -> dict | None:
+    raw = rdb.hgetall(f"{V2_PREFIX}:example:{example_id}")
+    if not raw:
+        return None
+    item = _hash_to_dict(raw)
+    item["evidence"] = _v2_json(item.get("evidence"), {})
+    item["hint_ids"] = _v2_json(item.get("hint_ids"), [])
+    item["exact_reusable"] = _to_bool(item.get("exact_reusable"))
+    return item
+
+
+def list_examples_v2(rdb, knowledge_key: str | None = None) -> list[dict]:
+    out = []
+    for raw_id in sorted(rdb.smembers(V2_EXAMPLE_INDEX)):
+        example_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+        item = get_example_v2(rdb, example_id)
+        if item and (knowledge_key is None or item.get("knowledge_key") == knowledge_key):
+            out.append(item)
+    return out
+
+
+def update_example_v2(rdb, example_id: str, fields: dict) -> bool:
+    if not rdb.exists(f"{V2_PREFIX}:example:{example_id}"):
+        return False
+    forbidden = {"evidence", "fingerprint", "knowledge_key"}.intersection(fields)
+    if forbidden:
+        raise ValueError(f"immutable example fields: {','.join(sorted(forbidden))}")
+    mapping = {}
+    if "exact_reusable" in fields:
+        mapping["exact_reusable"] = "true" if fields["exact_reusable"] else "false"
+    if "approved_by" in fields:
+        mapping["approved_by"] = fields["approved_by"]
+    if mapping:
+        rdb.hset(f"{V2_PREFIX}:example:{example_id}", mapping=mapping)
+        _v2_bump(rdb)
+    return True
+
+
+def store_hint_v2(rdb, text: str) -> str:
+    normalized = " ".join(str(text).split()).strip().lower()
+    if not normalized:
+        raise ValueError("hint text is required")
+    existing = rdb.hget(V2_HINT_TEXT_INDEX, normalized)
+    if existing:
+        return existing.decode() if isinstance(existing, bytes) else existing
+    hint_id = str(uuid.uuid4())
+    rdb.hset(f"{V2_PREFIX}:hint:{hint_id}", mapping={"hint_id": hint_id, "text": normalized})
+    rdb.hset(V2_HINT_TEXT_INDEX, normalized, hint_id)
+    rdb.sadd(V2_HINT_INDEX, hint_id)
+    _v2_bump(rdb)
+    return hint_id
+
+
+def search_hints_v2(rdb, query: str = "") -> list[dict]:
+    needle = " ".join(str(query).split()).lower()
+    out = []
+    for raw_id in sorted(rdb.smembers(V2_HINT_INDEX)):
+        hint_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+        item = _hash_to_dict(rdb.hgetall(f"{V2_PREFIX}:hint:{hint_id}"))
+        if item and (not needle or needle in item.get("text", "")):
+            out.append(item)
+    return out
+
+
+def link_knowledge_hints_v2(rdb, knowledge_key: str, hint_ids: list[str]) -> None:
+    rdb.set(f"{V2_PREFIX}:knowledge:{knowledge_key}:hints", json.dumps(sorted(set(hint_ids))))
+    _v2_bump(rdb)
+
+
+def list_knowledge_hint_ids_v2(rdb, knowledge_key: str) -> list[str]:
+    return _v2_json(rdb.get(f"{V2_PREFIX}:knowledge:{knowledge_key}:hints"), [])
+
+
