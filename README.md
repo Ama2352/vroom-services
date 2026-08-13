@@ -35,7 +35,7 @@ The application layer: 4 Go microservices + a React frontend that exercise the p
 | Testing | `go test`, testcontainers (real Postgres + Redis), k6 (load) |
 | CI | GitLab CI — test → integration → build → scan (Trivy) → publish (GHCR) |
 | SAST | gosec + GitLab SAST |
-| Incident agent | Python 3, Flask, rank-bm25 (BM25 runbook retrieval), Redis (semantic + episodic memory) |
+| Incident agent | Python 3, Flask, Redis-backed approved examples, BM25, MiniLM, guarded LLM generation |
 
 ---
 
@@ -49,7 +49,7 @@ The application layer: 4 Go microservices + a React frontend that exercise the p
 - Redis Geo driver matching — O(log N) radius search, 5 km waterfall
 - HPA autoscaling on `ride`/`dispatch`/`user`, verified under k6 load
 - End-to-end distributed tracing, including across async Redis Streams hops
-- LLM-assisted SRE incident-diagnosis agent (`incident-diagnosis/`)
+- Evidence-first incident diagnosis with exact approved reuse, hybrid advisory retrieval, and human review
 
 ---
 
@@ -72,7 +72,7 @@ Four Go microservices communicate through **Redis Streams** using the **Outbox p
 | **Redis Geo** | `dispatch-service`: `drivers:available` | O(log N) radius search; 5 km waterfall to nearest driver |
 | **HPA autoscaling** | `ride`, `dispatch`, `user` (CPU 60%, min=1, max=4) | Scales under load; verified by `validation/load-tests/spike.js` |
 | **Distributed tracing** | OTEL → Tempo, all 4 services | `traceparent` propagated through Redis Streams, not just HTTP |
-| **Structured diagnostics agent** | `incident-diagnosis/` | LLM-assisted SRE tool: collects Prometheus/Loki/K8s-events facts, one interpretation call, semantic memory of past incidents |
+| **Evidence-first diagnosis agent** | `incident-diagnosis/` | Collects logs, correlated traces, Kubernetes state, configuration diffs, and operational context; reuses exact approved examples or produces guarded advisory hypotheses |
 
 ### Transactional Outbox
 
@@ -107,128 +107,86 @@ This is a static image rather than a live Mermaid block — sequence-diagram mes
 
 ## SRE Incident Diagnosis Agent
 
-Vroom includes an LLM-assisted SRE incident diagnosis agent for turning a
-Kubernetes alert into an evidence-backed investigation. It is designed to
-reduce the time an operator spends searching across dashboards, logs, events,
-deployment history, and runbooks when a service is unhealthy.
+### Evidence-first diagnosis
 
-The agent does not treat the alert message alone as the diagnosis. For each
-investigation, it collects the current state of the affected service and its
-dependencies, recent container logs and Kubernetes events, Prometheus health
-signals, and relevant deployment or configuration changes. It then combines
-that evidence with trusted patterns from its Redis-backed incident memory and
-asks the configured LLM to produce a structured interpretation.
+Vroom turns an Alertmanager notification into a structured investigation rather
+than treating the alert as a root-cause statement. For the affected workload,
+the agent gathers current logs, a correlated trace when available, Kubernetes
+state and events, safe workload configuration diffs, and operational context.
+That evidence remains visible so an operator can verify the result instead of
+trusting generated text alone.
 
-The result is recorded as an incident and shown in the dashboard with:
-
-- a probable root cause and confidence signal;
-- the evidence that supports the diagnosis;
-- an immediate developer/operator action and suggested `kubectl` command;
-- a step-by-step investigation timeline; and
-- related incidents or a proposed knowledge-base update when a reusable
-  failure pattern is found.
-
-### Incident flow
-
-1. Alertmanager sends an alert through the incident-response workflow.
-2. The agent collects service, dependency, metrics, logs, events, and change
-   evidence through its diagnostic tools.
-3. Redis-backed memory is searched for a trusted match or related incidents.
-4. The LLM interprets the collected facts and returns a structured diagnosis.
-5. The dashboard lets an administrator validate the agent's diagnosis, optionally
-   try its suggested remediation, and review the proposed knowledge update.
+The agent recognizes known failures without confusing similarity for proof. An
+identical human-approved example reuses its approved diagnosis and remediation.
+Otherwise, BM25 and MiniLM retrieve related guidance and the LLM produces a
+grounded, explicitly unconfirmed hypothesis. Hard and semantic guardrails
+validate non-exact output, with one refinement at most; an unsupported cause is
+withheld while the current evidence and any cited hypothesis remain available.
 
 ```mermaid
-flowchart TB
-    subgraph Alerting["Alert intake"]
-        Prometheus["Prometheus alert fires"] --> Alertmanager["Alertmanager"]
-        Alertmanager --> N8n["n8n incident workflow"]
-        N8n --> Slack["Vroom Ops Slack alert"]
-        N8n --> Agent["Incident agent<br/>POST /investigate"]
-    end
-
-    subgraph Evidence["Evidence collection"]
-        Agent --> Collect["Collect diagnostic facts"]
-        Metrics["Prometheus<br/>metrics and health signals"] --> Collect
-        Logs["Loki<br/>service logs"] --> Collect
-        Kubernetes["Kubernetes<br/>pods, events, deployments"] --> Collect
-        Changes["ReplicaSet, dependency, and<br/>GitOps/provenance changes"] --> Collect
-        Collect --> Bundle["Structured evidence bundle"]
-    end
-
-    subgraph Diagnosis["Diagnosis and incident record"]
-        Bundle --> Match{"Trusted memory match?"}
-        Redis[("Redis<br/>knowledge and incident history")] --> Match
-        Match -->|Yes| Known["Known failure pattern<br/>and prior fix"]
-        Match -->|No| Related["Related incidents<br/>when available"]
-        Known --> LLM["LLM interpretation"]
-        Related --> LLM
-        Bundle --> LLM
-        LLM --> Result["Root cause, confidence,<br/>evidence, and suggested action"]
-        Result --> Record[("Redis incident record<br/>and investigation timeline")]
-    end
-
-    subgraph Review["Administrator review and learning"]
-        Record --> Dashboard["Incident dashboard"]
-        Dashboard --> Validate["Administrator validates<br/>agent diagnosis"]
-        Validate --> Recommendation["Agent-suggested remediation<br/>and kubectl command"]
-        Recommendation --> Apply{"Administrator tries<br/>the remediation?"}
-        Apply -->|Yes| Cluster["Kubernetes cluster"]
-        Apply -->|No| Suggest["Agent-recommended<br/>knowledge record"]
-        Cluster --> Suggest
-        Suggest --> ReviewKnowledge{"Administrator reviews<br/>knowledge recommendation"}
-        ReviewKnowledge -->|Approve as new| NewKnowledge["Create new knowledge"]
-        ReviewKnowledge -->|Attach to existing| ExistingKnowledge["Attach to existing knowledge"]
-        ReviewKnowledge -->|Do not approve| Archive["Keep as incident history only"]
-        NewKnowledge --> Redis
-        ExistingKnowledge --> Redis
-    end
-
-    classDef trigger fill:#e55050,stroke:#8c2424,color:#fff
-    classDef agent fill:#376996,stroke:#1d3d5c,color:#fff
-    classDef data fill:#6b4c91,stroke:#3e2860,color:#fff
-    classDef human fill:#c8862b,stroke:#805316,color:#fff
-    classDef external fill:#3f7a67,stroke:#205242,color:#fff
-
-    class Prometheus,Alertmanager,Slack trigger
-    class N8n,Agent,Collect,LLM,Result agent
-    class Redis,Record,Bundle,Known,Related data
-    class Dashboard,Validate,Recommendation,Apply,Suggest,ReviewKnowledge,NewKnowledge,ExistingKnowledge human
-    class Metrics,Logs,Kubernetes,Changes,Cluster,Archive external
+flowchart LR
+    A["Alert"] --> B["Collect current evidence"]
+    B --> C{"Identical approved example?"}
+    C -->|Yes| D["Reuse approved diagnosis"]
+    C -->|No| E["BM25 + MiniLM retrieval"]
+    E --> F["Grounded LLM hypothesis"]
+    F --> G["Hard + semantic guardrails"]
+    D --> H["Operator review"]
+    G --> H
 ```
 
-Remediation is strictly administrator-controlled. The agent recommends an
-action and provides a suggested `kubectl` command, but never executes it. The
-administrator may try that remediation or choose not to; either way, they then
-review the agent's recommended knowledge record. They can approve it as new
-knowledge, attach it to an existing knowledge entry, or decline it, in which
-case the incident remains history only.
+Metrics describe impact rather than cause. A selected structured log can bridge
+to an agreeing trace, while missing telemetry remains missing rather than being
+treated as a healthy zero. The agent recommends safe next actions but never
+executes remediation; a reviewer owns promotion of an incident into reusable
+knowledge.
 
-![Slack incident alert](docs/images/sre-slack-alert.png)
+- **Current evidence:** scoped logs, correlated trace facts, Kubernetes state
+  and events, safe configuration diffs, and operational metrics are retained.
+- **Hybrid retrieval:** BM25 provides lexical recall; MiniLM semantically
+  reranks approved examples.
+- **Guarded generation:** advisory output must cite current evidence and pass
+  hard and semantic validation before it is published.
+- **Human control:** the agent recommends next actions but never executes a
+  remediation; a reviewer approves reusable examples and knowledge.
 
-The incident begins with an alert in the Vroom Ops Slack channel, identifying
-the alert, affected service, namespace, and initial evidence.
+n8n also sends a compact Slack advisory for quick operator awareness. It
+contains the incident summary, an explicitly unconfirmed diagnosis cause,
+grounded hypothesis, decisive evidence, and a read-only investigation command;
+the dashboard remains the full evidence surface.
 
-![Dependency diagnosis](docs/images/sre-live-dependency.png)
+![Slack advisory: review-required DLQ diagnosis with a read-only investigation command](docs/images/incident-agent-slack-notification.png)
 
-For dependency failures, the dashboard correlates service health, dependency
-status, logs, events, recent changes, and investigation steps to explain the
-likely root cause and suggest an immediate recovery action.
+### Verified scenarios
 
-![GitOps change diagnosis](docs/images/sre-live-gitops.png)
+#### DLQ contract mismatch — exact reuse
 
-The same workflow can identify configuration or GitOps drift as the source of
-an incident, including the changed value, related commit, and recommended
-rollback or correction.
+`DLQEventsDetected` for `dispatch-service` captures an unsupported
+`Trip.Requested.v2` structured error and agreeing cross-service trace. Its
+complete normalized evidence matches an approved reusable example, so the
+agent confirms the producer/consumer contract mismatch without an LLM call.
 
-![Knowledge review](docs/images/sre-knowledge-review.png)
+![Confirmed DLQ contract mismatch from an identical approved example](docs/images/incident-agent-dlq-exact.png)
 
-After resolution, the agent can suggest a reusable knowledge entry. An
-operator can attach it to an existing pattern or create a new one, edit the
-wording and context, and approve or reject it before it is used for future
-incident matching.
+#### DLQ contract mismatch — advisory diagnosis
 
-**[Read the detailed Incident Agent workflow →](docs/incident-agent-workflow.md)**
+The same `dispatch-service` failure family can arrive with a non-identical
+evidence fingerprint. The structured error and correlated trace are retained;
+related approved examples guide an unconfirmed contract-version hypothesis,
+but do not establish a confirmed cause.
+
+![Advisory DLQ contract-version hypothesis with related approved guidance](docs/images/incident-agent-dlq-advisory.png)
+
+#### Redis endpoint configuration failure
+
+For `ServiceDown` on `ride-service`, the dashboard connects the previous and
+current `REDIS_ADDR` values with the Redis name-resolution error and pod state.
+The configuration change is a grounded hypothesis for review, not automatic
+causal attribution.
+
+![Redis endpoint configuration failure with workload diff and runtime error](docs/images/incident-agent-redis-config.png)
+
+**[Read the incident diagnosis architecture, retrieval design, and guardrails →](docs/incident-diagnosis-agent.md)**
 
 ---
 
@@ -259,8 +217,8 @@ vroom-services/
 │   ├── frontend/                 React 19 + Vite (passenger + driver UIs)
 │   └── tests/                    Cross-service choreography integration tests
 ├── incident-diagnosis/           SRE incident diagnosis agent (deployed as "incident-agent")
-│   ├── agent/                    Diagnostics + interpretation — Prometheus/Loki/K8s events → root cause
-│   └── kubectl-executor/         Allowlist-gated kubectl HTTP gateway
+│   ├── agent/                    Evidence collection, retrieval, grounded generation, validation, and incident APIs
+│   └── kubectl-executor/         Allowlist-gated kubectl HTTP gateway for operator-controlled access
 ├── validation/                   Things that exercise a running deployed cluster
 │   ├── load-tests/               k6 scenarios — baseline (P95<500ms), spike, geo_flood
 │   └── demo/                     Chaos/resilience demo scripts (pod crash, consumer crash, DLQ)
@@ -342,12 +300,6 @@ Kargo Warehouse (vroom-gitops) polls GHCR for new tags → creates Freight
 | `publish` | Push to GHCR (`ghcr.io/ama2352/vroom-mvp-*`) | Tags: `latest`, semver, short SHA. `incident-diagnosis/*` build+push in one combined job (Python images exceed GitLab's artifact upload limit as `.tar`, so they skip `build`/`scan` and publish directly) |
 
 Everything after `publish` — dev/staging/prod promotion, verification, approval — lives in [vroom-gitops](https://github.com/Ama2352/vroom-gitops) (`delivery/`), not here.
-
-## Incident diagnosis evidence path
-
-Prometheus impact alert → Alertmanager fingerprint and start time → n8n expands every alert → the agent collects typed impact metrics, a scoped structured Loki error, and the exact Tempo trace named by that log → grounded diagnosis plus advisory suggestions and deterministic confidence → Slack/dashboard → a human verifies the Grafana waterfall and decides remediation.
-
-Metrics detect impact; the structured error log is the bridge to the exact trace. A trace is called `correlated` only when its ID came from the selected log and its error span agrees with the log service, operation, or diagnostic message. Missing or conflicting telemetry lowers confidence rather than becoming a healthy zero. The kubectl executor is read-only; suggestions remain advisory.
 
 Required CI variables (GitLab Settings → CI/CD → Variables):
 
