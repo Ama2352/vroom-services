@@ -1,8 +1,0 @@
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-.pytest_cache/
-.draft/
-evaluation/.models/
-.venv-evaluation/
