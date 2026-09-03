@@ -1,4 +1,5 @@
 from collector import CollectedEvidence
+from investigation import decide_diagnosis
 from retrieval.models import EvidenceCandidate, EvidenceRetrievalMode, EvidenceRetrievalResult
 from services.investigation import InvestigationService
 
@@ -74,3 +75,35 @@ def test_unavailable_llm_returns_a_saved_evidence_only_diagnosis():
     assert result["diagnosis"]["diagnosis_cause"] is None
     assert result["diagnosis"]["hypothesis"] == "The observed structured error may explain the alert."
     assert result["missing_evidence"] == ["traces"]
+
+
+def test_semantic_critic_rejection_gets_one_refinement_before_accepting():
+    class Template:
+        def to_gate_context(self):
+            return {
+                "evidence": [{"id": "log:selected", "value": "connection refused"}],
+                "evidence_ids": ["log:selected"],
+            }
+
+    initial = {
+        "evidence_analysis": {}, "incident_summary": "Initial diagnosis.",
+        "diagnosis_cause": "Redis is unavailable.", "hypothesis": None,
+        "recommended_action": {"kind": "remediation", "summary": "Restore Redis."},
+        "evidence_refs": ["log:selected"], "hypothesis_evidence_refs": [],
+    }
+    refined = {**initial, "incident_summary": "Refined diagnosis."}
+    outputs = [
+        initial,
+        {"verdict": "fail", "issues": ["cause_not_supported"]},
+        refined,
+        {"verdict": "pass", "issues": []},
+    ]
+
+    result = decide_diagnosis(
+        Template(),
+        EvidenceRetrievalResult(EvidenceRetrievalMode.NEAREST, ()),
+        generate=lambda _prompt: outputs.pop(0),
+    )
+
+    assert result["incident_summary"] == "Refined diagnosis."
+    assert result["recommended_action"]["kind"] == "remediation"

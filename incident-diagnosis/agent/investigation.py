@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from critic import run_semantic_critic
 from diagnosis import (
     build_generation_prompt,
     build_refinement_prompt,
@@ -47,6 +48,16 @@ def _advisory_examples(retrieval) -> list[dict]:
     return examples
 
 
+def _validate_with_critic(draft: dict, context: dict, generate) -> tuple[bool, list[str]]:
+    """Both shape/citation checks and evidence-grounding review must pass."""
+    gate = validate_diagnosis(draft, context)
+    if not gate.passed:
+        return False, gate.issues
+
+    critic = run_semantic_critic(context, draft, generate=generate)
+    return critic.passed, critic.issues
+
+
 def decide_diagnosis(template, retrieval, generate, *, knowledge: dict | None = None) -> dict:
     """Return an approved exact diagnosis or a guarded non-exact hypothesis."""
     context = template.to_gate_context()
@@ -76,19 +87,19 @@ def decide_diagnosis(template, retrieval, generate, *, knowledge: dict | None = 
     if not isinstance(draft, dict):
         draft = _fallback(template)
 
-    gate = validate_diagnosis(draft, context)
-    if not gate.passed:
+    accepted, issues = _validate_with_critic(draft, context, generate)
+    if not accepted:
         # One retry improves recoverability while keeping cost and latency bounded.
         try:
-            refined = generate(build_refinement_prompt(prompt, draft, gate.issues))
+            refined = generate(build_refinement_prompt(prompt, draft, issues))
         except Exception:
             refined = None
         if isinstance(refined, dict):
-            refined_gate = validate_diagnosis(refined, context)
-            if refined_gate.passed:
-                draft, gate = refined, refined_gate
+            refined_accepted, _ = _validate_with_critic(refined, context, generate)
+            if refined_accepted:
+                draft, accepted = refined, True
 
-    result = finalize_diagnosis(draft, context, accepted=gate.passed)
+    result = finalize_diagnosis(draft, context, accepted=accepted)
     # Similar retrieved examples may guide a hypothesis but never confirm a cause.
     result["diagnosis_cause"] = None
     result["advisory_examples"] = advisory
