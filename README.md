@@ -123,17 +123,7 @@ grounded, explicitly unconfirmed hypothesis. Hard and semantic guardrails
 validate non-exact output, with one refinement at most; an unsupported cause is
 withheld while the current evidence and any cited hypothesis remain available.
 
-```mermaid
-flowchart LR
-    A["Alert"] --> B["Collect current evidence"]
-    B --> C{"Identical approved example?"}
-    C -->|Yes| D["Reuse approved diagnosis"]
-    C -->|No| E["BM25 + MiniLM retrieval"]
-    E --> F["Grounded LLM hypothesis"]
-    F --> G["Hard + semantic guardrails"]
-    D --> H["Operator review"]
-    G --> H
-```
+![Incident diagnosis agent architecture](docs/images/incident-agent-architecture.png)
 
 Metrics describe impact rather than cause. A selected structured log can bridge
 to an agreeing trace, while missing telemetry remains missing rather than being

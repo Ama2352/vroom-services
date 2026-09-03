@@ -17,35 +17,19 @@ The system is designed around four boundaries:
 
 ## End-to-end architecture
 
-```mermaid
-flowchart LR
-    A["Alertmanager"] --> B["n8n<br/>normalize alert"]
-    B --> C["Evidence collection"]
+![Incident diagnosis agent architecture](images/incident-agent-architecture.png)
 
-    C --> D["Fixed evidence template"]
-    C --> R["Raw current evidence"]
+Alertmanager supplies the trigger, while n8n normalizes its scope before the agent collects current evidence. An unambiguous, identical approved example reuses its diagnosis and remediation. All other incidents take the advisory route: BM25 and MiniLM retrieve related approved guidance, the LLM forms a grounded hypothesis, and hard plus semantic validation controls what may be published. Raw current evidence remains available to the dashboard regardless of the decision path.
 
-    D --> E{"Identical approved<br/>reusable example?"}
-    E -->|Yes| F["Reuse approved diagnosis<br/>and remediation"]
-    E -->|No| G["BM25 top 8"]
-    G --> H["MiniLM reranking"]
-    H --> I["Up to 3 related<br/>approved examples"]
-    I --> J["LLM grounded diagnosis"]
+## Activity flow
 
-    J --> K["Hard validation"]
-    K --> L["Semantic validation"]
-    L -->|Rejected| M["Refine once"]
-    M --> K
-    L -->|Accepted| N["Publish result"]
-    K -->|Rejected again| O["Remove unsupported cause<br/>retain evidence and grounded hypothesis"]
+![Incident agent activity flow: exact reuse, advisory and degraded retrieval, validation, refinement, publication, and human review](images/incident-agent-activity-diagram.png)
 
-    F --> N
-    R --> N
-    N --> P["Incident dashboard"]
-    P --> Q["Human approval"]
-```
+The activity flow expands the high-level architecture into its decision paths. An exact path requires an approved `exact_reusable` example with an identical normalized fingerprint and a unique knowledge family; it bypasses BM25, MiniLM, and LLM generation, then reuses the approved diagnosis and remediation.
 
-Raw current evidence is published to the dashboard regardless of the decision path. A failed generation therefore does not hide the logs, trace, configuration diff, or workload state that an operator needs to continue the investigation.
+When exact reuse is unavailable or ambiguous, advisory retrieval starts with BM25. No meaningful evidence overlap leads to an evidence-only diagnosis; MiniLM failure preserves the incident evidence and records a degraded retrieval reason. A successful rerank selects at most three distinct approved knowledge families as advisory context for a grounded LLM diagnosis. Related examples never prove the live cause.
+
+Every non-exact generated result passes hard validation and then semantic validation. The agent allows one refinement after a rejection. A second rejection safely downgrades the response to retained evidence and only a grounded, explicitly unconfirmed hypothesis, where one is validly cited. Exact, advisory, degraded, and safe-fallback results are published to the dashboard for human review; a reviewer may then approve a precise example for the knowledge store that later retrieval consults.
 
 ## Alert intake and current evidence
 
