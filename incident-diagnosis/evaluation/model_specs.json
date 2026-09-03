@@ -1,0 +1,20 @@
+{
+  "minilm": {
+    "name": "minilm",
+    "repo_id": "cross-encoder/ms-marco-MiniLM-L6-v2",
+    "revision": "eeed17e3bfc6fa06a790f2d12a9501fec587fccf",
+    "onnx_file": "onnx/model_quint8_avx2.onnx",
+    "sha256": "c80a8b34256ea453093d612e3ac48d3d965a0c0a48c7906709af8b8e28461bf9",
+    "license": "apache-2.0",
+    "max_length": 512
+  },
+  "mixedbread_xsmall": {
+    "name": "mixedbread_xsmall",
+    "repo_id": "mixedbread-ai/mxbai-rerank-xsmall-v1",
+    "revision": "d8e18fdfcfc8b37c036c5c23e9fa9bda8d738cc9",
+    "onnx_file": "onnx/model_quantized.onnx",
+    "sha256": "15ef19a6de90be7d52b627f2c784107bd806e64826450f41fb75fa4f0179ab30",
+    "license": "apache-2.0",
+    "max_length": 512
+  }
+}

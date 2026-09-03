@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
-from .bm25 import BM25Index, evidence_values
+from .bm25 import BM25Index, evidence_values, tokenize
 from .models import EvidenceCandidate, EvidenceRetrievalMode, EvidenceRetrievalResult
 
 
-_NON_DECISIVE_TERMS = {"service", "namespace", "alert", "metric", "configuration"}
+# Identity fields help BM25 find a relevant neighbourhood, but cannot by
+# themselves justify asking the semantic reranker for advisory guidance.
+_IDENTITY_FIELDS = {
+    "alert_name",
+    "service",
+    "triggering_metric",
+    "trace_error_service",
+}
+# These connect ordinary sentences but do not identify an incident family.
+_NON_DIAGNOSTIC_TERMS = {"and", "failed"}
 
 
 def _serialized(document: dict) -> str:
@@ -20,6 +29,22 @@ def _candidate(document: dict) -> EvidenceCandidate:
         knowledge_key=document["knowledge_key"],
         example_id=document["example_id"],
         serialized=_serialized(document),
+    )
+
+
+def _symptom_terms(template) -> set[str]:
+    """Return query terms from observations that distinguish one incident."""
+    observation_text = "\n".join(
+        value for field, value in template.values
+        if field not in _IDENTITY_FIELDS and value
+    )
+    identity_text = "\n".join(
+        value for field, value in template.values
+        if field in _IDENTITY_FIELDS and value
+    )
+    # A service name can be repeated in an error message without becoming a symptom.
+    return set(tokenize(observation_text)).difference(
+        tokenize(identity_text), _NON_DIAGNOSTIC_TERMS,
     )
 
 
@@ -50,9 +75,10 @@ class EvidenceRetrievalService:
             ranked = BM25Index(tuple(_candidate(item) for item in documents)).search(
                 evidence_values(template.serialize()), limit=8,
             )
+            symptom_terms = _symptom_terms(template)
             decisive = tuple(
                 item for item in ranked
-                if set(item.matched_terms).difference(_NON_DECISIVE_TERMS)
+                if set(item.matched_terms).intersection(symptom_terms)
             )
             if not decisive:
                 return EvidenceRetrievalResult(EvidenceRetrievalMode.NONE, exact_ambiguous=len(knowledge_keys) > 1)

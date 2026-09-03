@@ -1,0 +1,93 @@
+[
+  {
+    "case_id": "redis_exact",
+    "split": "calibration",
+    "alert": {"alert_name": "ServiceDown", "service": "ride-service"},
+    "facts": {},
+    "log": {"message": "redis connection refused"},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "exact",
+    "expected_keys": ["redis_connection"],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "image_pull_nearest",
+    "split": "calibration",
+    "alert": {"alert_name": "KubePodContainerWaiting", "service": "orders"},
+    "facts": {"waiting_reason": "ImagePullBackOff"},
+    "log": {"message": "manifest tag not found"},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": ["image_pull"],
+    "forbidden_keys": ["redis_connection"]
+  },
+  {
+    "case_id": "oom_exact",
+    "split": "calibration",
+    "alert": {"alert_name": "KubePodContainerTerminated", "service": "payments"},
+    "facts": {"last_terminated_reason": "OOMKilled"},
+    "log": {"message": "exit code 137 memory limit exceeded"},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "exact",
+    "expected_keys": ["oom_killed"],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "config_error_nearest",
+    "split": "calibration",
+    "alert": {"alert_name": "KubePodContainerWaiting", "service": "payments"},
+    "facts": {
+      "waiting_reason": "CreateContainerConfigError",
+      "event_reason": "Failed",
+      "event_message": "missing Secret payments-api"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": ["config_error"],
+    "forbidden_keys": ["oom_killed"]
+  },
+  {
+    "case_id": "failed_scheduling_nearest",
+    "split": "held_out",
+    "alert": {"alert_name": "KubePodNotScheduled", "service": "payments"},
+    "facts": {
+      "event_reason": "FailedScheduling",
+      "event_message": "insufficient CPU and node taint"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": ["failed_scheduling"],
+    "forbidden_keys": ["config_error"]
+  },
+  {
+    "case_id": "tls_none",
+    "split": "held_out",
+    "alert": {"alert_name": "TLSFailure", "service": "orders"},
+    "facts": {},
+    "log": {"message": "x509 certificate expired"},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": ["redis_connection", "image_pull"]
+  },
+  {
+    "case_id": "disk_pressure_none",
+    "split": "held_out",
+    "alert": {"alert_name": "KubeNodeCondition", "service": "platform"},
+    "facts": {"event_reason": "DiskPressure"},
+    "log": {"message": "no space left on device inode exhaustion"},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": ["oom_killed", "failed_scheduling"]
+  }
+]

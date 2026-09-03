@@ -1,0 +1,108 @@
+{
+  "families": [
+    {
+      "knowledge_key": "redis_connection",
+      "diagnosis_cause": "The configured Redis endpoint is unavailable.",
+      "remediation": "Verify Redis connectivity and endpoint configuration."
+    },
+    {
+      "knowledge_key": "image_pull",
+      "diagnosis_cause": "The container image cannot be pulled from its registry.",
+      "remediation": "Verify the image tag and registry credentials."
+    },
+    {
+      "knowledge_key": "oom_killed",
+      "diagnosis_cause": "The container exceeded its memory limit.",
+      "remediation": "Inspect memory use and adjust the workload limit if justified."
+    },
+    {
+      "knowledge_key": "config_error",
+      "diagnosis_cause": "The container cannot start because required configuration is missing.",
+      "remediation": "Verify the referenced Secret or ConfigMap."
+    },
+    {
+      "knowledge_key": "failed_scheduling",
+      "diagnosis_cause": "The pod cannot be scheduled onto an eligible node.",
+      "remediation": "Review resource requests, node capacity, and taints."
+    }
+  ],
+  "examples": [
+    {
+      "example_id": "redis-refused",
+      "knowledge_key": "redis_connection",
+      "fingerprint": "2f28185b31a8a9683c01c4886450608b14eec099b4107a36e5fae5312482cec0",
+      "evidence": {
+        "alert_name": "ServiceDown",
+        "service": "ride-service",
+        "triggering_metric": "ServiceDown",
+        "log_error": "redis connection refused"
+      },
+      "hint_ids": ["hint-redis"],
+      "exact_reusable": true
+    },
+    {
+      "example_id": "image-manifest",
+      "knowledge_key": "image_pull",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodContainerWaiting",
+        "service": "orders",
+        "triggering_metric": "KubePodContainerWaiting",
+        "waiting_reason": "ImagePullBackOff",
+        "log_error": "manifest tag not found"
+      },
+      "hint_ids": ["hint-image"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "oom-137",
+      "knowledge_key": "oom_killed",
+      "fingerprint": "bd4cec5e5720ac19ef4b78fe5a26db4870efe6173b88559729a048c8c65819f9",
+      "evidence": {
+        "alert_name": "KubePodContainerTerminated",
+        "service": "payments",
+        "triggering_metric": "KubePodContainerTerminated",
+        "last_terminated_reason": "OOMKilled",
+        "log_error": "exit code 137 memory limit exceeded"
+      },
+      "hint_ids": ["hint-oom"],
+      "exact_reusable": true
+    },
+    {
+      "example_id": "missing-secret",
+      "knowledge_key": "config_error",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodContainerWaiting",
+        "service": "payments",
+        "triggering_metric": "KubePodContainerWaiting",
+        "waiting_reason": "CreateContainerConfigError",
+        "event_reason": "Failed",
+        "event_message": "missing Secret payments-api"
+      },
+      "hint_ids": ["hint-config"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "cpu-taint",
+      "knowledge_key": "failed_scheduling",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodNotScheduled",
+        "service": "payments",
+        "triggering_metric": "KubePodNotScheduled",
+        "event_reason": "FailedScheduling",
+        "event_message": "insufficient CPU and node taint"
+      },
+      "hint_ids": ["hint-scheduling"],
+      "exact_reusable": false
+    }
+  ],
+  "hints": [
+    {"hint_id": "hint-redis", "text": "connection refused while opening Redis"},
+    {"hint_id": "hint-image", "text": "verify the image tag and registry credentials"},
+    {"hint_id": "hint-oom", "text": "exit code 137 and OOMKilled indicate a memory limit issue"},
+    {"hint_id": "hint-config", "text": "verify the missing Secret or ConfigMap reference"},
+    {"hint_id": "hint-scheduling", "text": "check CPU capacity and node taints before scheduling"}
+  ]
+}
