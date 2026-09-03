@@ -1,108 +1,432 @@
 {
   "families": [
     {
-      "knowledge_key": "redis_connection",
-      "diagnosis_cause": "The configured Redis endpoint is unavailable.",
-      "remediation": "Verify Redis connectivity and endpoint configuration."
+      "knowledge_key": "oom",
+      "diagnosis_cause": "Archived approved pattern: oom.",
+      "remediation": "Follow the approved runbook for this pattern."
     },
     {
-      "knowledge_key": "image_pull",
-      "diagnosis_cause": "The container image cannot be pulled from its registry.",
-      "remediation": "Verify the image tag and registry credentials."
-    },
-    {
-      "knowledge_key": "oom_killed",
-      "diagnosis_cause": "The container exceeded its memory limit.",
-      "remediation": "Inspect memory use and adjust the workload limit if justified."
+      "knowledge_key": "init_oom",
+      "diagnosis_cause": "Archived approved pattern: init_oom.",
+      "remediation": "Follow the approved runbook for this pattern."
     },
     {
       "knowledge_key": "config_error",
-      "diagnosis_cause": "The container cannot start because required configuration is missing.",
-      "remediation": "Verify the referenced Secret or ConfigMap."
+      "diagnosis_cause": "Archived approved pattern: config_error.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "image_pull",
+      "diagnosis_cause": "Archived approved pattern: image_pull.",
+      "remediation": "Follow the approved runbook for this pattern."
     },
     {
       "knowledge_key": "failed_scheduling",
-      "diagnosis_cause": "The pod cannot be scheduled onto an eligible node.",
-      "remediation": "Review resource requests, node capacity, and taints."
+      "diagnosis_cause": "Archived approved pattern: failed_scheduling.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "outbox_not_draining",
+      "diagnosis_cause": "Archived approved pattern: outbox_not_draining.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "driver_matching_returns_0_results",
+      "diagnosis_cause": "Archived approved pattern: driver_matching_returns_0_results.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "crashloop",
+      "diagnosis_cause": "Archived approved pattern: crashloop.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "init_crashloop",
+      "diagnosis_cause": "Archived approved pattern: init_crashloop.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "deployment_scaled_to_zero",
+      "diagnosis_cause": "Archived approved pattern: deployment_scaled_to_zero.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "zero_replica",
+      "diagnosis_cause": "Archived approved pattern: zero_replica.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "xautoclaim_pel_backlog",
+      "diagnosis_cause": "Archived approved pattern: xautoclaim_pel_backlog.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "trip_offer_timeout_storm",
+      "diagnosis_cause": "Archived approved pattern: trip_offer_timeout_storm.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "argocd_app_stuck_outofsync",
+      "diagnosis_cause": "Archived approved pattern: argocd_app_stuck_outofsync.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "kargo_verification_failing",
+      "diagnosis_cause": "Archived approved pattern: kargo_verification_failing.",
+      "remediation": "Follow the approved runbook for this pattern."
+    },
+    {
+      "knowledge_key": "high_error_rate_on_ride_service",
+      "diagnosis_cause": "Archived approved pattern: high_error_rate_on_ride_service.",
+      "remediation": "Follow the approved runbook for this pattern."
     }
   ],
   "examples": [
     {
-      "example_id": "redis-refused",
-      "knowledge_key": "redis_connection",
-      "fingerprint": "2f28185b31a8a9683c01c4886450608b14eec099b4107a36e5fae5312482cec0",
-      "evidence": {
-        "alert_name": "ServiceDown",
-        "service": "ride-service",
-        "triggering_metric": "ServiceDown",
-        "log_error": "redis connection refused"
-      },
-      "hint_ids": ["hint-redis"],
-      "exact_reusable": true
-    },
-    {
-      "example_id": "image-manifest",
-      "knowledge_key": "image_pull",
-      "fingerprint": "",
-      "evidence": {
-        "alert_name": "KubePodContainerWaiting",
-        "service": "orders",
-        "triggering_metric": "KubePodContainerWaiting",
-        "waiting_reason": "ImagePullBackOff",
-        "log_error": "manifest tag not found"
-      },
-      "hint_ids": ["hint-image"],
-      "exact_reusable": false
-    },
-    {
-      "example_id": "oom-137",
-      "knowledge_key": "oom_killed",
-      "fingerprint": "bd4cec5e5720ac19ef4b78fe5a26db4870efe6173b88559729a048c8c65819f9",
+      "example_id": "archived-oom",
+      "knowledge_key": "oom",
+      "fingerprint": "62370b26fed64f64bac482aba43b4dd28f4626e5ccbfa870ac9076a58d14da2b",
       "evidence": {
         "alert_name": "KubePodContainerTerminated",
-        "service": "payments",
         "triggering_metric": "KubePodContainerTerminated",
         "last_terminated_reason": "OOMKilled",
         "log_error": "exit code 137 memory limit exceeded"
       },
-      "hint_ids": ["hint-oom"],
+      "hint_ids": [
+        "hint-oom"
+      ],
       "exact_reusable": true
     },
     {
-      "example_id": "missing-secret",
+      "example_id": "archived-init_oom",
+      "knowledge_key": "init_oom",
+      "fingerprint": "5aaad4b9e37b57a27c6f363e59658b89568fb5281e544c172185ddac51738740",
+      "evidence": {
+        "alert_name": "KubePodContainerTerminated",
+        "triggering_metric": "KubePodContainerTerminated",
+        "log_error": "init container OOMKilled"
+      },
+      "hint_ids": [
+        "hint-init_oom"
+      ],
+      "exact_reusable": true
+    },
+    {
+      "example_id": "archived-config_error",
       "knowledge_key": "config_error",
-      "fingerprint": "",
+      "fingerprint": "0c9cf703fd7bee349a90c75095fd69cccd70807d5bf52a4c917aa43f98ec7375",
       "evidence": {
         "alert_name": "KubePodContainerWaiting",
-        "service": "payments",
         "triggering_metric": "KubePodContainerWaiting",
         "waiting_reason": "CreateContainerConfigError",
         "event_reason": "Failed",
-        "event_message": "missing Secret payments-api"
+        "event_message": "missing Secret",
+        "log_error": ""
       },
-      "hint_ids": ["hint-config"],
+      "hint_ids": [
+        "hint-config_error"
+      ],
+      "exact_reusable": true
+    },
+    {
+      "example_id": "archived-image_pull",
+      "knowledge_key": "image_pull",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodContainerWaiting",
+        "triggering_metric": "KubePodContainerWaiting",
+        "waiting_reason": "ImagePullBackOff",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "manifest tag not found"
+      },
+      "hint_ids": [
+        "hint-image_pull"
+      ],
       "exact_reusable": false
     },
     {
-      "example_id": "cpu-taint",
+      "example_id": "archived-failed_scheduling",
       "knowledge_key": "failed_scheduling",
       "fingerprint": "",
       "evidence": {
         "alert_name": "KubePodNotScheduled",
-        "service": "payments",
         "triggering_metric": "KubePodNotScheduled",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
         "event_reason": "FailedScheduling",
-        "event_message": "insufficient CPU and node taint"
+        "event_message": "insufficient CPU and taint",
+        "log_error": ""
       },
-      "hint_ids": ["hint-scheduling"],
+      "hint_ids": [
+        "hint-failed_scheduling"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-outbox_not_draining",
+      "knowledge_key": "outbox_not_draining",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "OutboxBacklog",
+        "triggering_metric": "OutboxBacklog",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "outbox_events PENDING no PUBLISHED rows"
+      },
+      "hint_ids": [
+        "hint-outbox_not_draining"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-driver_matching_returns_0_results",
+      "knowledge_key": "driver_matching_returns_0_results",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "DriverMatchFailure",
+        "triggering_metric": "DriverMatchFailure",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "GeoSearch drivers:available returns empty"
+      },
+      "hint_ids": [
+        "hint-driver_matching_returns_0_results"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-crashloop",
+      "knowledge_key": "crashloop",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodContainerWaiting",
+        "triggering_metric": "KubePodContainerWaiting",
+        "waiting_reason": "CrashLoopBackOff",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "startup failed missing environment variable"
+      },
+      "hint_ids": [
+        "hint-crashloop"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-init_crashloop",
+      "knowledge_key": "init_crashloop",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodContainerWaiting",
+        "triggering_metric": "KubePodContainerWaiting",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "init log startup failure init container CrashLoopBackOff"
+      },
+      "hint_ids": [
+        "hint-init_crashloop"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-deployment_scaled_to_zero",
+      "knowledge_key": "deployment_scaled_to_zero",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "ServiceDown",
+        "triggering_metric": "ServiceDown",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "0 rps no traffic"
+      },
+      "hint_ids": [
+        "hint-deployment_scaled_to_zero"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-zero_replica",
+      "knowledge_key": "zero_replica",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "ServiceDown",
+        "triggering_metric": "ServiceDown",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "0 rps no traffic"
+      },
+      "hint_ids": [
+        "hint-zero_replica"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-xautoclaim_pel_backlog",
+      "knowledge_key": "xautoclaim_pel_backlog",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "ConsumerBacklog",
+        "triggering_metric": "ConsumerBacklog",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "XAUTOCLAIM pending entries list messages not acknowledged"
+      },
+      "hint_ids": [
+        "hint-xautoclaim_pel_backlog"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-trip_offer_timeout_storm",
+      "knowledge_key": "trip_offer_timeout_storm",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "TripFailure",
+        "triggering_metric": "TripFailure",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "trips CANCELLED immediately after REQUESTED offer deadline"
+      },
+      "hint_ids": [
+        "hint-trip_offer_timeout_storm"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-argocd_app_stuck_outofsync",
+      "knowledge_key": "argocd_app_stuck_outofsync",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "ArgoCDAppOutOfSync",
+        "triggering_metric": "ArgoCDAppOutOfSync",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "OutOfSync",
+        "event_message": "vroom-infrastructure OutOfSync perpetually",
+        "log_error": ""
+      },
+      "hint_ids": [
+        "hint-argocd_app_stuck_outofsync"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-kargo_verification_failing",
+      "knowledge_key": "kargo_verification_failing",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KargoVerificationFailed",
+        "triggering_metric": "KargoVerificationFailed",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "Failed",
+        "event_message": "AnalysisRun prometheus-checks Failed promotion blocked",
+        "log_error": ""
+      },
+      "hint_ids": [
+        "hint-kargo_verification_failing"
+      ],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "archived-high_error_rate_on_ride_service",
+      "knowledge_key": "high_error_rate_on_ride_service",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "HighErrorRate",
+        "triggering_metric": "HighErrorRate",
+        "waiting_reason": "",
+        "last_terminated_reason": "",
+        "event_reason": "",
+        "event_message": "",
+        "log_error": "http_requests_total status 5xx above 1 percent"
+      },
+      "hint_ids": [
+        "hint-high_error_rate_on_ride_service"
+      ],
       "exact_reusable": false
     }
   ],
   "hints": [
-    {"hint_id": "hint-redis", "text": "connection refused while opening Redis"},
-    {"hint_id": "hint-image", "text": "verify the image tag and registry credentials"},
-    {"hint_id": "hint-oom", "text": "exit code 137 and OOMKilled indicate a memory limit issue"},
-    {"hint_id": "hint-config", "text": "verify the missing Secret or ConfigMap reference"},
-    {"hint_id": "hint-scheduling", "text": "check CPU capacity and node taints before scheduling"}
+    {
+      "hint_id": "hint-oom",
+      "text": "KubePodContainerTerminated KubePodContainerTerminated OOMKilled exit code 137 memory limit exceeded"
+    },
+    {
+      "hint_id": "hint-init_oom",
+      "text": "KubePodContainerTerminated KubePodContainerTerminated init container OOMKilled"
+    },
+    {
+      "hint_id": "hint-config_error",
+      "text": "KubePodContainerWaiting KubePodContainerWaiting CreateContainerConfigError Failed missing Secret"
+    },
+    {
+      "hint_id": "hint-image_pull",
+      "text": "KubePodContainerWaiting KubePodContainerWaiting ImagePullBackOff manifest tag not found"
+    },
+    {
+      "hint_id": "hint-failed_scheduling",
+      "text": "KubePodNotScheduled KubePodNotScheduled FailedScheduling insufficient CPU and taint"
+    },
+    {
+      "hint_id": "hint-outbox_not_draining",
+      "text": "OutboxBacklog OutboxBacklog outbox_events PENDING no PUBLISHED rows"
+    },
+    {
+      "hint_id": "hint-driver_matching_returns_0_results",
+      "text": "DriverMatchFailure DriverMatchFailure GeoSearch drivers:available returns empty"
+    },
+    {
+      "hint_id": "hint-crashloop",
+      "text": "KubePodContainerWaiting KubePodContainerWaiting CrashLoopBackOff startup failed missing environment variable"
+    },
+    {
+      "hint_id": "hint-init_crashloop",
+      "text": "KubePodContainerWaiting KubePodContainerWaiting init log startup failure init container CrashLoopBackOff"
+    },
+    {
+      "hint_id": "hint-deployment_scaled_to_zero",
+      "text": "ServiceDown ServiceDown 0 rps no traffic"
+    },
+    {
+      "hint_id": "hint-zero_replica",
+      "text": "ServiceDown ServiceDown 0 rps no traffic"
+    },
+    {
+      "hint_id": "hint-xautoclaim_pel_backlog",
+      "text": "ConsumerBacklog ConsumerBacklog XAUTOCLAIM pending entries list messages not acknowledged"
+    },
+    {
+      "hint_id": "hint-trip_offer_timeout_storm",
+      "text": "TripFailure TripFailure trips CANCELLED immediately after REQUESTED offer deadline"
+    },
+    {
+      "hint_id": "hint-argocd_app_stuck_outofsync",
+      "text": "ArgoCDAppOutOfSync ArgoCDAppOutOfSync OutOfSync vroom-infrastructure OutOfSync perpetually"
+    },
+    {
+      "hint_id": "hint-kargo_verification_failing",
+      "text": "KargoVerificationFailed KargoVerificationFailed Failed AnalysisRun prometheus-checks Failed promotion blocked"
+    },
+    {
+      "hint_id": "hint-high_error_rate_on_ride_service",
+      "text": "HighErrorRate HighErrorRate http_requests_total status 5xx above 1 percent"
+    }
   ]
 }

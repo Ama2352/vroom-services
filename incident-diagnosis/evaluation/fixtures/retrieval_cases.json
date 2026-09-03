@@ -1,93 +1,837 @@
 [
   {
-    "case_id": "redis_exact",
-    "split": "calibration",
-    "alert": {"alert_name": "ServiceDown", "service": "ride-service"},
-    "facts": {},
-    "log": {"message": "redis connection refused"},
-    "trace": {},
-    "configuration": {},
-    "expected_mode": "exact",
-    "expected_keys": ["redis_connection"],
-    "forbidden_keys": []
-  },
-  {
-    "case_id": "image_pull_nearest",
-    "split": "calibration",
-    "alert": {"alert_name": "KubePodContainerWaiting", "service": "orders"},
-    "facts": {"waiting_reason": "ImagePullBackOff"},
-    "log": {"message": "manifest tag not found"},
-    "trace": {},
-    "configuration": {},
-    "expected_mode": "nearest",
-    "expected_keys": ["image_pull"],
-    "forbidden_keys": ["redis_connection"]
-  },
-  {
     "case_id": "oom_exact",
     "split": "calibration",
-    "alert": {"alert_name": "KubePodContainerTerminated", "service": "payments"},
-    "facts": {"last_terminated_reason": "OOMKilled"},
-    "log": {"message": "exit code 137 memory limit exceeded"},
+    "alert": {
+      "alert_name": "KubePodContainerTerminated",
+      "service": ""
+    },
+    "facts": {
+      "last_terminated_reason": "OOMKilled"
+    },
+    "log": {
+      "message": "exit code 137 memory limit exceeded"
+    },
     "trace": {},
     "configuration": {},
     "expected_mode": "exact",
-    "expected_keys": ["oom_killed"],
+    "expected_keys": [
+      "oom"
+    ],
     "forbidden_keys": []
   },
   {
-    "case_id": "config_error_nearest",
+    "case_id": "init_oom_exact",
     "split": "calibration",
-    "alert": {"alert_name": "KubePodContainerWaiting", "service": "payments"},
+    "alert": {
+      "alert_name": "KubePodContainerTerminated",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "init container OOMKilled"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "exact",
+    "expected_keys": [
+      "init_oom"
+    ],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "config_error_exact",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
     "facts": {
       "waiting_reason": "CreateContainerConfigError",
       "event_reason": "Failed",
-      "event_message": "missing Secret payments-api"
+      "event_message": "missing Secret"
     },
     "log": {},
     "trace": {},
     "configuration": {},
-    "expected_mode": "nearest",
-    "expected_keys": ["config_error"],
-    "forbidden_keys": ["oom_killed"]
+    "expected_mode": "exact",
+    "expected_keys": [
+      "config_error"
+    ],
+    "forbidden_keys": []
   },
   {
-    "case_id": "failed_scheduling_nearest",
-    "split": "held_out",
-    "alert": {"alert_name": "KubePodNotScheduled", "service": "payments"},
+    "case_id": "image_pull_advisory",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "ImagePullBackOff"
+    },
+    "log": {
+      "message": "manifest tag not found"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "image_pull"
+    ],
+    "forbidden_keys": [
+      "oom"
+    ]
+  },
+  {
+    "case_id": "failed_scheduling_advisory",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodNotScheduled",
+      "service": ""
+    },
     "facts": {
       "event_reason": "FailedScheduling",
-      "event_message": "insufficient CPU and node taint"
+      "event_message": "insufficient CPU and taint"
     },
     "log": {},
     "trace": {},
     "configuration": {},
     "expected_mode": "nearest",
-    "expected_keys": ["failed_scheduling"],
-    "forbidden_keys": ["config_error"]
+    "expected_keys": [
+      "failed_scheduling"
+    ],
+    "forbidden_keys": [
+      "crashloop"
+    ]
   },
   {
-    "case_id": "tls_none",
-    "split": "held_out",
-    "alert": {"alert_name": "TLSFailure", "service": "orders"},
+    "case_id": "outbox_not_draining",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "OutboxBacklog",
+      "service": ""
+    },
     "facts": {},
-    "log": {"message": "x509 certificate expired"},
+    "log": {
+      "message": "outbox_events PENDING no PUBLISHED rows"
+    },
     "trace": {},
     "configuration": {},
-    "expected_mode": "none",
-    "expected_keys": [],
-    "forbidden_keys": ["redis_connection", "image_pull"]
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "outbox_not_draining"
+    ],
+    "forbidden_keys": []
   },
   {
-    "case_id": "disk_pressure_none",
-    "split": "held_out",
-    "alert": {"alert_name": "KubeNodeCondition", "service": "platform"},
-    "facts": {"event_reason": "DiskPressure"},
-    "log": {"message": "no space left on device inode exhaustion"},
+    "case_id": "driver_geo_empty",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "DriverMatchFailure",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "GeoSearch drivers:available returns empty"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "driver_matching_returns_0_results"
+    ],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "generic_crashloop",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "startup failed missing environment variable"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "crashloop"
+    ],
+    "forbidden_keys": [
+      "oom"
+    ]
+  },
+  {
+    "case_id": "tls_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "x509 certificate expired TLS handshake failure"
+    },
     "trace": {},
     "configuration": {},
     "expected_mode": "none",
     "expected_keys": [],
-    "forbidden_keys": ["oom_killed", "failed_scheduling"]
+    "forbidden_keys": [
+      "crashloop",
+      "image_pull"
+    ]
+  },
+  {
+    "case_id": "disk_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubeNodeCondition",
+      "service": ""
+    },
+    "facts": {
+      "event_reason": "DiskPressure"
+    },
+    "log": {
+      "message": "no space left on device inode exhaustion"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "oom"
+    ]
+  },
+  {
+    "case_id": "init_crashloop",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "init log startup failure init container CrashLoopBackOff"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "init_crashloop"
+    ],
+    "forbidden_keys": [
+      "crashloop"
+    ]
+  },
+  {
+    "case_id": "scaled_to_zero",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "ServiceDown",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "0 rps no traffic"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "deployment_scaled_to_zero",
+      "zero_replica"
+    ],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "xautoclaim_backlog",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "ConsumerBacklog",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "XAUTOCLAIM pending entries list messages not acknowledged"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "xautoclaim_pel_backlog"
+    ],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "trip_timeout_storm",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "TripFailure",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "trips CANCELLED immediately after REQUESTED offer deadline"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "trip_offer_timeout_storm"
+    ],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "argocd_outofsync",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "ArgoCDAppOutOfSync",
+      "service": ""
+    },
+    "facts": {
+      "event_reason": "OutOfSync",
+      "event_message": "vroom-infrastructure OutOfSync perpetually"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "argocd_app_stuck_outofsync"
+    ],
+    "forbidden_keys": [
+      "kargo_verification_failing"
+    ]
+  },
+  {
+    "case_id": "kargo_analysis_failed",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KargoVerificationFailed",
+      "service": ""
+    },
+    "facts": {
+      "event_reason": "Failed",
+      "event_message": "AnalysisRun prometheus-checks Failed promotion blocked"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "kargo_verification_failing"
+    ],
+    "forbidden_keys": [
+      "argocd_app_stuck_outofsync"
+    ]
+  },
+  {
+    "case_id": "high_error_rate",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "HighErrorRate",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "http_requests_total status 5xx above 1 percent"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "high_error_rate_on_ride_service"
+    ],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "dns_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "lookup unknown.external.example no such host"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "oom",
+      "config_error"
+    ]
+  },
+  {
+    "case_id": "sparse_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "UnclassifiedAlert",
+      "service": ""
+    },
+    "facts": {},
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "oom",
+      "crashloop"
+    ]
+  },
+  {
+    "case_id": "ambiguous_conclusive",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CreateContainerConfigError"
+    },
+    "log": {
+      "message": "init container OOMKilled"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "init_oom",
+      "config_error"
+    ],
+    "forbidden_keys": []
+  },
+  {
+    "case_id": "err_image_pull_alias",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "ErrImagePull"
+    },
+    "log": {
+      "message": "repository manifest unknown"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "image_pull"
+    ],
+    "forbidden_keys": [
+      "oom"
+    ]
+  },
+  {
+    "case_id": "zero_replicas_hpa",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "ServiceDown",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "HPA min replicas misconfigured"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "zero_replica",
+      "deployment_scaled_to_zero"
+    ],
+    "forbidden_keys": [
+      "oom"
+    ]
+  },
+  {
+    "case_id": "outbox_redis_unreachable",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "OutboxBacklog",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "outbox PENDING; Redis connection refused"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "outbox_not_draining"
+    ],
+    "forbidden_keys": [
+      "crashloop"
+    ]
+  },
+  {
+    "case_id": "argocd_ssa_conflict",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "ArgoCDAppOutOfSync",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "ArgoCD OutOfSync managedFields conflict"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "nearest",
+    "expected_keys": [
+      "argocd_app_stuck_outofsync"
+    ],
+    "forbidden_keys": [
+      "kargo_verification_failing"
+    ]
+  },
+  {
+    "case_id": "auth_401_crashloop_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "HTTP 401 invalid service token"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "crashloop",
+      "config_error"
+    ]
+  },
+  {
+    "case_id": "network_policy_timeout_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "i/o timeout blocked by NetworkPolicy"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "crashloop",
+      "failed_scheduling"
+    ]
+  },
+  {
+    "case_id": "database_schema_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "DatabaseError",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "relation rides.trip_audit does not exist"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "outbox_not_draining",
+      "crashloop"
+    ]
+  },
+  {
+    "case_id": "poison_message_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "ConsumerError",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "message deserialization failed unknown schema id"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "xautoclaim_pel_backlog",
+      "outbox_not_draining"
+    ]
+  },
+  {
+    "case_id": "quota_exceeded_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodCreateFailure",
+      "service": ""
+    },
+    "facts": {
+      "event_reason": "FailedCreate",
+      "event_message": "resource quota exceeded"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "failed_scheduling",
+      "zero_replica"
+    ]
+  },
+  {
+    "case_id": "clock_skew_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "AuthenticationFailure",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "JWT not yet valid; node clock skew 14m"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "config_error",
+      "crashloop"
+    ]
+  },
+  {
+    "case_id": "certificate_name_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "TLSFailure",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "x509 valid for api.internal not redis.internal"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "image_pull",
+      "crashloop"
+    ]
+  },
+  {
+    "case_id": "volume_mount_no_match",
+    "split": "calibration",
+    "alert": {
+      "alert_name": "KubePodMountFailure",
+      "service": ""
+    },
+    "facts": {
+      "event_reason": "FailedMount",
+      "event_message": "PVC data-rides not found"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "config_error",
+      "failed_scheduling"
+    ]
+  },
+  {
+    "case_id": "oauth_expired_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "oauth token expired while calling dispatch"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "crashloop",
+      "config_error"
+    ]
+  },
+  {
+    "case_id": "tcp_refused_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "connect notification:8080 connection refused"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "crashloop",
+      "zero_replica"
+    ]
+  },
+  {
+    "case_id": "read_only_fs_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "FilesystemError",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "read-only file system writing /tmp/cache"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "oom",
+      "config_error"
+    ]
+  },
+  {
+    "case_id": "kafka_broker_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "ConsumerError",
+      "service": ""
+    },
+    "facts": {},
+    "log": {
+      "message": "broker not available for topic trip-events"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "outbox_not_draining",
+      "xautoclaim_pel_backlog"
+    ]
+  },
+  {
+    "case_id": "webhook_denied_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodCreateFailure",
+      "service": ""
+    },
+    "facts": {
+      "event_reason": "FailedCreate",
+      "event_message": "admission webhook denied privileged container"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "failed_scheduling",
+      "config_error"
+    ]
+  },
+  {
+    "case_id": "node_notready_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubeNodeCondition",
+      "service": ""
+    },
+    "facts": {
+      "event_reason": "NodeNotReady",
+      "event_message": "kubelet stopped posting status"
+    },
+    "log": {},
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "failed_scheduling",
+      "zero_replica"
+    ]
+  },
+  {
+    "case_id": "redis_acl_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "NOPERM user has no permissions for XREADGROUP"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "crashloop",
+      "xautoclaim_pel_backlog"
+    ]
+  },
+  {
+    "case_id": "malformed_config_value_held_no_match",
+    "split": "held_out",
+    "alert": {
+      "alert_name": "KubePodContainerWaiting",
+      "service": ""
+    },
+    "facts": {
+      "waiting_reason": "CrashLoopBackOff"
+    },
+    "log": {
+      "message": "invalid duration REDIS_TTL=tomorrow"
+    },
+    "trace": {},
+    "configuration": {},
+    "expected_mode": "none",
+    "expected_keys": [],
+    "forbidden_keys": [
+      "crashloop",
+      "config_error"
+    ]
   }
 ]

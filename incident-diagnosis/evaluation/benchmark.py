@@ -114,7 +114,7 @@ def retrieve_case(case: RetrievalCase, snapshot: dict, reranker):
     return EvidenceRetrievalService(KnowledgeCorpus(snapshot), reranker).retrieve(build_template(case))
 
 
-def run_system(cases, snapshot: dict, reranker, *, name: str) -> EvaluationResult:
+def run_system(cases, snapshot: dict, reranker, *, name: str, score_floor: float | None = None) -> EvaluationResult:
     """Score one reranker using the production retrieval modes and fixtures."""
     counts = {
         "exact_correct": 0, "exact_total": 0, "advisory_top1": 0,
@@ -126,7 +126,10 @@ def run_system(cases, snapshot: dict, reranker, *, name: str) -> EvaluationResul
 
     for case in cases:
         result = retrieve_case(case, snapshot, reranker)
-        candidate_keys = tuple(item.knowledge_key for item in result.candidates)
+        candidates = result.candidates
+        if score_floor is not None and result.mode.value == "nearest":
+            candidates = tuple(item for item in candidates if _candidate_score(item) >= score_floor)
+        candidate_keys = tuple(item.knowledge_key for item in candidates)
         if result.mode.value == "degraded":
             counts["degraded_count"] += 1
         if set(candidate_keys).intersection(case.forbidden_keys):
@@ -155,6 +158,25 @@ def run_system(cases, snapshot: dict, reranker, *, name: str) -> EvaluationResul
             counts["false_positives"] += 1
 
     return EvaluationResult(name=name, **counts)
+
+
+def _candidate_score(candidate) -> float:
+    return candidate.reranker_score if candidate.reranker_score is not None else candidate.bm25_score
+
+
+def calibrate_score_floor(cases, snapshot: dict, reranker, *, name: str) -> float:
+    """Choose the lowest calibration floor with no false positives or forbidden keys."""
+    calibration = tuple(case for case in cases if case.split == "calibration")
+    scores = {0.0}
+    for case in calibration:
+        result = retrieve_case(case, snapshot, reranker)
+        scores.update(_candidate_score(item) for item in result.candidates)
+    passing = []
+    for floor in sorted(scores):
+        result = run_system(calibration, snapshot, reranker, name=name, score_floor=floor)
+        if result.false_positives == 0 and result.forbidden_acceptances == 0 and result.exact_failures == 0:
+            passing.append((result.advisory_top1, result.advisory_recall_at_3, -floor, floor))
+    return max(passing)[-1] if passing else float("inf")
 
 
 def passes_gate(result: EvaluationResult, *, baseline: EvaluationResult) -> bool:
