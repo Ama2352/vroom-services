@@ -29,6 +29,7 @@ class RetrievalCase:
     expected_mode: str
     expected_keys: tuple[str, ...]
     forbidden_keys: tuple[str, ...]
+    competing_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,7 @@ def load_cases(path: Path) -> tuple[RetrievalCase, ...]:
             case_id, split, dict(item.get("alert") or {}), dict(item.get("facts") or {}),
             dict(item.get("log") or {}), dict(item.get("trace") or {}),
             dict(item.get("configuration") or {}), mode, expected,
-            tuple(item.get("forbidden_keys") or ()),
+            tuple(item.get("forbidden_keys") or ()), tuple(item.get("competing_keys") or ()),
         ))
     return tuple(cases)
 
@@ -88,6 +89,15 @@ def load_cases(path: Path) -> tuple[RetrievalCase, ...]:
 def load_snapshot(path: Path) -> dict:
     """Load the same families/examples/hints document used by KnowledgeCorpus."""
     snapshot = json.loads(path.read_text(encoding="utf-8"))
+    base_name = snapshot.get("base_snapshot") if isinstance(snapshot, dict) else None
+    if base_name:
+        if not isinstance(base_name, str) or Path(base_name).name != base_name:
+            raise ValueError("base_snapshot must name a sibling fixture")
+        base = load_snapshot(path.parent / base_name)
+        snapshot = {
+            key: [*base[key], *(snapshot.get(key) or [])]
+            for key in ("families", "examples", "hints")
+        }
     if not isinstance(snapshot, dict) or any(not isinstance(snapshot.get(key), list) for key in ("families", "examples", "hints")):
         raise ValueError("knowledge snapshot needs families, examples, and hints lists")
     return snapshot

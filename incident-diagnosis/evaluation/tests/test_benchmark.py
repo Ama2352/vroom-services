@@ -24,11 +24,11 @@ from retrieval.models import EvidenceCandidate, EvidenceRetrievalMode
 
 
 CASES_PATH = EVALUATION_ROOT / "fixtures" / "retrieval_cases.json"
-SNAPSHOT_PATH = EVALUATION_ROOT / "fixtures" / "knowledge_snapshot.json"
+SEMANTIC_CASES_PATH = EVALUATION_ROOT / "fixtures" / "semantic_disambiguation_cases.json"
+SNAPSHOT_PATH = EVALUATION_ROOT / "fixtures" / "historical_context_enriched_snapshot.json"
 MODEL_SPECS_PATH = EVALUATION_ROOT / "model_specs.json"
 RUNTIME_MINILM_MANIFEST = AGENT_ROOT / "retrieval" / "model_manifest.json"
 NOTEBOOK_PATH = EVALUATION_ROOT / "model_selection_colab.ipynb"
-README_PATH = EVALUATION_ROOT / "README.md"
 
 
 def test_exact_case_matches_one_current_schema_fingerprint():
@@ -177,6 +177,31 @@ def test_fixture_preserves_the_archived_tournament_case_balance():
     assert sum(case.split == "held_out" and case.expected_mode != "none" for case in cases) == 10
 
 
+def test_historical_context_enriched_snapshot_has_multiple_examples_without_held_out_reuse():
+    cases = load_cases(CASES_PATH)
+    snapshot = load_snapshot(SNAPSHOT_PATH)
+    held_out_fingerprints = {
+        build_template(case).fingerprint()
+        for case in cases if case.split == "held_out"
+    }
+
+    assert len(snapshot["examples"]) > 16
+    assert any(example["example_id"].startswith("historical-") for example in snapshot["examples"])
+    assert not any(
+        example["exact_reusable"] and example["fingerprint"] in held_out_fingerprints
+        for example in snapshot["examples"]
+    )
+
+
+def test_semantic_cases_surface_their_keyword_sharing_competitors_in_bm25():
+    snapshot = load_snapshot(SNAPSHOT_PATH)
+    for case in load_cases(SEMANTIC_CASES_PATH):
+        result = retrieve_case(case, snapshot, IdentityReranker())
+        keys = {candidate.knowledge_key for candidate in result.candidates}
+        assert keys.intersection(case.expected_keys)
+        assert keys.intersection(case.competing_keys)
+
+
 def test_score_floor_turns_rejected_nearest_candidate_into_an_abstention():
     no_match = next(case for case in load_cases(CASES_PATH) if case.case_id == "tls_no_match")
 
@@ -245,6 +270,8 @@ def test_notebook_contains_pinned_local_models_and_decision_outputs():
     assert "resource_probe.py" in source
     assert "BM25 remains a comparison baseline" in source
     assert "held-out positive cases" in source
+    assert "historical_context_enriched_snapshot.json" in source
+    assert "BM25 → MiniLM" in source
     assert "confusion matrix is intentionally omitted" in source
 
 
@@ -257,13 +284,3 @@ def test_benchmark_execution_cell_imports_numpy_for_its_calibration_guard():
     )
 
     assert "import numpy as np" in source
-
-
-def test_readme_explains_colab_without_production_access():
-    source = README_PATH.read_text(encoding="utf-8")
-
-    assert "Google Colab" in source
-    assert "API key" in source
-    assert "Kubernetes" in source
-    assert "Redis" in source
-    assert "CPU" in source

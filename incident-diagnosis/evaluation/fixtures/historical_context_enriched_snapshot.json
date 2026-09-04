@@ -1,0 +1,143 @@
+{
+  "corpus_profile": "historical_context_enriched",
+  "base_snapshot": "knowledge_snapshot.json",
+  "examples": [
+    {
+      "example_id": "historical-oom-cache-pressure",
+      "knowledge_key": "oom",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodContainerTerminated",
+        "triggering_metric": "KubePodContainerTerminated",
+        "last_terminated_reason": "OOMKilled",
+        "log_error": "worker cache growth exhausted the pod memory limit"
+      },
+      "hint_ids": ["historical-hint-oom"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-crashloop-startup-config",
+      "knowledge_key": "crashloop",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodContainerWaiting",
+        "triggering_metric": "KubePodContainerWaiting",
+        "waiting_reason": "CrashLoopBackOff",
+        "log_error": "application startup exited after an environment configuration error"
+      },
+      "hint_ids": ["historical-hint-crashloop"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-outbox-redis-pressure",
+      "knowledge_key": "outbox_not_draining",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "OutboxBacklog",
+        "triggering_metric": "OutboxBacklog",
+        "log_error": "OutboxWorker cannot publish pending rows because Redis stream writes are blocked"
+      },
+      "hint_ids": ["historical-hint-outbox"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-driver-redis-restart",
+      "knowledge_key": "driver_matching_returns_0_results",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "DriverMatchFailure",
+        "triggering_metric": "DriverMatchFailure",
+        "log_error": "drivers available GeoSearch became empty after Redis restarted"
+      },
+      "hint_ids": ["historical-hint-driver"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-trip-offer-deadline",
+      "knowledge_key": "trip_offer_timeout_storm",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "TripFailure",
+        "triggering_metric": "TripFailure",
+        "log_error": "offers change from REQUESTED to CANCELLED at the ten second deadline"
+      },
+      "hint_ids": ["historical-hint-trip-timeout"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-xautoclaim-idle-pending",
+      "knowledge_key": "xautoclaim_pel_backlog",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "ConsumerBacklog",
+        "triggering_metric": "ConsumerBacklog",
+        "log_error": "pending stream messages stay idle and are repeatedly claimed without acknowledgement"
+      },
+      "hint_ids": ["historical-hint-xautoclaim"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-argocd-ssa-conflict",
+      "knowledge_key": "argocd_app_stuck_outofsync",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "ArgoCDAppOutOfSync",
+        "triggering_metric": "ArgoCDAppOutOfSync",
+        "event_reason": "OutOfSync",
+        "event_message": "multiple server-side apply field managers conflict"
+      },
+      "hint_ids": ["historical-hint-argocd"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-kargo-prometheus-gate",
+      "knowledge_key": "kargo_verification_failing",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KargoVerificationFailed",
+        "triggering_metric": "KargoVerificationFailed",
+        "event_reason": "Failed",
+        "event_message": "Prometheus AnalysisRun rejected the promotion after a p99 latency regression"
+      },
+      "hint_ids": ["historical-hint-kargo"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-deployment-manual-scale",
+      "knowledge_key": "deployment_scaled_to_zero",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "ServiceDown",
+        "triggering_metric": "ServiceDown",
+        "log_error": "no pods or traffic after a manual deployment scale to zero"
+      },
+      "hint_ids": ["historical-hint-scale-zero"],
+      "exact_reusable": false
+    },
+    {
+      "example_id": "historical-scheduling-taint",
+      "knowledge_key": "failed_scheduling",
+      "fingerprint": "",
+      "evidence": {
+        "alert_name": "KubePodNotScheduled",
+        "triggering_metric": "KubePodNotScheduled",
+        "event_reason": "FailedScheduling",
+        "event_message": "node taint and resource request prevent scheduling"
+      },
+      "hint_ids": ["historical-hint-scheduling"],
+      "exact_reusable": false
+    }
+  ],
+  "hints": [
+    {"hint_id": "historical-hint-oom", "text": "Archived runbook context: check node and pod memory pressure; connection pool leaks and large in-memory caches can trigger OOMKilled."},
+    {"hint_id": "historical-hint-crashloop", "text": "Archived runbook context: inspect previous container logs for a missing environment variable, bad startup configuration, or unreachable dependency."},
+    {"hint_id": "historical-hint-outbox", "text": "Archived runbook context: pending outbox rows build up when the Redis stream is full or unavailable; inspect Redis memory pressure and worker logs."},
+    {"hint_id": "historical-hint-driver", "text": "Archived runbook context: drivers:available is an in-memory Redis Geo key; a Redis restart clears it until drivers reconnect."},
+    {"hint_id": "historical-hint-trip-timeout", "text": "Archived runbook context: TripTimeoutWorker cancels an offer after ten seconds when dispatch is slow or no drivers are available."},
+    {"hint_id": "historical-hint-xautoclaim", "text": "Archived runbook context: a crashed dispatch worker leaves pending entries; XAUTOCLAIM retries idle messages and acknowledgement is the decisive signal."},
+    {"hint_id": "historical-hint-argocd", "text": "Archived runbook context: OutOfSync can be caused by server-side apply field-manager conflicts or by a rejected Kargo namespace label."},
+    {"hint_id": "historical-hint-kargo", "text": "Archived runbook context: inspect the failed AnalysisRun; Prometheus scraping or a genuine latency/error regression can block promotion."},
+    {"hint_id": "historical-hint-scale-zero", "text": "Archived runbook context: zero replicas can follow manual scaling or an HPA configuration; inspect scale events and restore replicas deliberately."},
+    {"hint_id": "historical-hint-scheduling", "text": "Archived runbook context: FailedScheduling requires checking node selectors, requested resources, taints, and affinity against available nodes."}
+  ]
+}
