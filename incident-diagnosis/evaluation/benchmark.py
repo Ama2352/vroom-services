@@ -269,6 +269,11 @@ def run_system(cases, snapshot: dict, reranker, *, name: str, score_floor: float
     return EvaluationResult(name=name, **counts)
 
 
+def run_raw_ranking(cases, snapshot: dict, reranker, *, name: str) -> EvaluationResult:
+    """Score candidate ordering before a system-specific acceptance floor is applied."""
+    return run_system(cases, snapshot, reranker, name=name, score_floor=None)
+
+
 def _candidate_score(candidate, *, name: str) -> float:
     """Use the score that actually ordered this system's candidates."""
     return candidate.bm25_score if name == "bm25" else candidate.reranker_score

@@ -21,6 +21,7 @@ from benchmark import (
     passes_gate,
     retrieve_case,
     run_system,
+    run_raw_ranking,
     evaluate_selection_gate,
     validate_semantic_cases,
 )
@@ -269,6 +270,17 @@ def test_score_floor_turns_rejected_nearest_candidate_into_an_abstention():
     assert result.correct_abstentions == 1
 
 
+def test_raw_ranking_scores_the_unfiltered_bm25_candidate_order():
+    case = next(case for case in load_cases(CASES_PATH) if case.case_id == "image_pull_advisory")
+    snapshot = load_snapshot(SNAPSHOT_PATH)
+
+    raw = run_raw_ranking((case,), snapshot, IdentityReranker(), name="bm25")
+    accepted = run_system((case,), snapshot, IdentityReranker(), name="bm25", score_floor=float("inf"))
+
+    assert raw.advisory_top1 == 1
+    assert accepted.advisory_top1 == 0
+
+
 def test_bm25_calibration_uses_lexical_scores_instead_of_default_reranker_scores():
     floor = calibrate_score_floor(
         load_cases(CASES_PATH),
@@ -335,6 +347,9 @@ def test_notebook_reports_provenance_coverage_and_pre_scoring_validation():
     assert "evidence_category_coverage" in source
     assert "archive_derived" in source
     assert "synthetic_stress" in source
+    assert "run_raw_ranking" in source
+    assert "Raw Top-8 ranking quality" in source
+    assert "complete pipeline" in source
 
 
 def test_benchmark_execution_cell_imports_numpy_for_its_calibration_guard():
