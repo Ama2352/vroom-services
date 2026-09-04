@@ -13,6 +13,10 @@ from stores.knowledge import KnowledgeCorpus
 
 _MODES = {"exact", "nearest", "none", "degraded"}
 _SPLITS = {"calibration", "held_out"}
+_COVERAGE_FIELDS = (
+    "service", "triggering_metric", "log_error", "trace_error_service",
+    "trace_error_operation", "trace_error_message", "configuration_diff",
+)
 
 
 @dataclass(frozen=True)
@@ -119,9 +123,39 @@ def build_template(case: RetrievalCase):
     return normalize_evidence(case.alert, case.facts, case.log, case.trace, case.configuration)
 
 
+def field_coverage(cases) -> dict[str, float]:
+    """Return the fraction of cases with each important evidence field populated."""
+    cases = tuple(cases)
+    if not cases:
+        return {field: 0.0 for field in _COVERAGE_FIELDS}
+    populated = {field: 0 for field in _COVERAGE_FIELDS}
+    for case in cases:
+        values = dict(build_template(case).values)
+        for field in populated:
+            populated[field] += bool(values.get(field))
+    return {field: count / len(cases) for field, count in populated.items()}
+
+
 def retrieve_case(case: RetrievalCase, snapshot: dict, reranker):
     """Exercise the clean exact-and-advisory retrieval pipeline for one case."""
     return EvidenceRetrievalService(KnowledgeCorpus(snapshot), reranker).retrieve(build_template(case))
+
+
+def pipeline_trace(case: RetrievalCase, snapshot: dict, reranker, *, name: str, score_floor: float) -> dict:
+    """Expose BM25, reranking, and threshold stages for one audit case."""
+    bm25 = retrieve_case(case, snapshot, IdentityReranker())
+    reranked = retrieve_case(case, snapshot, reranker)
+    accepted = tuple(
+        item for item in reranked.candidates
+        if reranked.mode.value != "nearest" or _candidate_score(item, name=name) >= score_floor
+    )
+    describe = lambda items: [
+        {"key": item.knowledge_key, "bm25": item.bm25_score, "reranker": item.reranker_score,
+         "matched_terms": item.matched_terms}
+        for item in items
+    ]
+    return {"bm25_candidates": describe(bm25.candidates), "raw_reranker_candidates": describe(reranked.candidates),
+            "score_floor": score_floor, "accepted_candidates": describe(accepted)}
 
 
 def run_system(cases, snapshot: dict, reranker, *, name: str, score_floor: float | None = None) -> EvaluationResult:

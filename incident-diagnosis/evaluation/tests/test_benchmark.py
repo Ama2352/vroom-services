@@ -13,6 +13,7 @@ from benchmark import (
     IdentityReranker,
     build_template,
     calibrate_score_floor,
+    field_coverage,
     load_cases,
     load_model_specs,
     load_snapshot,
@@ -200,6 +201,14 @@ def test_semantic_cases_surface_their_keyword_sharing_competitors_in_bm25():
         keys = {candidate.knowledge_key for candidate in result.candidates}
         assert keys.intersection(case.expected_keys)
         assert keys.intersection(case.competing_keys)
+
+
+def test_field_coverage_reports_normalized_schema_population():
+    coverage = field_coverage(load_cases(SEMANTIC_CASES_PATH))
+
+    assert coverage["triggering_metric"] == 1.0
+    assert 0 < coverage["log_error"] < 1.0
+    assert coverage["configuration_diff"] == 0.0
 
 
 def test_score_floor_turns_rejected_nearest_candidate_into_an_abstention():
