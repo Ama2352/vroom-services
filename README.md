@@ -35,7 +35,7 @@ The application layer: 4 Go microservices + a React frontend that exercise the p
 | Testing | `go test`, testcontainers (real Postgres + Redis), k6 (load) |
 | CI | GitLab CI — test → integration → build → scan (Trivy) → publish (GHCR) |
 | SAST | gosec + GitLab SAST |
-| Incident agent | Python 3, Flask, Redis-backed approved examples, BM25, MiniLM, guarded LLM generation |
+| Incident agent | Python 3, Flask, Redis-backed approved examples, BM25 retrieval, guarded LLM generation |
 
 ---
 
@@ -49,7 +49,7 @@ The application layer: 4 Go microservices + a React frontend that exercise the p
 - Redis Geo driver matching — O(log N) radius search, 5 km waterfall
 - HPA autoscaling on `ride`/`dispatch`/`user`, verified under k6 load
 - End-to-end distributed tracing, including across async Redis Streams hops
-- Evidence-first incident diagnosis with exact approved reuse, hybrid advisory retrieval, and human review
+- Evidence-first incident diagnosis with exact approved reuse, BM25 advisory retrieval, and human review
 
 ---
 
@@ -116,7 +116,7 @@ trusting generated text alone.
 
 The agent recognizes known failures without confusing similarity for proof. An
 identical human-approved example reuses its approved diagnosis and remediation.
-Otherwise, BM25 and MiniLM retrieve related guidance and the LLM produces a
+Otherwise, BM25 retrieves related guidance and the LLM produces a
 grounded, explicitly unconfirmed hypothesis. Hard and semantic guardrails
 validate non-exact output, with one refinement at most; an unsupported cause is
 withheld while the current evidence and any cited hypothesis remain available.
@@ -131,8 +131,9 @@ knowledge.
 
 - **Current evidence:** scoped logs, correlated trace facts, Kubernetes state
   and events, safe configuration diffs, and operational metrics are retained.
-- **Hybrid retrieval:** BM25 provides lexical recall; MiniLM semantically
-  reranks approved examples.
+- **Explainable retrieval:** BM25 searches approved examples and hints using
+  the normalized evidence, then keeps the strongest distinct families as
+  advisory context.
 - **Guarded generation:** advisory output must cite current evidence and pass
   hard and semantic validation before it is published.
 - **Human control:** the agent recommends next actions but never executes a
@@ -206,6 +207,8 @@ vroom-services/
 │   └── tests/                    Cross-service choreography integration tests
 ├── incident-diagnosis/           SRE incident diagnosis agent (deployed as "incident-agent")
 │   ├── agent/                    Evidence collection, retrieval, grounded generation, validation, and incident APIs
+│   ├── dashboard/                React dashboard for incident investigation and human review
+│   ├── evaluation/               Offline retrieval benchmarks, notebooks, fixtures, and captured results
 │   └── kubectl-executor/         Allowlist-gated kubectl HTTP gateway for operator-controlled access
 ├── validation/                   Things that exercise a running deployed cluster
 │   ├── load-tests/               k6 scenarios — baseline (P95<500ms), spike, geo_flood

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from evidence import normalize_evidence
 from retrieval.bm25 import tokenize
 from retrieval.evidence import EvidenceRetrievalService
+from retrieval.models import EvidenceRetrievalMode
 from stores.knowledge import KnowledgeCorpus
 
 
@@ -180,8 +181,11 @@ def evidence_category_coverage(cases) -> dict[str, int]:
 
 
 def retrieve_case(case: RetrievalCase, snapshot: dict, reranker):
-    """Exercise the clean exact-and-advisory retrieval pipeline for one case."""
-    return EvidenceRetrievalService(KnowledgeCorpus(snapshot), reranker).retrieve(build_template(case))
+    """Run production BM25, then apply a reranker only in this offline harness."""
+    result = EvidenceRetrievalService(KnowledgeCorpus(snapshot)).retrieve(build_template(case))
+    if result.mode is EvidenceRetrievalMode.NEAREST:
+        result = replace(result, candidates=reranker.rerank(build_template(case).serialize(), result.candidates))
+    return result
 
 
 def validate_semantic_cases(cases, snapshot: dict) -> None:

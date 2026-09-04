@@ -21,7 +21,7 @@ class EvidenceCandidate:
     example_id: str                     # which approved past example
     serialized: str                     # its evidence as text
     bm25_score: float = 0.0             # keyword similarty
-    reranker_score: float = 0.0         # MiniLM semantic similarity
+    reranker_score: float = 0.0         # reserved for offline evaluation adapters
     matched_terms: tuple[str, ...] = ()
 
 

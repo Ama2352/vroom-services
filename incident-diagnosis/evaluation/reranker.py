@@ -1,4 +1,4 @@
-"""Local MiniLM cross-encoder adapted to evidence-first candidates."""
+"""Offline-only MiniLM adapter used by the model-selection notebooks."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .models import EvidenceCandidate
+from retrieval.models import EvidenceCandidate
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def verify_sha256(artifact: Path, expected_sha256: str) -> Path:
 
 
 class OnnxCrossEncoder:
-    """Low-level local model adapter; no network call occurs at scoring time."""
+    """Load and score a pinned local ONNX model for offline comparison only."""
 
     def __init__(self, model_dir: Path, spec: ModelSpec):
         from transformers import AutoTokenizer
@@ -64,7 +64,7 @@ class OnnxCrossEncoder:
 
 
 class MiniLMReranker:
-    """Scores evidence candidates and returns the best semantic matches first."""
+    """Rank BM25 candidates for the offline reranking comparison."""
 
     def __init__(self, backend):
         self.backend = backend
@@ -74,13 +74,11 @@ class MiniLMReranker:
     ) -> tuple[EvidenceCandidate, ...]:
         if not candidates:
             return ()
-        # `serialized` contains evidence and approved hints, never a diagnosis answer.
         scores = self.backend.score(query, tuple(item.serialized for item in candidates))
         if len(scores) != len(candidates):
             raise ValueError("reranker score count does not match candidates")
         scored = tuple(replace(item, reranker_score=float(score)) for item, score in zip(candidates, scores))
         highest = max(item.reranker_score for item in scored)
-        # For near ties, keep BM25's lexical signal instead of making a noisy flip.
         return tuple(sorted(
             scored,
             key=lambda item: (

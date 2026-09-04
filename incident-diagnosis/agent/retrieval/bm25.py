@@ -56,7 +56,7 @@ class BM25Index:
         if not query_tokens:
             return ()
         query_terms = set(query_tokens)
-        # BM25 cheaply narrows the corpus; MiniLM decides the final order later.
+        # BM25 provides the lexical candidate order used by the agent.
         ranked = []
         for candidate, document_tokens, score in zip(
             self.candidates, self._tokenized, self._bm25.get_scores(query_tokens),
@@ -70,7 +70,7 @@ class BM25Index:
             ))
 
         ranked.sort(key=lambda item: (-item.bm25_score, item.knowledge_key, item.example_id))
-        # Avoid sending duplicate examples from one family to MiniLM.
+        # Keep one representative example per incident family.
         families: dict[str, EvidenceCandidate] = {}
         for candidate in ranked:
             families.setdefault(candidate.knowledge_key, candidate)

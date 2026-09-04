@@ -32,8 +32,7 @@ CASES_PATH = EVALUATION_ROOT / "fixtures" / "retrieval_cases.json"
 SEMANTIC_CASES_PATH = EVALUATION_ROOT / "fixtures" / "semantic_disambiguation_cases.json"
 SNAPSHOT_PATH = EVALUATION_ROOT / "fixtures" / "historical_context_enriched_snapshot.json"
 MODEL_SPECS_PATH = EVALUATION_ROOT / "model_specs.json"
-RUNTIME_MINILM_MANIFEST = AGENT_ROOT / "retrieval" / "model_manifest.json"
-NOTEBOOK_PATH = EVALUATION_ROOT / "model_selection_colab.ipynb"
+NOTEBOOK_PATH = EVALUATION_ROOT / "raw_model_selection_colab.ipynb"
 
 
 def test_exact_case_matches_one_current_schema_fingerprint():
@@ -142,11 +141,10 @@ def test_selection_gate_allows_a_small_justified_tradeoff_but_rejects_material_r
     assert evaluate_selection_gate(material_drop, baseline=baseline, p95_ms=10, peak_rss_mb=10).status == "rejected"
 
 
-def test_model_specs_pin_the_runtime_minilm_and_mixedbread_contender():
+def test_model_specs_pin_the_offline_minilm_and_mixedbread_contenders():
     specs = load_model_specs(MODEL_SPECS_PATH)
-    runtime_minilm = json.loads(RUNTIME_MINILM_MANIFEST.read_text(encoding="utf-8"))
 
-    assert specs["minilm"] == runtime_minilm
+    assert specs["minilm"]["repo_id"] == "cross-encoder/ms-marco-MiniLM-L6-v2"
     assert specs["mixedbread_xsmall"]["repo_id"] == "mixedbread-ai/mxbai-rerank-xsmall-v1"
     assert specs["mixedbread_xsmall"]["revision"] == "d8e18fdfcfc8b37c036c5c23e9fa9bda8d738cc9"
     assert specs["mixedbread_xsmall"]["onnx_file"] == "onnx/model_quantized.onnx"

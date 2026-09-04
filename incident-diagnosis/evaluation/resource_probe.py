@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path[:0] = [str(ROOT.parent / "agent"), str(ROOT)]
 
 from benchmark import load_cases, load_model_specs, load_snapshot, retrieve_case
-from retrieval.reranker import MiniLMReranker, ModelSpec, OnnxCrossEncoder
+from reranker import MiniLMReranker, ModelSpec, OnnxCrossEncoder
 
 
 def main() -> None:

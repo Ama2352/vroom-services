@@ -1,9 +1,0 @@
-{
-  "name": "minilm",
-  "repo_id": "cross-encoder/ms-marco-MiniLM-L6-v2",
-  "revision": "eeed17e3bfc6fa06a790f2d12a9501fec587fccf",
-  "onnx_file": "onnx/model_quint8_avx2.onnx",
-  "sha256": "c80a8b34256ea453093d612e3ac48d3d965a0c0a48c7906709af8b8e28461bf9",
-  "license": "apache-2.0",
-  "max_length": 512
-}

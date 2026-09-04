@@ -51,9 +51,8 @@ def _symptom_terms(template) -> set[str]:
 class EvidenceRetrievalService:
     """Recognizes evidence; it never turns a similar example into a live cause."""
 
-    def __init__(self, corpus, reranker):
+    def __init__(self, corpus):
         self.corpus = corpus
-        self.reranker = reranker
 
     def retrieve(self, template) -> EvidenceRetrievalResult:
         try:
@@ -83,10 +82,8 @@ class EvidenceRetrievalService:
             if not decisive:
                 return EvidenceRetrievalResult(EvidenceRetrievalMode.NONE, exact_ambiguous=len(knowledge_keys) > 1)
 
-            # MiniLM reranks only the small BM25 set; it does not search new examples.
-            reranked = self.reranker.rerank(template.serialize(), decisive)
             families, seen = [], set()
-            for candidate in reranked:
+            for candidate in decisive:
                 if candidate.knowledge_key not in seen:
                     seen.add(candidate.knowledge_key)
                     families.append(candidate)

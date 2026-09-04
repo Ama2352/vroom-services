@@ -1,1 +1,1 @@
-"""Evidence recognition: exact reuse, BM25 candidates, and MiniLM reranking."""
+"""Evidence recognition: exact reuse and BM25 candidate retrieval."""

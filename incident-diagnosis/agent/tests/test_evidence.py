@@ -1,4 +1,29 @@
 from evidence import normalize_collected_evidence, normalize_evidence
+from retrieval.evidence import EvidenceRetrievalService
+
+
+class FakeCorpus:
+    def __init__(self, documents):
+        self.documents = tuple(documents)
+
+    def get_documents(self):
+        return self.documents
+
+
+def test_retrieval_constructs_without_a_reranker_dependency():
+    template = normalize_evidence(
+        alert={"alert_name": "PodCrashLoop", "service": "orders"},
+        facts={"waiting_reason": "CrashLoopBackOff"},
+        log={"status": "found", "message": "connection refused"},
+        trace={},
+        configuration={"status": "unchanged", "changes": []},
+    )
+    corpus = FakeCorpus([])
+
+    result = EvidenceRetrievalService(corpus).retrieve(template)
+
+    assert result.mode.value == "none"
+    assert result.candidates == ()
 
 
 def test_template_has_fixed_order_and_excludes_volatile_trace_id():

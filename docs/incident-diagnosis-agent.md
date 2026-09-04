@@ -19,15 +19,50 @@ The system is designed around four boundaries:
 
 ![Incident diagnosis agent architecture](images/incident-agent-architecture.png)
 
-Alertmanager supplies the trigger, while n8n normalizes its scope before the agent collects current evidence. An unambiguous, identical approved example reuses its diagnosis and remediation. All other incidents take the advisory route: BM25 and MiniLM retrieve related approved guidance, the LLM forms a grounded hypothesis, and hard plus semantic validation controls what may be published. Raw current evidence remains available to the dashboard regardless of the decision path.
+Alertmanager supplies the trigger, while n8n normalizes its scope before the agent collects current evidence. An unambiguous, identical approved example reuses its diagnosis and remediation. All other incidents take the advisory route: BM25 retrieves related approved guidance, the LLM forms a grounded hypothesis, and hard plus semantic validation controls what may be published. Raw current evidence remains available to the dashboard regardless of the decision path.
 
 ## Activity flow
 
-![Incident agent activity flow: exact reuse, advisory and degraded retrieval, validation, refinement, publication, and human review](images/incident-agent-activity-diagram.png)
+```mermaid
+flowchart TD
+    A[Alertmanager webhook] --> B[n8n expands and normalizes alert scope]
+    B --> C[POST /investigate]
+    C --> D[Collect scoped metrics, logs, traces, Kubernetes state, and configuration diff]
+    D --> E[Build normalized evidence template and fingerprint]
+    E --> F{Unique approved exact fingerprint?}
 
-The activity flow expands the high-level architecture into its decision paths. An exact path requires an approved `exact_reusable` example with an identical normalized fingerprint and a unique knowledge family; it bypasses BM25, MiniLM, and LLM generation, then reuses the approved diagnosis and remediation.
+    F -- Yes --> G[Reuse approved diagnosis and remediation]
+    G --> P[Publish incident record to dashboard and Slack]
 
-When exact reuse is unavailable or ambiguous, advisory retrieval starts with BM25. No meaningful evidence overlap leads to an evidence-only diagnosis; MiniLM failure preserves the incident evidence and records a degraded retrieval reason. A successful rerank selects at most three distinct approved knowledge families as advisory context for a grounded LLM diagnosis. Related examples never prove the live cause.
+    F -- No or ambiguous --> H[Search approved examples and hints with BM25]
+    H --> X{Retrieval succeeds?}
+    X -- No --> Y[Degraded response: retain evidence and record retrieval error]
+    Y --> P
+    X -- Yes --> I{Meaningful evidence overlap?}
+    I -- No --> J[Evidence-only response; no diagnosis claim]
+    J --> P
+
+    I -- Yes --> K[Keep up to three distinct BM25 knowledge families as advisory context]
+    K --> L[Generate grounded, explicitly unconfirmed analysis with the LLM]
+    L --> M[Hard validation: schema, references, confirmation boundary]
+    M -- Reject --> N{One refinement already used?}
+    N -- No --> O[Refine once using validator feedback]
+    O --> L
+    N -- Yes --> Q[Safe fallback: retain evidence and grounded hypothesis only]
+    M -- Pass --> R[Semantic validation: evidence supports the explanation?]
+    R -- Reject --> N
+    R -- Pass --> S[Advisory response: diagnosis remains unconfirmed]
+    Q --> P
+    S --> P
+
+    P --> T{Human reviewer approves reusable example?}
+    T -- Yes --> U[Store approved evidence fingerprint, knowledge, and hints]
+    T -- No --> V[Keep incident advisory-only]
+```
+
+The activity flow expands the high-level architecture into its decision paths. An exact path requires an approved `exact_reusable` example with an identical normalized fingerprint and a unique knowledge family; it bypasses BM25 and LLM generation, then reuses the approved diagnosis and remediation.
+
+When exact reuse is unavailable or ambiguous, advisory retrieval starts with BM25. No meaningful evidence overlap leads to an evidence-only diagnosis. BM25 keeps at most three distinct approved knowledge families as advisory context for a grounded LLM diagnosis; retrieval failures preserve the incident evidence and record a degraded retrieval reason. Related examples never prove the live cause.
 
 Every non-exact generated result passes hard validation and then semantic validation. The agent allows one refinement after a rejection. A second rejection safely downgrades the response to retained evidence and only a grounded, explicitly unconfirmed hypothesis, where one is validly cited. Exact, advisory, degraded, and safe-fallback results are published to the dashboard for human review; a reviewer may then approve a precise example for the knowledge store that later retrieval consults.
 
@@ -133,18 +168,15 @@ Retrieval searches observable evidence plus approved hints. Diagnosis and remedi
 
 ## Exact reuse
 
-Exact reuse requires a complete normalized evidence fingerprint identical to one approved example marked `exact_reusable=true`. In this path, the approved diagnosis and remediation are returned directly. BM25, MiniLM, and LLM generation are bypassed because a human has already approved this specific evidence-to-knowledge association for reuse.
+Exact reuse requires a complete normalized evidence fingerprint identical to one approved example marked `exact_reusable=true`. In this path, the approved diagnosis and remediation are returned directly. BM25 and LLM generation are bypassed because a human has already approved this specific evidence-to-knowledge association for reuse.
 
 The rule is intentionally strict: a change in any normalized evidence field moves the incident to advisory handling. This favors precision over recall. A partial similarity never receives deterministic confirmation merely because it resembles a familiar failure family.
 
-## Advisory retrieval with BM25 and MiniLM
+## Advisory retrieval with BM25
 
-When no reusable exact example exists, the agent retrieves related guidance in two stages.
+When no reusable exact example exists, BM25 searches the normalized evidence and globally approved hints. It selects up to eight lexical candidates, then keeps at most three distinct related knowledge families for advisory context. Rare error tokens, operations, service names, event types, configuration fields, and hints provide useful lexical anchors.
 
-1. BM25 searches the normalized evidence and globally approved hints, selecting up to eight candidates. Rare error tokens, operations, service names, event types, configuration fields, and hints provide useful lexical anchors.
-2. MiniLM reranks that narrowed set semantically and returns at most three distinct related knowledge families.
-
-The fixed template does not make BM25 redundant. Incident wording still varies: an error can expose a hostname, event type, operation name, resource field, or a reviewer-created hint that is lexically decisive. MiniLM then helps distinguish paraphrases and related wording inside a small candidate set.
+The fixed template does not make BM25 redundant. Incident wording still varies: an error can expose a hostname, event type, operation name, resource field, or a reviewer-created hint that is lexically decisive.
 
 The returned examples are advisory. Their rank is not causal proof, and the design does not claim a calibrated no-match threshold. Operators see the guidance because it may shorten their investigation, but it cannot confirm the current incident by itself.
 
@@ -189,7 +221,7 @@ For an advisory incident, a reviewer can approve it as a reusable example after 
 
 ### DLQ contract mismatch — exact reuse
 
-`ride-service` publishes `Trip.Requested.v2`. `dispatch-service` rejects the unsupported event after retries and the DLQ alert fires. The agent collects the structured `unknown event type` log and a correlated trace that follows the event to `dispatch.consume.Trip.Requested.v2`. Because the normalized evidence is identical to an approved reusable example, it bypasses retrieval and generation, returning the approved contract-mismatch diagnosis and remediation.
+`ride-service` publishes `Trip.Requested.v2`. `dispatch-service` rejects the unsupported event after retries and the DLQ alert fires. The agent collects the structured `unknown event type` log and a correlated trace that follows the event to `dispatch.consume.Trip.Requested.v2`. Because the normalized evidence is identical to an approved reusable example, it bypasses BM25 retrieval and generation, returning the approved contract-mismatch diagnosis and remediation.
 
 The operator can still inspect the log, trace, current Kubernetes state, and operational context before aligning contract versions and deciding whether to replay the DLQ.
 
@@ -197,7 +229,7 @@ The operator can still inspect the log, trace, current Kubernetes state, and ope
 
 ### DLQ contract mismatch — advisory diagnosis
 
-This scenario produces the same general failure family without an identical reusable fingerprint. The dispatch structured error and cross-service trace remain decisive observations. BM25 and MiniLM return related approved guidance; the LLM turns that current evidence into an unconfirmed contract-version hypothesis and the guardrails check its references and confirmation boundary.
+This scenario produces the same general failure family without an identical reusable fingerprint. The dispatch structured error and cross-service trace remain decisive observations. BM25 returns related approved guidance; the LLM turns that current evidence into an unconfirmed contract-version hypothesis and the guardrails check its references and confirmation boundary.
 
 The operator receives useful guidance but no false confirmation. They must verify the producer and consumer contract versions before approving the incident as a reusable example.
 
@@ -215,14 +247,14 @@ The next safe action is to verify the workload diff and restore the known Redis 
 
 - Fixed normalization improves comparison and keeps retrieval input compact, but it cannot express every useful raw detail.
 - Strict exact reuse favors precision over recall; even small template differences take the advisory path.
-- BM25 plus MiniLM provides practical lexical and semantic retrieval without requiring a simulated calibration dataset for a no-match threshold. Weak or unrelated guidance can still appear, so it never confirms the live cause.
+- BM25 provides compact, explainable lexical retrieval without adding a local model's latency or memory cost. Weak or unrelated guidance can still appear, so it never confirms the live cause.
 - Configuration diffs provide temporal context and concrete values, not a universal explanation for failures.
 - Hard and semantic guardrails reduce unsupported claims, but no validation layer can guarantee a perfect diagnosis from a low-cost LLM or incomplete telemetry.
 - The quality of trusted knowledge depends on the reviewer who approves examples and hints.
 
 ## Components and interfaces
 
-The Flask agent exposes `POST /investigate` and incident/knowledge administration APIs. Its collectors query Prometheus, Loki, Tempo, and Kubernetes; `retrieval/` contains the Redis-backed approved corpus, BM25 selection, and MiniLM reranking; `diagnosis_v2.py`, `validation.py`, and the interpreter implement grounded generation and validation; `runtime_v2.py` stores the presentation-ready incident record. n8n normalizes Alertmanager webhooks, while the React dashboard displays evidence and supports review.
+The Flask agent exposes `POST /investigate` and incident/knowledge administration APIs. Its collectors query Prometheus, Loki, Tempo, and Kubernetes; `retrieval/` contains the Redis-backed approved corpus and BM25 selection; the diagnosis and validation modules implement grounded generation and validation; the runtime stores the presentation-ready incident record. n8n normalizes Alertmanager webhooks, while the React dashboard displays evidence and supports review.
 
 ## Current limitations
 
