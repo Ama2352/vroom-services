@@ -21,6 +21,7 @@ from benchmark import (
     passes_gate,
     retrieve_case,
     run_system,
+    validate_semantic_cases,
 )
 from retrieval.models import EvidenceCandidate, EvidenceRetrievalMode
 
@@ -202,6 +203,10 @@ def test_semantic_cases_surface_their_keyword_sharing_competitors_in_bm25():
         keys = {candidate.knowledge_key for candidate in result.candidates}
         assert keys.intersection(case.expected_keys)
         assert keys.intersection(case.competing_keys)
+
+
+def test_semantic_fixture_has_a_pre_scoring_ambiguity_validator():
+    validate_semantic_cases(load_cases(SEMANTIC_CASES_PATH), load_snapshot(SNAPSHOT_PATH))
 
 
 def test_semantic_fixture_declares_a_large_enough_provenanced_ambiguity_set():

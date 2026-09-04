@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from evidence import normalize_evidence
+from retrieval.bm25 import tokenize
 from retrieval.evidence import EvidenceRetrievalService
 from stores.knowledge import KnowledgeCorpus
 
@@ -173,6 +174,23 @@ def evidence_category_coverage(cases) -> dict[str, int]:
 def retrieve_case(case: RetrievalCase, snapshot: dict, reranker):
     """Exercise the clean exact-and-advisory retrieval pipeline for one case."""
     return EvidenceRetrievalService(KnowledgeCorpus(snapshot), reranker).retrieve(build_template(case))
+
+
+def validate_semantic_cases(cases, snapshot: dict) -> None:
+    """Reject benchmark rows that do not create the declared lexical ambiguity."""
+    for case in cases:
+        result = retrieve_case(case, snapshot, IdentityReranker())
+        expected = [item for item in result.candidates if item.knowledge_key in case.expected_keys]
+        competitors = [item for item in result.candidates if item.knowledge_key in case.competing_keys]
+        shared = set(tokenize(" ".join(case.shared_keywords)))
+        query_terms = set(tokenize(build_template(case).serialize()))
+        competitor_terms = set().union(*(set(item.matched_terms) for item in competitors)) if competitors else set()
+        if not expected:
+            raise ValueError(f"{case.case_id}: BM25 did not surface an expected key")
+        if not competitors:
+            raise ValueError(f"{case.case_id}: BM25 did not surface a competing key")
+        if not shared.intersection(query_terms).intersection(competitor_terms):
+            raise ValueError(f"{case.case_id}: declared shared keywords do not overlap the competing evidence")
 
 
 def pipeline_trace(case: RetrievalCase, snapshot: dict, reranker, *, name: str, score_floor: float) -> dict:
