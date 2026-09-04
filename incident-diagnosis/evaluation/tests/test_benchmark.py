@@ -2,11 +2,12 @@ import json
 from pathlib import Path
 import sys
 
-
 EVALUATION_ROOT = Path(__file__).parents[1]
 AGENT_ROOT = EVALUATION_ROOT.parent / "agent"
 sys.path.insert(0, str(AGENT_ROOT))
 sys.path.insert(0, str(EVALUATION_ROOT))
+
+import benchmark
 
 from benchmark import (
     EvaluationResult,
@@ -222,7 +223,20 @@ def test_field_coverage_reports_normalized_schema_population():
 
     assert coverage["triggering_metric"] == 1.0
     assert 0 < coverage["log_error"] < 1.0
-    assert coverage["configuration_diff"] == 0.0
+    assert 0 < coverage["configuration_diff"] < 1.0
+    assert 0 < coverage["trace_error_message"] < 1.0
+
+
+def test_evidence_category_coverage_is_available_for_dataset_diversity_audits():
+    cases = (*load_cases(CASES_PATH), *load_cases(SEMANTIC_CASES_PATH))
+
+    coverage = benchmark.evidence_category_coverage(cases)
+
+    assert set(coverage) == {
+        "kubernetes_heavy", "metrics_plus_logs", "logs_plus_traces",
+        "configuration_related", "sparse_no_match", "conflicting_evidence",
+    }
+    assert all(count > 0 for count in coverage.values())
 
 
 def test_score_floor_turns_rejected_nearest_candidate_into_an_abstention():

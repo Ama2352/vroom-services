@@ -142,6 +142,34 @@ def field_coverage(cases) -> dict[str, float]:
     return {field: count / len(cases) for field, count in populated.items()}
 
 
+def evidence_category_coverage(cases) -> dict[str, int]:
+    """Count natural evidence mixes represented by the frozen case set."""
+    categories = {
+        "kubernetes_heavy": 0,
+        "metrics_plus_logs": 0,
+        "logs_plus_traces": 0,
+        "configuration_related": 0,
+        "sparse_no_match": 0,
+        "conflicting_evidence": 0,
+    }
+    for case in cases:
+        values = dict(build_template(case).values)
+        kubernetes = ("waiting_reason", "last_terminated_reason", "event_reason", "event_message")
+        source_groups = (
+            sum(bool(values[field]) for field in kubernetes) > 0,
+            bool(values["log_error"]),
+            any(bool(values[field]) for field in ("trace_error_service", "trace_error_operation", "trace_error_message")),
+            bool(values["configuration_diff"]),
+        )
+        categories["kubernetes_heavy"] += sum(bool(values[field]) for field in kubernetes) >= 2
+        categories["metrics_plus_logs"] += bool(values["triggering_metric"] and values["log_error"])
+        categories["logs_plus_traces"] += bool(source_groups[1] and source_groups[2])
+        categories["configuration_related"] += source_groups[3]
+        categories["sparse_no_match"] += case.expected_mode == "none" and sum(source_groups) <= 1
+        categories["conflicting_evidence"] += bool(case.competing_keys) and sum(source_groups) >= 2
+    return categories
+
+
 def retrieve_case(case: RetrievalCase, snapshot: dict, reranker):
     """Exercise the clean exact-and-advisory retrieval pipeline for one case."""
     return EvidenceRetrievalService(KnowledgeCorpus(snapshot), reranker).retrieve(build_template(case))
