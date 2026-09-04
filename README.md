@@ -99,8 +99,6 @@ flowchart LR
 
 Driver matching has no orchestrator — `ride-service` and `dispatch-service` each react to events on the shared `ride_events` stream and publish the next one themselves. Every compensation is explicit about who triggers it: a rejected offer or 10s timeout is detected by `ride-service` (`TripTimeoutWorker` or `POST /reject-offer`), which publishes `Trip.OfferRejected`; `dispatch-service` consumes it, releases the driver, and the waterfall loop retries the next-nearest candidate.
 
-This is a static image rather than a live Mermaid block — sequence-diagram message/loop text renders on a transparent canvas with no background box behind it, so a color scheme readable in GitHub's light mode goes invisible in dark mode (and vice versa). Baking the render in as an image avoids that.
-
 ![Saga choreography sequence diagram](docs/images/h33-saga-sequence.png)
 
 ---

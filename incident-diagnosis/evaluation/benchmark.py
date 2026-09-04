@@ -128,7 +128,10 @@ def run_system(cases, snapshot: dict, reranker, *, name: str, score_floor: float
         result = retrieve_case(case, snapshot, reranker)
         candidates = result.candidates
         if score_floor is not None and result.mode.value == "nearest":
-            candidates = tuple(item for item in candidates if _candidate_score(item) >= score_floor)
+            candidates = tuple(
+                item for item in candidates
+                if _candidate_score(item, name=name) >= score_floor
+            )
         candidate_keys = tuple(item.knowledge_key for item in candidates)
         if result.mode.value == "degraded":
             counts["degraded_count"] += 1
@@ -152,7 +155,9 @@ def run_system(cases, snapshot: dict, reranker, *, name: str, score_floor: float
                 counts["advisory_recall_at_3"] += first_rank <= 3
                 counts["advisory_mrr_sum"] += 1 / first_rank
                 counts["advisory_top1"] += first_rank == 1
-        elif result.mode.value == "none":
+        # A score floor can reject a nearest candidate.  Treat that empty
+        # accepted set as an abstention, not as the pre-filtered mode.
+        elif not candidate_keys:
             counts["correct_abstentions"] += 1
         else:
             counts["false_positives"] += 1
@@ -160,8 +165,9 @@ def run_system(cases, snapshot: dict, reranker, *, name: str, score_floor: float
     return EvaluationResult(name=name, **counts)
 
 
-def _candidate_score(candidate) -> float:
-    return candidate.reranker_score if candidate.reranker_score is not None else candidate.bm25_score
+def _candidate_score(candidate, *, name: str) -> float:
+    """Use the score that actually ordered this system's candidates."""
+    return candidate.bm25_score if name == "bm25" else candidate.reranker_score
 
 
 def calibrate_score_floor(cases, snapshot: dict, reranker, *, name: str) -> float:
@@ -170,7 +176,7 @@ def calibrate_score_floor(cases, snapshot: dict, reranker, *, name: str) -> floa
     scores = {0.0}
     for case in calibration:
         result = retrieve_case(case, snapshot, reranker)
-        scores.update(_candidate_score(item) for item in result.candidates)
+        scores.update(_candidate_score(item, name=name) for item in result.candidates)
     passing = []
     for floor in sorted(scores):
         result = run_system(calibration, snapshot, reranker, name=name, score_floor=floor)

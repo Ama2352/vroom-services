@@ -12,6 +12,7 @@ from benchmark import (
     EvaluationResult,
     IdentityReranker,
     build_template,
+    calibrate_score_floor,
     load_cases,
     load_model_specs,
     load_snapshot,
@@ -173,6 +174,33 @@ def test_fixture_preserves_the_archived_tournament_case_balance():
     assert sum(case.expected_mode != "none" for case in cases) == 20
     assert sum(case.expected_mode == "none" for case in cases) == 20
     assert sum(case.split == "held_out" and case.expected_mode == "none" for case in cases) == 10
+    assert sum(case.split == "held_out" and case.expected_mode != "none" for case in cases) == 10
+
+
+def test_score_floor_turns_rejected_nearest_candidate_into_an_abstention():
+    no_match = next(case for case in load_cases(CASES_PATH) if case.case_id == "tls_no_match")
+
+    result = run_system(
+        (no_match,),
+        load_snapshot(SNAPSHOT_PATH),
+        IdentityReranker(),
+        name="bm25",
+        score_floor=float("inf"),
+    )
+
+    assert result.false_positives == 0
+    assert result.correct_abstentions == 1
+
+
+def test_bm25_calibration_uses_lexical_scores_instead_of_default_reranker_scores():
+    floor = calibrate_score_floor(
+        load_cases(CASES_PATH),
+        load_snapshot(SNAPSHOT_PATH),
+        IdentityReranker(),
+        name="bm25",
+    )
+
+    assert floor != float("inf")
 
 
 def test_added_oom_case_uses_an_exact_clean_template_match():
@@ -214,6 +242,9 @@ def test_notebook_contains_pinned_local_models_and_decision_outputs():
     assert "Quality metrics" in source
     assert "Safety gate" in source
     assert "Operational metrics" in source
+    assert "resource_probe.py" in source
+    assert "BM25 remains a comparison baseline" in source
+    assert "held-out positive cases" in source
     assert "confusion matrix is intentionally omitted" in source
 
 
