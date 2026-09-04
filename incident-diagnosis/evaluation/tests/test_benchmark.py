@@ -317,6 +317,16 @@ def test_notebook_contains_pinned_local_models_and_decision_outputs():
     assert "confusion matrix is intentionally omitted" in source
 
 
+def test_notebook_reports_provenance_coverage_and_pre_scoring_validation():
+    notebook = json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
+
+    assert "validate_semantic_cases" in source
+    assert "evidence_category_coverage" in source
+    assert "archive_derived" in source
+    assert "synthetic_stress" in source
+
+
 def test_benchmark_execution_cell_imports_numpy_for_its_calibration_guard():
     notebook = json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
     source = next(
