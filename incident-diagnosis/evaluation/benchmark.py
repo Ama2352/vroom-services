@@ -34,6 +34,10 @@ class RetrievalCase:
     expected_keys: tuple[str, ...]
     forbidden_keys: tuple[str, ...]
     competing_keys: tuple[str, ...] = ()
+    shared_keywords: tuple[str, ...] = ()
+    decisive_fields: tuple[str, ...] = ()
+    provenance: str = ""
+    rationale: str = ""
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,8 @@ def load_cases(path: Path) -> tuple[RetrievalCase, ...]:
             dict(item.get("log") or {}), dict(item.get("trace") or {}),
             dict(item.get("configuration") or {}), mode, expected,
             tuple(item.get("forbidden_keys") or ()), tuple(item.get("competing_keys") or ()),
+            tuple(item.get("shared_keywords") or ()), tuple(item.get("decisive_fields") or ()),
+            str(item.get("provenance") or ""), str(item.get("rationale") or ""),
         ))
     return tuple(cases)
 

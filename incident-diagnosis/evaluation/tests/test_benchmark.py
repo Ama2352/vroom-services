@@ -203,6 +203,20 @@ def test_semantic_cases_surface_their_keyword_sharing_competitors_in_bm25():
         assert keys.intersection(case.competing_keys)
 
 
+def test_semantic_fixture_declares_a_large_enough_provenanced_ambiguity_set():
+    """Semantic claims need enough labelled, inspectable cases to be credible."""
+    raw_cases = json.loads(SEMANTIC_CASES_PATH.read_text(encoding="utf-8"))
+
+    assert len(raw_cases) >= 16
+    assert sum(case.get("provenance") == "archive_derived" for case in raw_cases) >= 8
+    for case in raw_cases:
+        assert case.get("provenance") in {"archive_derived", "synthetic_stress"}
+        assert case.get("competing_keys")
+        assert case.get("shared_keywords")
+        assert case.get("decisive_fields")
+        assert case.get("rationale")
+
+
 def test_field_coverage_reports_normalized_schema_population():
     coverage = field_coverage(load_cases(SEMANTIC_CASES_PATH))
 
