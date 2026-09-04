@@ -21,6 +21,7 @@ from benchmark import (
     passes_gate,
     retrieve_case,
     run_system,
+    evaluate_selection_gate,
     validate_semantic_cases,
 )
 from retrieval.models import EvidenceCandidate, EvidenceRetrievalMode
@@ -129,6 +130,15 @@ def test_gate_rejects_forbidden_or_exact_failure():
 
     assert passes_gate(baseline, baseline=baseline) is True
     assert passes_gate(unsafe, baseline=baseline) is False
+
+
+def test_selection_gate_allows_a_small_justified_tradeoff_but_rejects_material_regression():
+    baseline = EvaluationResult("bm25", 0, 0, 16, 20, 16.0, 20, 0, 0, 0, 2, 0)
+    small_tradeoff = EvaluationResult("small", 0, 0, 15, 20, 17.0, 20, 0, 0, 0, 2, 0)
+    material_drop = EvaluationResult("drop", 0, 0, 14, 20, 14.0, 20, 0, 0, 0, 2, 0)
+
+    assert evaluate_selection_gate(small_tradeoff, baseline=baseline, p95_ms=10, peak_rss_mb=10).status == "selected"
+    assert evaluate_selection_gate(material_drop, baseline=baseline, p95_ms=10, peak_rss_mb=10).status == "rejected"
 
 
 def test_model_specs_pin_the_runtime_minilm_and_mixedbread_contender():

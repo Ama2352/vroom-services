@@ -59,6 +59,14 @@ class EvaluationResult:
     degraded_count: int
 
 
+@dataclass(frozen=True)
+class SelectionGateResult:
+    """Auditable model-selection result, including justified quality trade-offs."""
+
+    status: str
+    quality_deltas: dict[str, float]
+    reasons: tuple[str, ...]
+
 class IdentityReranker:
     """BM25-only baseline: keep the lexical candidate order unchanged."""
 
@@ -292,3 +300,30 @@ def passes_gate(result: EvaluationResult, *, baseline: EvaluationResult) -> bool
         and result.advisory_recall_at_3 >= baseline.advisory_recall_at_3
         and result.advisory_mrr_sum >= baseline.advisory_mrr_sum
     )
+
+
+def evaluate_selection_gate(
+    result: EvaluationResult, *, baseline: EvaluationResult, p95_ms: float, peak_rss_mb: float,
+    material_regression: float = 0.05,
+) -> SelectionGateResult:
+    """Apply hard operational gates and explain any small quality trade-off."""
+    def ratio(value, total):
+        return value / total if total else 0.0
+
+    deltas = {
+        "top1": ratio(result.advisory_top1, result.advisory_positive_count) - ratio(baseline.advisory_top1, baseline.advisory_positive_count),
+        "recall_at_3": ratio(result.advisory_recall_at_3, result.advisory_positive_count) - ratio(baseline.advisory_recall_at_3, baseline.advisory_positive_count),
+        "mrr": ratio(result.advisory_mrr_sum, result.advisory_positive_count) - ratio(baseline.advisory_mrr_sum, baseline.advisory_positive_count),
+    }
+    reasons = []
+    if result.forbidden_acceptances or result.false_positives or result.exact_failures or result.degraded_count:
+        reasons.append("retrieval safety gate failed")
+    if p95_ms > 1000 or peak_rss_mb > 500:
+        reasons.append("operational latency or memory gate failed")
+    if any(delta < -material_regression - 1e-12 for delta in deltas.values()):
+        reasons.append("material retrieval-quality regression")
+    small_drop = any(delta < 0 for delta in deltas.values())
+    meaningful_gain = any(delta >= material_regression - 1e-12 for delta in deltas.values())
+    if small_drop and not meaningful_gain:
+        reasons.append("small regression has no compensating quality gain")
+    return SelectionGateResult("selected" if not reasons else "rejected", deltas, tuple(reasons))
